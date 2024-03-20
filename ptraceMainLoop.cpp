@@ -299,6 +299,20 @@ namespace {
 		else if (syscallNr == SYS_exit_group || syscallNr == SYS_exit) {
 			strBuf << "() = exiting\n"sv;
 		}
+		else if (syscallNr == SYS_execve) {
+			//handled.
+		}
+		else if (syscallNr == SYS_brk) {
+			//intentionally ignored
+			//brk - basically mallocking stuff
+		}
+		else if (syscallNr == SYS_mmap || syscallNr == SYS_arch_prctl) {
+			//does not create new file descriptors or modify the existing ones
+		}
+		else {
+			/*printf("please add handling for syscall %s\n", syscallName->data());
+			assert(false);*/
+		}
 		//TODO: handle pipes
 		process.syscallInfo = strBuf.str();
 	}
@@ -381,7 +395,7 @@ void ptraceChildren()
 				}
 				if (process.syscallState == processState::inside) {
 					long val = getSyscallRetval(process.pid);
-					logSyscallExit(process, val);
+					//logSyscallExit(process, val);
 					if (process.syscallHandlerFn.has_value()) {
 						process.syscallHandlerFn.value()(val, state);
 					}
@@ -394,7 +408,7 @@ void ptraceChildren()
 					long syscall_id = getSyscallNr(process.pid);
 					process.syscallHandlerFn = handleSyscall(process.pid, syscall_id, state);
 
-					logSyscallEntry(process, syscall_id, state);
+					//logSyscallEntry(process, syscall_id, state);
 					process.syscallState = processState::inside;
 				}
 
@@ -413,7 +427,8 @@ void ptraceChildren()
 			}
 		}
 	}
+	csvBased(state, "accessedFiles.csv");
 	report(state);
-	chrootBased(state);
+	//chrootBased(state);
 }
 
