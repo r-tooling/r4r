@@ -81,7 +81,7 @@ public:
 };
 
 
-void logPtraceError(int err) {
+inline void logPtraceError(int err) {
 	switch (err) {
 	case EBUSY: printf("(i386 only) There was an error with allocating or freeing a debug register."); break;
 	case EFAULT: printf("There was an attempt to read from or write to an invalid"
@@ -110,7 +110,7 @@ void logPtraceError(int err) {
 	}
 }
 
-std::string userPtrToString(pid_t processPid, long processPtr) {
+inline std::string userPtrToString(pid_t processPid, long processPtr) {
 	std::vector<char> v;
 	bool zeroReched = false;
 	std::size_t offset = 0;
@@ -136,7 +136,7 @@ std::string userPtrToString(pid_t processPid, long processPtr) {
 }
 
 
-std::unique_ptr<unsigned char[]> userPtrToOwnPtr(pid_t processPid, long ptr, size_t count) {
+inline std::unique_ptr<unsigned char[]> userPtrToOwnPtr(pid_t processPid, long ptr, size_t count) {
 	iovec remote[1];
 	remote[0].iov_base = reinterpret_cast<void*>(ptr);
 	remote[0].iov_len = count;
@@ -149,7 +149,7 @@ std::unique_ptr<unsigned char[]> userPtrToOwnPtr(pid_t processPid, long ptr, siz
 	return std::move(localPtr);
 }
 template<class pointsToStruct>
-std::unique_ptr<pointsToStruct, decltype(std::free)*> userPtrToOwnPtr(pid_t processPid, long ptr) {
+inline std::unique_ptr<pointsToStruct, decltype(std::free)*> userPtrToOwnPtr(pid_t processPid, long ptr) {
 	constexpr size_t count = sizeof(pointsToStruct);
 	iovec remote[1];
 	remote[0].iov_base = reinterpret_cast<void*>(ptr);
@@ -164,7 +164,7 @@ std::unique_ptr<pointsToStruct, decltype(std::free)*> userPtrToOwnPtr(pid_t proc
 }
 //TODO: figure out how to make it possible to specify the array size in the return type.
 template<class pointsToStruct, int Count>
-std::unique_ptr<pointsToStruct[], decltype(std::free)*> userPtrToOwnPtr(pid_t processPid, long ptr) {
+inline std::unique_ptr<pointsToStruct[], decltype(std::free)*> userPtrToOwnPtr(pid_t processPid, long ptr) {
 	constexpr size_t count = sizeof(pointsToStruct) * Count;
 	iovec remote[1];
 	remote[0].iov_base = reinterpret_cast<void*>(ptr);

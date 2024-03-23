@@ -21,10 +21,11 @@
 using std::size_t;
 
 #include <sys/wait.h>
+#ifndef _GNU_SOURCE 
+#define _GNU_SOURCE 1
+#endif // !_GNU_SOURCE 
 
-#define _GNU_SOURCE   
 #include <sched.h>
-#undef _GNU_SOURCE   
 
 
 

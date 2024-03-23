@@ -113,6 +113,7 @@ void chrootBased(const MiddleEndState& state)
 	assert(mkdtemp(dirName) != nullptr);
 	auto dir = open(dirName, O_DIRECTORY);
 	assert(dir >= 0);
+
 	for (const auto& file : state.encounteredFilenames) {
 		const auto& fileInfo = *file.second;
 		transferFile(dir,fileInfo.realpath);

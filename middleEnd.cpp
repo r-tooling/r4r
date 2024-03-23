@@ -94,8 +94,7 @@ void MiddleEndState::trackNewProcess(pid_t process, pid_t parent, bool copy)
 
 }
 
-//TODO: was the file jast created or was it merely opened.
-void MiddleEndState::openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags)
+void MiddleEndState::openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, bool existed)
 {
 	auto val = processToInfo.find(process);
 	assert(val != processToInfo.end());
@@ -109,7 +108,7 @@ void MiddleEndState::openHandling(pid_t process, absFilePath filename, relFilePa
 		fileInfo = ptr.get();
 		encounteredFilenames.emplace(filename, std::move(ptr));
 	}
-
+	fileInfo->wasCreated = fileInfo->wasCreated || (!existed);
 	val->second.fdTable->table.emplace(fd, fileInfo);
 }
 

@@ -63,7 +63,7 @@ static_assert(getBuild() == std::string_view{ "x86_64" }, "This header shoudl on
 // but alas, there is no way to iterate over all defined macros as of now so not constructing these from the sys/syscalls header
 // //generated via
 //ausyscall x86_64 --dump | awk 'BEGIN{print "std::unordered_map<long,std::string_view> map{" } { print "{" $1 ",\"" $2 "\"sv}," } END{ print "}"}'
-std::optional<const std::string_view> getSyscallName(long syscallNr) noexcept {
+inline std::optional<const std::string_view> getSyscallName(long syscallNr) noexcept {
     using namespace std::string_view_literals;
 
     const static std::unordered_map<long, std::string_view> map{
@@ -438,7 +438,7 @@ std::optional<const std::string_view> getSyscallName(long syscallNr) noexcept {
 }
 //generated via
 //ausyscall x86_64 --dump | awk 'BEGIN{print "std::unordered_map<std::string_view,unsigned int> map{" } { print "{" "\"" $2 "\"sv" "," $1 "}," } END{ print "}"}'
-std::optional<long> getSyscallNumber(std::string_view syscallName) noexcept {
+inline std::optional<long> getSyscallNumber(std::string_view syscallName) noexcept {
     using namespace std::string_view_literals;
 
     std::unordered_map<std::string_view, long> map{
@@ -811,4 +811,3 @@ std::optional<long> getSyscallNumber(std::string_view syscallName) noexcept {
         return std::nullopt;
     }
 }
-

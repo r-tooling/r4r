@@ -1,0 +1,10 @@
+#pragma once
+#include "open.hpp"
+#include "dup.hpp"
+#include "read.hpp"
+#include "exit.hpp"
+#include "clone.hpp"
+#include "chroot.hpp"
+#include "execve.hpp"
+#include "fnctl.hpp"
+#include "ignored.hpp"

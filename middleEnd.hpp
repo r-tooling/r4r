@@ -43,6 +43,8 @@ public:
 	struct file_info {
 		absFilePath realpath;
 		std::unordered_set<access_info> accessibleAs; //but we would need to know where it is relative from right now... Assuming programs do not move their current directory.
+		bool wasCreated = false;
+		bool wasDeleted = false;
 		//different required access rights?
 	};
 
@@ -94,7 +96,7 @@ public:
 	void trackNewProcess(pid_t process);//TODO: support sharing FDs by copying a FD table reference and inherting a different workdir. Handle CloseOnExec
 	void trackNewProcess(pid_t process,pid_t parent, bool copy);//TODO: support sharing FDs by copying a FD table reference and inherting a different workdir. Handle CloseOnExec
 
-	void openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags);
+	void openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, bool existed);
 	void execFile(pid_t process, absFilePath filename, relFilePath relativePath);
 	void closeFile(pid_t process, fileDescriptor fd);
 	void registerFdAlias(pid_t process, fileDescriptor newFd, fileDescriptor oldFD);

@@ -1,4 +1,5 @@
 ﻿#pragma once
+
 #include <sys/ptrace.h>
 #include <sys/reg.h>
 
@@ -23,10 +24,10 @@ The first table lists the instruction used to transition to
 		x86-64        rdi   rsi   rdx   r10   r8    r9    -
 */
 
-long getSyscallNr(pid_t processPid) {
+inline long getSyscallNr(pid_t processPid) {
 	return ptrace(PTRACE_PEEKUSER, processPid, 8 * ORIG_RAX, nullptr);
 }
-long getSyscallRetval(pid_t processPid) {
+inline long getSyscallRetval(pid_t processPid) {
 	/*user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, processPid, 0, &regs);
 	return regs.rax;*/
@@ -35,7 +36,7 @@ long getSyscallRetval(pid_t processPid) {
 
 
 template<unsigned int NR>
-long getSyscallParam(pid_t processPid) {//it is impossible to have validation if the given syscall actually has these arguments at this point.
+inline long getSyscallParam(pid_t processPid) {//it is impossible to have validation if the given syscall actually has these arguments at this point.
 	static_assert(NR >= 1 && NR <= 6, "syscalls only take up to 6 arguments");
 	if constexpr (NR == 1) { //would even be consteval in c++ 23
 		return ptrace(PTRACE_PEEKUSER, processPid, 8 * RDI, nullptr);
