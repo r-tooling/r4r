@@ -4,7 +4,7 @@
 #include <optional>
 #include <unistd.h> //syscall fn
 #include <cassert>
-#include "middleEnd.hpp"
+#include "middleend/middleEnd.hpp"
 
 //circular dependency hell
 struct syscallHandler;
@@ -21,6 +21,11 @@ struct processState {
 		return ret;
 	}
 
+	struct ChildWaiting {
+		std::optional<pid_t> cloneChildPid = std::nullopt;
+		long flags;
+	};
+	std::optional<ChildWaiting> blockedInClone;
 
 	enum {
 		outside,

@@ -1,6 +1,6 @@
 ﻿#include "ptraceMainLoop.hpp"
 #include "syscallMapping.hpp"
-#include "backEnd.hpp"
+#include "backend/backEnd.hpp"
 #include "platformSpecificSyscallHandling.hpp"
 #include "ptraceHelpers.hpp"
 #include "syscalls/syscallHandlerMapper.hpp"
@@ -27,7 +27,6 @@ namespace {
 
 	static std::unordered_map<pid_t, processState> processing;//TODO: move this so it is not global but passed as an argument.
 
-
 	processState& getProcesState(pid_t pid, MiddleEndState& state) {
 		auto found = processing.find(pid);
 		if (found != processing.end()) {
@@ -37,7 +36,17 @@ namespace {
 		assert(emplaced.second);
 		auto& process = emplaced.first->second;
 		ptrace(PTRACE_SETOPTIONS, process.pid, nullptr, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD);
-		state.trackNewProcess(process.pid); //TODO: add a list of running clone calls to try and match this to a creating process.
+
+		for (auto& [pid,oldProcess] : processing) { 
+			//todo: try to walk all currently blocked processes to get this marked down
+			//todo: consider keeping the list in a separate structure.
+			if (oldProcess.blockedInClone && !oldProcess.blockedInClone->cloneChildPid.has_value()) {
+				state.trackNewProcess(process.pid, oldProcess.pid, !(process.blockedInClone->flags & CLONE_FILES), std::nullopt);
+				oldProcess.blockedInClone->cloneChildPid = process.pid;
+				return process;
+			}
+		}
+		state.trackNewProcess(process.pid);
 		return process;
 	}
 	void removeProcessHandling(processState& process) {
@@ -68,17 +77,7 @@ namespace {
 
 void ptraceChildren()
 {
-	/*static const syscallHandlerMapper<
-		SYS_open, SYS_openat, SYS_openat2, 
-		SYS_dup,SYS_dup2,SYS_dup3, 
-		SYS_execve, 
-		SYS_brk, SYS_mmap,
-		SYS_read, SYS_pread64,
-		SYS_write, SYS_pwrite64,
-		SYS_close,
-		SYS_chroot, SYS_chdir
-	> mapper{};*/
-	static const syscallHandlerMapperOfAll<450> mapper{};//todo don't get this number manually. put it as a constexpr value ina header.
+	static const syscallHandlerMapperOfAll mapper{};
 	MiddleEndState state{};
 	siginfo_t status;
 	while (tryWait(status)) {
@@ -103,8 +102,8 @@ void ptraceChildren()
 					long val = getSyscallRetval(process.pid);
 					//logSyscallExit(process, val);
 					if (process.syscallHandlerObj) {
-						process.syscallHandlerObj->exitLog(process,state,val);
 						process.syscallHandlerObj->exit(process, state, val);
+						process.syscallHandlerObj->exitLog(process,state,val);
 						process.syscallHandlerObj = nullptr;
 					}
 					process.syscallState = processState::outside;
@@ -144,7 +143,43 @@ void ptraceChildren()
 //intentionally here this way as otherwise the unique_ptr will not compile
 processState::processState(pid_t pid) :pid(pid) {
 	pidFD = syscall(SYS_pidfd_open, pid, 0);
-	assert(pidFD >= 0); //TODO: handle me.
+	auto err = errno;
+	if (pidFD < 0) { //error state
+		fprintf(stderr, "pidfd_open(%d): ",pid);
+		switch (err)
+		{
+		case EINVAL:
+			fprintf(stderr, "pid is not valid.(or flags but that is impossible) \n");
+			break;
+		case EMFILE:
+			fprintf(stderr, "The per-process limit on the number of open file descriptors has been reached\n");
+			break;
+		case ENFILE:
+			fprintf(stderr, "The system-wide limit on the total number of open fileshas been reached.\n");
+			break;
+		case ENODEV:
+			fprintf(stderr, "The anonymous inode filesystem is not available in this kernel.\n");
+			break;
+		case ENOMEM:
+			fprintf(stderr, "Insufficient kernel memory was available.\n");
+			break;
+		case ESRCH:
+			fprintf(stderr, "The process specified by pid does not exist.\n");
+			//todo: recover?
+			assert(false);
+			break;
+		case ENOSYS:
+			fprintf(stderr, "The kernel you are using does not have this syscall.\n");
+			//todo: recover?
+			assert(false);
+			break;
+		default:
+			fprintf(stderr, "Unknown error: %d\n", err);
+			assert(false); //todo; handle unknown error
+			break;
+		}
+	}
+
 };
 processState::~processState(){
 	close(pidFD);

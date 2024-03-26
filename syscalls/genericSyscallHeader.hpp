@@ -1,20 +1,22 @@
 #pragma once
-#include "../middleEnd.hpp"
+#include "../middleend/middleEnd.hpp"
 #include "../platformSpecificSyscallHandling.hpp"
 #include "../ptraceHelpers.hpp"
 #include "../syscallMapping.hpp"
 #include "./syscallHandler.hpp"
 
 #include <sstream>
+#include <fcntl.h> //AT_*
 
 
 struct nullOptHandler :syscallHandler {
-	void entry(const processState& process, const MiddleEndState& state, long syscallNr) override {};
+	void entry(processState & process, const MiddleEndState& state, long syscallNr) override {};
 	void exit(processState& process, MiddleEndState& state, long syscallRetval) override {};
 
 	void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override {};
 	void exitLog(const processState& process, const MiddleEndState& state, long syscallRetval) override {};
 };
+
 
 struct errorHandler :nullOptHandler {
 	void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) {
@@ -37,28 +39,64 @@ struct simpleSyscallHandler_base : virtual syscallHandler {
 		strBuf << syscallNr << "->" << getSyscallName(syscallNr).value_or(std::string_view{ "Unknown" }) << "";
 	}
 
+	template<bool log = true>
 	void appendResolvedFilename(const processState& process, const MiddleEndState& state, int fd, std::stringstream& strBuf)
 	{
-		if (auto resolved = state.getFilePath(process.pid, fd); resolved.has_value()) {
+		if (fd == AT_FDCWD) {
+			strBuf << "AT_FDCWD";
+		}
+		else if (auto resolved = state.getFilePath<log>(process.pid, fd); resolved.has_value()) {
 			strBuf << resolved.value();
 		}
 		else {
-			fprintf(stderr, "Unable to resolve file descriptor %d", fd);
 			strBuf << fd;
 		}
 	}
 };
 
+namespace SyscallHandlers {
+	struct onlyEntryLog : public simpleSyscallHandler_base {
+		void entry(processState& process, const MiddleEndState& state, long syscallNr) override {};
+		void exit(processState& process, MiddleEndState& state, long syscallRetval) override {};
+
+		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override {
+			simpleSyscallHandler_base::entryLog(process, state, syscallNr);
+			strBuf << "() = exiting\n";
+			printf("%d : %s", process.pid, strBuf.str().c_str());
+			strBuf.clear();
+		};
+		void exitLog(const processState& process, const MiddleEndState& state, long syscallRetval) override {};
+	};
+
+	struct FileOperationLogger : simpleSyscallHandler_base {
+		fileDescriptor fd;
+		// Inherited via simpleSyscallHandler_base
+		void entry(processState& process, const MiddleEndState& state, long syscallNr) override;
+		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
+		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override;
+	};
+
+	struct PathAtHolder : virtual simpleSyscallHandler_base {
+		std::filesystem::path fileRelPath;
+		fileDescriptor at;
+		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override;
+	};
+}
+
+
+
 template<int nr>
 struct simpleSyscallHandler;
 
-#define HandlerClass(syscallNR) \
-template<> \
-struct simpleSyscallHandler<syscallNR> : virtual public syscallHandler
 #define HandlerClassDef(syscallNR) \
 template<> \
 struct simpleSyscallHandler<syscallNR>
-#define NullOptHandlerClass(syscallNR)  HandlerClassDef(syscallNR) :public nullOptHandler{};
+
+#define HandlerClass(syscallNR) \
+HandlerClassDef(syscallNR) : virtual public syscallHandler
+
+#define NullOptHandlerClass(syscallNR)  \
+HandlerClassDef(syscallNR) :public nullOptHandler{};
 
 
 	/*intended - macroed - usage

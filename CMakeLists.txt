@@ -5,6 +5,6 @@ cmake_minimum_required (VERSION 3.12)
 
 project ("ptraceBasedTracer")
 
-add_executable (ptraceBasedTracer "ptraceBasedTracer.cpp" "ptraceMainLoop.cpp" "middleEnd.cpp" "backEnd.cpp" "syscalls/open.cpp" "syscalls/dup.cpp" "syscalls/read.cpp" "syscalls/clone.cpp" "syscalls/pipe.cpp" "syscalls/execve.cpp" "syscalls/fnctl.cpp")
+add_executable (ptraceBasedTracer "ptraceBasedTracer.cpp" "ptraceMainLoop.cpp" "middleend/middleEnd.cpp" "backend/backEnd.cpp" "syscalls/open.cpp" "syscalls/dup.cpp" "syscalls/read.cpp" "syscalls/clone.cpp" "syscalls/pipe.cpp" "syscalls/execve.cpp" "syscalls/fnctl.cpp" "syscalls/stat.cpp" "syscalls/socket.cpp" "syscalls/futex.cpp" "syscalls/mkdir.cpp" "syscalls/unlink.cpp" "syscalls/syscallHandlerMapper.cpp")
 
 set_property(TARGET ptraceBasedTracer PROPERTY CXX_STANDARD 20)

@@ -28,7 +28,7 @@
 		   invalid file descriptor number in dirfd can be used as a means to
 		   ensure that pathname is absolute.)
 			*/
-void OpenBase::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::OpenBase::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
 	auto FD = static_cast<fileDescriptor>(syscallRetval);
 	if (FD < 0) {
@@ -49,16 +49,16 @@ void OpenBase::exit(processState& process, MiddleEndState& state, long syscallRe
 	}
 }
 
-void OpenBase::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::OpenBase::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
 {
 	simpleSyscallHandler_base::entryLog(process, state, syscallNr);
 	strBuf << "(" << fileRelPath << ")";
 }
 
-void OpenBase::checkIfExists(const processState& process)
+void SyscallHandlers::OpenBase::checkIfExists(const processState& process)
 {
-	if (flags & O_CREAT) { //had already existed, if it did indeed exist, then we just error out
-		existed = false;
+	if (!(flags & O_CREAT)) { //had already existed, if it did indeed exist, then we just error out
+		existed = true;
 		return;
 	}
 	struct stat data;
@@ -82,7 +82,7 @@ void OpenBase::checkIfExists(const processState& process)
 }
 
 
-void Open::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Open::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 	fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
 	flags = getSyscallParam<2>(process.pid);
@@ -90,7 +90,7 @@ void Open::entry(const processState& process, const MiddleEndState& state, long 
 	checkIfExists(process);
 }
 
-void OpenAT::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::OpenAT::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 	fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };
 	at = getSyscallParam<1>(process.pid);
@@ -99,7 +99,7 @@ void OpenAT::entry(const processState& process, const MiddleEndState& state, lon
 }
 
 
-void OpenAT2::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::OpenAT2::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 	auto structSize = getSyscallParam<4>(process.pid);
 	assert(structSize == sizeof(open_how));
@@ -115,7 +115,7 @@ void OpenAT2::entry(const processState& process, const MiddleEndState& state, lo
 	checkIfExists(process);
 }
 
-void Creat::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Creat::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 	//I am the open syscall with a couple of flags. https://github.com/torvalds/linux/blob/484193fecd2b6349a6fd1554d306aec646ae1a6a/fs/open.c#L1493
 	fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };

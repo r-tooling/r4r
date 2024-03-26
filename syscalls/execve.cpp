@@ -1,11 +1,11 @@
 #include "execve.hpp"
 
-void Exec::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Exec::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 	fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<1>(process.pid)) };
 }
 
-void Exec::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::Exec::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
 		std::unique_ptr<char, decltype(std::free)*> resolvedPath{ realpath(fileRelPath.c_str(), nullptr), std::free };//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
 		if (!resolvedPath) {
@@ -18,7 +18,7 @@ void Exec::exit(processState& process, MiddleEndState& state, long syscallRetval
 		}
 }
 
-void Exec::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Exec::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
 {
 	simpleSyscallHandler_base::entryLog(process, state, syscallNr);
 	strBuf << "(" << fileRelPath << ")";

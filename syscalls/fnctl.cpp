@@ -1,7 +1,7 @@
 #include "fnctl.hpp"
 
 
-void fnctlHandler::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Fcntl::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 	oldFd = getSyscallParam<1>(process.pid);
 	auto command = getSyscallParam<2>(process.pid);
@@ -11,7 +11,7 @@ void fnctlHandler::entry(const processState& process, const MiddleEndState& stat
 		case F_DUPFD: 
 		case F_DUPFD_CLOEXEC:
 		{
-			//TODO: reuse dup.
+			syscallHandling = dup;
 			break;
 		}
 		/*     The following commands manipulate the flags associated with a
@@ -62,10 +62,11 @@ void fnctlHandler::entry(const processState& process, const MiddleEndState& stat
 	//todo: do we care about O_CLOEXEC?
 }
 
-void fnctlHandler::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::Fcntl::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
-	if (syscallHandling == dup) {
+	if (syscallHandling == dup) {//todo: reuse dup impl
 		if (syscallRetval >= 0) {
+			state.getFilePath<true>(process.pid,oldFd);
 			state.registerFdAlias(process.pid, syscallRetval, oldFd);
 		}
 	}
@@ -74,15 +75,15 @@ void fnctlHandler::exit(processState& process, MiddleEndState& state, long sysca
 	}
 }
 
-void fnctlHandler::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Fcntl::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
 {
 	simpleSyscallHandler_base::entryLog(process, state, syscallNr);
-	if (syscallHandling == dup) {
+	if (syscallHandling == dup) { 
 		strBuf << "( retval = ";
 	}
 	else {
 		strBuf << "( operation on ";
 	}
-	appendResolvedFilename(process, state, oldFd, strBuf);
+	appendResolvedFilename<false>(process, state, oldFd, strBuf);//todo: warn only if the result is positive, otherwise the warining should not be there.
 	strBuf << ")";
 }

@@ -2,6 +2,12 @@
 #include <string_view>
 #include <optional>
 
+/*
+    This is a constant that determines which syscall number is considered to be the highest known.
+*/
+constexpr size_t MaxSyscallNr = 449;
+
+
 //https://stackoverflow.com/questions/152016/detecting-cpu-architecture-compile-time
 constexpr std::string_view getBuild() noexcept { //Get current architecture, detectx nearly every architecture. Coded by Freak
     using namespace std::string_view_literals;

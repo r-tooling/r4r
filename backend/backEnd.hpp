@@ -1,5 +1,5 @@
 #pragma once
-#include "middleEnd.hpp"
+#include "../middleend/middleEnd.hpp"
 
 void report(const MiddleEndState&);
 void chrootBased(const MiddleEndState&);

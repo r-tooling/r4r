@@ -1,23 +1,22 @@
 #pragma once
 #include "genericSyscallHeader.hpp"
-
 namespace SyscallHandlers {
-	struct Dup23 : simpleSyscallHandler_base {
-		fileDescriptor oldFd;
-		fileDescriptor newFd;
-		// Inherited via simpleSyscallHandler_base
-		void entry(processState& process, const MiddleEndState& state, long syscallNr) override;
-		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
-		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override;
-	};
-	struct Dup : simpleSyscallHandler_base {
-		fileDescriptor oldFd;
+	struct Socket : simpleSyscallHandler_base {
 		// Inherited via simpleSyscallHandler_base
 		void entry(processState& process, const MiddleEndState& state, long syscallNr) override;
 		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
 		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override;
 	};
 }
-HandlerClassDef(SYS_dup) : public SyscallHandlers::Dup{};
-HandlerClassDef(SYS_dup2) : public SyscallHandlers::Dup23{};
-HandlerClassDef(SYS_dup3) : public SyscallHandlers::Dup23{};
+
+HandlerClassDef(SYS_socket) : public SyscallHandlers::Socket{};
+namespace SyscallHandlers {
+	struct SocketPair : simpleSyscallHandler_base {
+		long ptr;
+		// Inherited via simpleSyscallHandler_base
+		void entry(processState& process, const MiddleEndState& state, long syscallNr) override;
+		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
+		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override;
+	};
+}
+HandlerClassDef(SYS_socketpair) : public SyscallHandlers::SocketPair{};

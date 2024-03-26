@@ -17,7 +17,7 @@ typedef std::filesystem::path relFilePath;
 struct access_info {
 	pid_t pid; //this will eventually be replaced with the state of the current acceess rights as in teh logged in user/groups etc.
 	relFilePath relPath;
-	int flags;
+	std::optional<int> flags = std::nullopt; //sometimes the file is only created but never opened.
 	bool executable;
 	absFilePath workdir;
 	auto operator<=>(access_info const& other) const noexcept {//cannt be default as string is annoying
@@ -33,7 +33,7 @@ struct std::hash<access_info> {
 	std::size_t operator()(access_info const& s) const noexcept {
 		std::size_t h1 = std::hash<std::string>{}(s.relPath);
 		std::size_t h2 = std::hash<pid_t>{}(s.pid) << 2;
-		std::size_t h3 = std::hash<pid_t>{}(s.flags) << 6;
+		std::size_t h3 = std::hash<pid_t>{}(s.flags.value_or(0)) << 6;
 		return  h1 ^ h2 ^ h3;
 	}
 };
@@ -43,9 +43,21 @@ public:
 	struct file_info {
 		absFilePath realpath;
 		std::unordered_set<access_info> accessibleAs; //but we would need to know where it is relative from right now... Assuming programs do not move their current directory.
-		bool wasCreated = false;
-		bool wasDeleted = false;
+
+		std::optional<bool> wasEverCreated;
+		std::optional<bool> wasEverDeleted;
+		std::optional<bool> isCurrentlyOnTheDisk;
+		std::optional<bool> wasInitiallyOnTheDisk;
+
+		enum FileType { file, pipe, socket, process, dir,
+		blockDev,  //TODO: use me
+		charDev, //TODO: use me
+		link, //TODO: use me
+		}; //may not be set for a pure unlink() call.
+		std::optional<FileType> type = std::nullopt;
 		//different required access rights?
+		
+		//TODO: consider supporting hard links via saving the inode number and matching that. 
 	};
 
 	struct FD_Table {
@@ -53,7 +65,9 @@ public:
 	};
 
 private:
+	size_t processFD = 0;
 	size_t pipeCount = 0;
+	size_t socketCount = 0;
 	std::vector<std::unique_ptr<FD_Table>> FD_Tables;//Todo: handle hard links. I dont even know where I'd begin with the detection, though. I would need to keep track of inode numbers and their potential deletions. Meaning I'd have to add inode watchers to the entire process.
 
 	//current file descriptor state in each process PID. Need to support sharing between say threads.
@@ -94,7 +108,13 @@ public:
 
 	//TODO: add a method for saying a process has terminated ad sucha  pid can be encountered again.
 	void trackNewProcess(pid_t process);//TODO: support sharing FDs by copying a FD table reference and inherting a different workdir. Handle CloseOnExec
-	void trackNewProcess(pid_t process,pid_t parent, bool copy);//TODO: support sharing FDs by copying a FD table reference and inherting a different workdir. Handle CloseOnExec
+	void trackNewProcess(pid_t process,pid_t parent, bool copy,std::optional<pid_t> assumedChildPid);
+	void createDirectory(pid_t process, absFilePath filename, relFilePath relativePath);
+	void removeDirectory(pid_t process, absFilePath filename);
+
+	void removeNonDirectory(pid_t process, absFilePath filename);
+
+	//TODO: support sharing FDs by copying a FD table reference and inherting a different workdir. Handle CloseOnExec
 
 	void openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, bool existed);
 	void execFile(pid_t process, absFilePath filename, relFilePath relativePath);
@@ -102,8 +122,25 @@ public:
 	void registerFdAlias(pid_t process, fileDescriptor newFd, fileDescriptor oldFD);
 	void toBeDeleted(pid_t process);
 	void registerPipe(pid_t process, fileDescriptor pipes[2]);
-	//lifetime only guaranteed utill the 
-	std::optional<std::string_view> getFilePath(pid_t process, fileDescriptor fd) const;
+	void registerSocket(pid_t process, fileDescriptor socket);
+	void registerSocket(pid_t process, fileDescriptor sockets[2]);
+
+	void registerProcessFD(pid_t process, pid_t otherProcess, fileDescriptor procFD);
+	//lifetime only guaranteed utill the process lives. Or maybe not maybe the entire state, who knows.
+	// here because I am too lazy to define a logging and a non-logging variant 
+	template<bool log = true>
+	std::optional<std::string_view> getFilePath(pid_t process, fileDescriptor fd) const {
+		auto val = processToInfo.find(process);
+		assert(val != processToInfo.end());
+		if (auto file = val->second.fdTable->table.find(fd); file != val->second.fdTable->table.end()) {
+			return std::string_view{ file->second->realpath.c_str() };
+		}
+		if constexpr (log) {
+			fprintf(stderr, "Unable to resolve file descriptor %d\n", fd);
+		}
+		return std::nullopt;
+	}
+	;
 };
 
 

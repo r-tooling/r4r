@@ -1,6 +1,14 @@
 #include "clone.hpp"
+#include <cassert>
 
-void Clone::entry(const processState& process, const MiddleEndState& state, long syscallNr)
+#include <linux/sched.h>    /* Definition of struct clone_args */
+#include <sched.h>          /* Definition of CLONE_* constants */
+#include <unistd.h>
+
+static_assert(getBuild() == std::string_view{ "x86_64" }, "The clone interfaces may differ on different plaforms");
+
+
+void SyscallHandlers::Clone::entry(processState & process, const MiddleEndState& state, long syscallNr)
 {
 
 	/*
@@ -21,18 +29,68 @@ void Clone::entry(const processState& process, const MiddleEndState& state, long
 	//TODO: clone may terminate later than the cild process did. What shall be done in such a case?
 	//TODO: this is very much platform specific
 	flags = getSyscallParam<1>(process.pid); //TODO: won't this fail for fork and such?
+	handleEntryState(process, state, syscallNr);
 }
 
-void Clone::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::Clone::handleEntryState(processState& process, const MiddleEndState& state, long syscallNr)
 {
-	if (syscallRetval >= 0) {
-		state.trackNewProcess(syscallRetval, process.pid, !(flags & CLONE_FILES));
-	}
+	process.blockedInClone = { std::nullopt, flags }; //TODO: maybe just save &this?
 }
 
-void Clone::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Clone::exit(processState& process, MiddleEndState& state, long syscallRetval)
+{
+	assert(process.blockedInClone);//can be safely removed later on.
+	if (syscallRetval >= 0) {
+		state.trackNewProcess(syscallRetval, process.pid, !(process.blockedInClone->flags & CLONE_FILES), process.blockedInClone->cloneChildPid);
+		if (fileDescriptorPtr && fileDescriptorPtr.value() != 0) {
+			auto ptr = userPtrToOwnPtr<pid_t>(process.pid,fileDescriptorPtr.value());
+			state.registerProcessFD(process.pid, syscallRetval, *ptr);
+		}
+	}
+	else {
+		assert(!process.blockedInClone || !process.blockedInClone->cloneChildPid.has_value());
+	}
+
+	process.blockedInClone = std::nullopt;
+}
+
+void SyscallHandlers::Clone::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
 {
 	simpleSyscallHandler_base::entryLog(process, state, syscallNr);
 	strBuf << "()";
 
+}
+
+void SyscallHandlers::Clone3::entry(processState & process, const MiddleEndState& state, long syscallNr)
+{
+	size_t size = getSyscallParam<2>(process.pid);
+	assert(size == sizeof(clone_args));
+	auto data = userPtrToOwnPtr<clone_args>(process.pid,getSyscallParam<1>(process.pid));
+	flags = data->flags & ~0xff;
+	fileDescriptorPtr = data->pidfd;
+	handleEntryState(process,state,syscallNr);
+}
+
+void SyscallHandlers::Fork::entry(processState& process, const MiddleEndState& state, long syscallNr)
+{
+	/*
+	* https://github.com/torvalds/linux/blob/70293240c5ce675a67bfc48f419b093023b862b3/kernel/fork.c#L2881C2-L2884C1
+struct kernel_clone_args args = {
+	.exit_signal = SIGCHLD,
+};
+
+*/
+	flags = 0;
+	handleEntryState(process, state, syscallNr);
+
+}
+
+void SyscallHandlers::VFork::entry(processState& process, const MiddleEndState& state, long syscallNr)
+{
+	/*	struct kernel_clone_args args = {
+		.flags		= CLONE_VFORK | CLONE_VM,
+		.exit_signal	= SIGCHLD,
+	};*/
+	flags = CLONE_VFORK | CLONE_VM;
+	handleEntryState(process, state, syscallNr);
 }

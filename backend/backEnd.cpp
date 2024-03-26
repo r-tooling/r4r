@@ -139,7 +139,7 @@ void chrootBased(const MiddleEndState& state)
 void csvBased(const MiddleEndState& state, absFilePath output)
 {
 	auto openedFile = std::ofstream{ output };
-	openedFile << "filename" << "," << "flags" << std::endl;
+	openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << std::endl;
 	for (auto& file : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
 		auto path = file.second->realpath.string();
 
@@ -148,19 +148,21 @@ void csvBased(const MiddleEndState& state, absFilePath output)
 			if (relative.executable) {
 				flags |= fileAccessFlags::execute;
 			}
-			if ((relative.flags & O_ACCMODE) == O_RDONLY) {
-				flags |= fileAccessFlags::read;
-			}
-			else if ((relative.flags & O_ACCMODE) == O_WRONLY) {
-				flags |= fileAccessFlags::write;
-			}
-			else if ((relative.flags & O_ACCMODE) == O_RDWR) {
-				flags |= fileAccessFlags::read | fileAccessFlags::write;
+			if (relative.flags) {
+				if ((*relative.flags & O_ACCMODE) == O_RDONLY) {
+					flags |= fileAccessFlags::read;
+				}
+				else if ((*relative.flags & O_ACCMODE) == O_WRONLY) {
+					flags |= fileAccessFlags::write;
+				}
+				else if ((*relative.flags & O_ACCMODE) == O_RDWR) {
+					flags |= fileAccessFlags::read | fileAccessFlags::write;
+				}
 			}
 
 		}
 		replaceAll(path, "\"", "\"\"\"");
-		openedFile << "\"" << path << "\"" << "," << flags_to_str(flags) << std::endl;
+		openedFile << "\"" << path << "\"" << "," << flags_to_str(flags) << "," << (file.second->wasInitiallyOnTheDisk ? "F" : "T") << "," << (file.second->wasEverDeleted ? "T" : "F") << std::endl;
 	}
 
 }
@@ -170,6 +172,7 @@ void report(const MiddleEndState& state)
 {
 	for (auto& file : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
 		printf("%s - ", file.second->realpath.c_str());
+		auto flags = 0;
 		for (auto& relative : file.second->accessibleAs) {
 			if (relative.relPath != file.second->realpath) {
 				printf("%s -", relative.relPath.c_str());
@@ -178,22 +181,25 @@ void report(const MiddleEndState& state)
 				printf("from path: %s ", relative.workdir.c_str());
 			}
 
-			if ((relative.flags & O_ACCMODE) == O_RDONLY) {
-				printf("READONLY");
-			}
-			else if ((relative.flags & O_ACCMODE) == O_WRONLY) {
-				printf("WRITEONLY");
-			}
-			else if ((relative.flags & O_ACCMODE) == O_RDWR) {
-				printf("R/W");
-			}
-			else {
-				assert(false);//no reasonable system should reach here;
-			}
 			if (relative.executable) {
-				printf("+X");
+				flags |= fileAccessFlags::execute;
+			}
+			if (relative.flags) {
+				if ((*relative.flags & O_ACCMODE) == O_RDONLY) {
+					flags |= fileAccessFlags::read;
+				}
+				else if ((*relative.flags & O_ACCMODE) == O_WRONLY) {
+					flags |= fileAccessFlags::write;
+				}
+				else if ((*relative.flags & O_ACCMODE) == O_RDWR) {
+					flags |= fileAccessFlags::read | fileAccessFlags::write;
+				}
+				else {
+					assert(false);//no reasonable system should reach here;
+				}
 			}
 		}
-		printf("\n");
+		
+		printf("%s\n", flags_to_str(flags).c_str());
 	}
 }
