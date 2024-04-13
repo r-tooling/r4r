@@ -4,7 +4,12 @@ namespace SyscallHandlers{
 	struct Close : FileOperationLogger {
 		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
 	};
+	struct GetDents : FileOperationLogger {
+		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
+	};
 }
+
+HandlerClassDef(SYS_ftruncate) : public SyscallHandlers::FileOperationLogger{};
 
 HandlerClassDef(SYS_read) : public SyscallHandlers::FileOperationLogger{};
 HandlerClassDef(SYS_pread64) : public SyscallHandlers::FileOperationLogger{};
@@ -21,3 +26,4 @@ HandlerClassDef(SYS_ioctl) : public SyscallHandlers::FileOperationLogger{};//TOD
 //TODO: mark the given directores as needing access to this!
 HandlerClassDef(SYS_getdents) : public SyscallHandlers::FileOperationLogger{};
 HandlerClassDef(SYS_getdents64) : public SyscallHandlers::FileOperationLogger{};
+

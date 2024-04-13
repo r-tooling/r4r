@@ -7,15 +7,12 @@ void SyscallHandlers::Exec::entry(processState & process, const MiddleEndState& 
 
 void SyscallHandlers::Exec::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
-		std::unique_ptr<char, decltype(std::free)*> resolvedPath{ realpath(fileRelPath.c_str(), nullptr), std::free };//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
-		if (!resolvedPath) {
-			printf("Unable to resolve path for exec %s\n", fileRelPath.c_str());
-			std::string tmp{ fileRelPath };
-			state.execFile(process.pid, std::move(tmp), std::move(fileRelPath));
+		auto resolvedPath = state.resolveToAbsoltute(process.pid, fileRelPath);//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
+		auto failed = state.execFile(process.pid, resolvedPath, std::move(fileRelPath),0,false);
+		if (failed && syscallRetval == 0) {
+			state.execFile(process.pid, resolvedPath, std::move(fileRelPath), 0, false); // Middle end decided the exec should fail but it does not. Force it to keep a hold of this reality.
 		}
-		else {
-			state.execFile(process.pid, { resolvedPath.get() }, std::move(fileRelPath));
-		}
+
 }
 
 void SyscallHandlers::Exec::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)

@@ -41,7 +41,7 @@ namespace {
 			//todo: try to walk all currently blocked processes to get this marked down
 			//todo: consider keeping the list in a separate structure.
 			if (oldProcess.blockedInClone && !oldProcess.blockedInClone->cloneChildPid.has_value()) {
-				state.trackNewProcess(process.pid, oldProcess.pid, !(process.blockedInClone->flags & CLONE_FILES), std::nullopt);
+				state.trackNewProcess(process.pid, oldProcess.pid, !(process.blockedInClone->flags & CLONE_FILES), std::nullopt, process.blockedInClone->flags & CLONE_FS);
 				oldProcess.blockedInClone->cloneChildPid = process.pid;
 				return process;
 			}
@@ -137,14 +137,14 @@ void ptraceChildren()
 		}
 	}
 	csvBased(state, "accessedFiles.csv");
-	report(state);
+	//report(state);
 	//chrootBased(state);
 }
 //intentionally here this way as otherwise the unique_ptr will not compile
-processState::processState(pid_t pid) :pid(pid) {
-	pidFD = syscall(SYS_pidfd_open, pid, 0);
-	auto err = errno;
-	if (pidFD < 0) { //error state
+processState::processState(pid_t pid) :pid(pid),pidFD(-1) {
+	pidFD = syscall(SYS_pidfd_open, pid, 0); //cannot default init as that results in invalid errno
+	auto err = errno; 
+	if (!pidFD) { //error state
 		fprintf(stderr, "pidfd_open(%d): ",pid);
 		switch (err)
 		{
@@ -181,6 +181,4 @@ processState::processState(pid_t pid) :pid(pid) {
 	}
 
 };
-processState::~processState(){
-	close(pidFD);
-}
+processState::~processState(){}

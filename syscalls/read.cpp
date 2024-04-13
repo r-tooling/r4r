@@ -25,6 +25,13 @@ void SyscallHandlers::Close::exit(processState& process, MiddleEndState& state, 
 {
 	if (syscallRetval == 0) {
 		state.getFilePath<true>(process.pid, fd);
-		state.closeFile(process.pid, fd);
+		state.closeFileDescriptor(process.pid, fd);
+	}
+}
+
+void SyscallHandlers::GetDents::exit(processState& process, MiddleEndState& state, long syscallRetval)
+{
+	if (syscallRetval == 0) {
+		state.listDirectory(process.pid, fd);
 	}
 }

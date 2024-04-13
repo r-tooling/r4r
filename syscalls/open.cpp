@@ -35,17 +35,10 @@ void SyscallHandlers::OpenBase::exit(processState& process, MiddleEndState& stat
 		//TODO: log open failed and file is non existent. Check retval for error.
 	}
 	else {
-		assert(at == AT_FDCWD || fileRelPath.is_absolute());
-		std::unique_ptr<char, decltype(std::free)*> resolvedPath{ realpath(fileRelPath.c_str(), nullptr), std::free };//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
+		auto resolvedPath = state.resolveToAbsoltute(process.pid, fileRelPath, at);
+		assert(resolvedPath.is_absolute());
+		state.openHandling(process.pid, resolvedPath, std::move(fileRelPath), FD, flags, existed);//the order is undefined otherwise
 
-		if (!resolvedPath) {
-			printf("Unable to resolve path for file %s\n", fileRelPath.c_str());
-			std::string tmp{ fileRelPath };
-			state.openHandling(process.pid, std::move(tmp), std::move(fileRelPath), FD, flags,existed);//the order is undefined otherwise
-		}
-		else {
-			state.openHandling(process.pid, { resolvedPath.get() }, std::move(fileRelPath), FD, flags, existed);//the order is undefined otherwise
-		}
 	}
 }
 
@@ -68,10 +61,9 @@ void SyscallHandlers::OpenBase::checkIfExists(const processState& process)
 	//TODO: how about other flags
 	//TODO: check if we already know about file in middleEnd
 	if (at != AT_FDCWD) {
-		fileDescriptor toBeClosed = process.stealFD(at);
-		state = fstatat(toBeClosed, fileRelPath.c_str(), &data, (flags & O_NOFOLLOW) ? AT_SYMLINK_NOFOLLOW : 0);
+		auto toBeClosed = process.stealFD(at);
+		state = fstatat(toBeClosed.get(), fileRelPath.c_str(), &data, (flags & O_NOFOLLOW) ? AT_SYMLINK_NOFOLLOW : 0);
 		err = errno;
-		close(toBeClosed);
 	}
 	else {
 		state =fstatat(AT_FDCWD, fileRelPath.c_str(), &data, (flags & O_NOFOLLOW) ? AT_SYMLINK_NOFOLLOW : 0);

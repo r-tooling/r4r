@@ -16,17 +16,8 @@ void SyscallHandlers::MkdirBase::exit(processState& process, MiddleEndState& sta
 {
 	//TODO: search perms in path.
 	if (syscallRetval == 0) {
-		assert(at == AT_FDCWD || fileRelPath.is_absolute());
-		std::unique_ptr<char, decltype(std::free)*> resolvedPath{ realpath(fileRelPath.c_str(), nullptr), std::free };//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
-
-		if (!resolvedPath) {
-			printf("Unable to resolve path for file %s\n", fileRelPath.c_str());
-			std::string tmp{ fileRelPath };
-			state.createDirectory(process.pid, std::move(tmp), std::move(fileRelPath));//the order is undefined otherwise
-		}
-		else {
-			state.createDirectory(process.pid, { resolvedPath.get() }, std::move(fileRelPath));//the order is undefined otherwise
-		}
+		auto resolvedPath = state.resolveToAbsoltute(process.pid,fileRelPath,at);
+		state.createDirectory(process.pid, resolvedPath, std::move(fileRelPath));//the order is undefined otherwise
 	}
 }
 

@@ -1,4 +1,7 @@
 #include "backEnd.hpp"
+#include "dpkgResolver.hpp"
+#include "rpkgResolver.hpp"
+#include "../toBeClosedFd.hpp"
 
 #include <cstdlib>
 #include <fcntl.h> //O_* flags
@@ -15,15 +18,17 @@ namespace {
 		execute = 4
 	};
 	//src: https://stackoverflow.com/questions/2896600/how-to-replace-all-occurrences-of-a-character-in-string
-	void replaceAll(std::string& source, const std::string& from, const std::string& to)
+	template<class T>
+	T&& replaceAll(T&& source, const T&& from, const T&& to)
 	{
-		std::string newString;
+		using noref = std::remove_reference_t<T>;
+		noref newString{};
 		newString.reserve(source.length());  // avoids a few memory allocations
 
-		std::string::size_type lastPos = 0;
-		std::string::size_type findPos;
+		typename noref::size_type lastPos = 0;
+		typename noref::size_type findPos;
 
-		while (std::string::npos != (findPos = source.find(from, lastPos)))
+		while (noref::npos != (findPos = source.find(from, lastPos)))
 		{
 			newString.append(source, lastPos, findPos - lastPos);
 			newString += to;
@@ -34,6 +39,7 @@ namespace {
 		newString += source.substr(lastPos);
 
 		source.swap(newString);
+		return std::forward<T>(source);
 	}
 	std::string flags_to_str(int flags) {
 		std::string res = "";
@@ -54,8 +60,8 @@ namespace {
 
 		//hardlink based-solution
 		//open old file
-		auto oldFile = open(oldPath.c_str(), O_RDONLY);
-		auto currentDir = dup(chrootDirectory);//todo: avoid the need for dup here
+		ToBeClosedFd oldFile = open(oldPath.c_str(), O_RDONLY);
+		ToBeClosedFd currentDir = dup(chrootDirectory);
 		for (auto begin = oldPath.begin(),
 			next = ++begin, //the last file shall not be considered here.
 			end = oldPath.end();
@@ -72,16 +78,14 @@ namespace {
 		   file specified by pathname does not exist, open() will create a
 		   regular file (i.e., O_DIRECTORY is ignored).
 			*/
-			auto potentialDir = openat(currentDir, relPath.c_str(), O_DIRECTORY);
+			auto potentialDir = openat((fileDescriptor)currentDir, relPath.c_str(), O_DIRECTORY);
 			if (potentialDir < 0) {
-				potentialDir = mkdirat(currentDir, relPath.c_str(), 0777);
+				potentialDir = mkdirat((fileDescriptor)currentDir, relPath.c_str(), 0777);
 				if (potentialDir < 0) {
 					printf("cannot make directory %s from %s\n", relPath.c_str(), oldPath.c_str());
-					close(currentDir);
 					return;
 				}
 			}
-			close(currentDir);
 			currentDir = potentialDir;
 		}
 		/*
@@ -100,7 +104,6 @@ namespace {
 		//todo: ahndle folders
 		/*assert(linkat(oldFile, "",
 			currentDir, oldPath.filename().c_str(), AT_EMPTY_PATH) == 0);*/
-		close(oldFile);
 		printf("transferred %s\n", oldPath.c_str());
 
 	}
@@ -111,15 +114,20 @@ void chrootBased(const MiddleEndState& state)
 {
 	char dirName[]{ "chrootTestXXXXXX\0" }; //NOT STATIC very intentionally, gets modified. Null byte because of paranoia if this ever gets changed it will need to be thought of.
 	assert(mkdtemp(dirName) != nullptr);
-	auto dir = open(dirName, O_DIRECTORY);
-	assert(dir >= 0);
+	ToBeClosedFd dir = open(dirName, O_DIRECTORY);
+	auto err = errno;
+	if (!dir) {
+		fprintf(stderr, "Unable to open temp directory for the choroot env. \n");
+		return;
+			//return err;
+	}
 
 	for (const auto& file : state.encounteredFilenames) {
 		const auto& fileInfo = *file.second;
-		transferFile(dir,fileInfo.realpath);
+		transferFile(dir.get(),fileInfo.realpath);
 		for (const auto& rel : fileInfo.accessibleAs) {
 			if (rel.relPath.is_absolute()) {
-				transferFile(dir, rel.relPath);//TODO: duplicates
+				transferFile(dir.get(), rel.relPath);//TODO: duplicates
 			}
 			else {
 				//TODO: we pray this works now.
@@ -138,11 +146,14 @@ void chrootBased(const MiddleEndState& state)
 */
 void csvBased(const MiddleEndState& state, absFilePath output)
 {
-	auto openedFile = std::ofstream{ output };
-	openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << std::endl;
-	for (auto& file : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
-		auto path = file.second->realpath.string();
+	using std::string_literals::operator""s;
 
+	auto rpkgResolver = backend::Rpkg{};
+	auto dpkgResolver = backend::Dpkg{};
+
+	auto openedFile = std::ofstream{ output,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
+	openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << ", source dpkg package" << ", source R package" << std::endl;
+	for (auto& file : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
 		auto flags = 0;
 		for (auto& relative : file.second->accessibleAs) {
 			if (relative.executable) {
@@ -161,8 +172,24 @@ void csvBased(const MiddleEndState& state, absFilePath output)
 			}
 
 		}
-		replaceAll(path, "\"", "\"\"\"");
-		openedFile << "\"" << path << "\"" << "," << flags_to_str(flags) << "," << (file.second->wasInitiallyOnTheDisk ? "F" : "T") << "," << (file.second->wasEverDeleted ? "T" : "F") << std::endl;
+		openedFile << "\"" << replaceAll(std::move(file.second->realpath.string()), "\""s, "\"\"\""s) << "\"" << "," << flags_to_str(flags)
+			<< "," << (file.second->wasInitiallyOnTheDisk.value_or(false) ? "F" : "T")
+			<< "," << (file.second->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T");
+
+		auto dpkg = dpkgResolver.resolvePathToPackage(file.second->realpath);
+		{
+			auto resolved = replaceAll(dpkg ? (std::u8string)dpkg.value() : u8""s, u8"\""s, u8"\"\"\""s);
+			std::string compat{ reinterpret_cast<const char*>(resolved.data()),resolved.length()};
+			openedFile << ", \"" << compat << "\"";
+		}
+		auto rpkg = !dpkg ? rpkgResolver.resolvePathToPackage(file.second->realpath) : std::nullopt;
+		{
+			auto resolved = replaceAll(rpkg ? (std::u8string)rpkg.value() : u8""s, u8"\""s, u8"\"\"\""s);
+			std::string compat{ reinterpret_cast<const char*>(resolved.data()),resolved.length() };
+			openedFile << ", \"" << compat << "\"";
+		}
+		openedFile << std::endl;
+
 	}
 
 }
@@ -200,6 +227,14 @@ void report(const MiddleEndState& state)
 			}
 		}
 		
-		printf("%s\n", flags_to_str(flags).c_str());
+		/*printf("%s", flags_to_str(flags).c_str());
+		auto package = backend::dpkg::resolvePathToPackage(file.second->realpath);
+		if (package) {
+			printf(" From package %s\n", package.value().c_str());
+		}
+		else {
+			printf(" From unknown package\n");
+
+		}*/
 	}
 }

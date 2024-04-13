@@ -48,3 +48,10 @@ NullOptHandlerClass(SYS_madvise)
 NullOptHandlerClass(SYS_sched_getaffinity)
 
 NullOptHandlerClass(SYS_sigaltstack) //should not affect us in any way
+
+NullOptHandlerClass(SYS_clock_nanosleep)//sleep, should be safe.
+NullOptHandlerClass(SYS_clock_gettime)
+
+NullOptHandlerClass(SYS_sched_yield)//just optimisations
+
+NullOptHandlerClass(SYS_tgkill) //TODO: do I care about cross-process signals?

@@ -2,19 +2,17 @@
 
 void SyscallHandlers::UnlinkBase::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
-	fprintf(stderr, "unlink %s %ld\n", fileRelPath.c_str(), syscallRetval);
+	//fprintf(stderr, "unlink %s %ld\n", fileRelPath.c_str(), syscallRetval);
 	if (syscallRetval == 0) {
-		assert(at == AT_FDCWD || fileRelPath.is_absolute());
-		state.removeNonDirectory(process.pid,fileRelPath);
+		state.removeNonDirectory(process.pid,state.resolveToAbsoltuteDeleted(process.pid, fileRelPath));
 	}
 }
 
 void SyscallHandlers::RmdirBase::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
-	fprintf(stderr, "rmdir %s %ld\n", fileRelPath.c_str(), syscallRetval);
+	//fprintf(stderr, "rmdir %s %ld\n", fileRelPath.c_str(), syscallRetval);
 	if (syscallRetval == 0) {
-		assert(at == AT_FDCWD || fileRelPath.is_absolute());
-		state.removeDirectory(process.pid, fileRelPath);
+		state.removeDirectory(process.pid, state.resolveToAbsoltuteDeleted(process.pid, fileRelPath));
 	}
 }
 
@@ -40,7 +38,7 @@ void SyscallHandlers::UnlinkAt::entry(processState& process, const MiddleEndStat
 
 void SyscallHandlers::UnlinkAt::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
-	fprintf(stderr, "rm %s %d\n", fileRelPath.c_str(), rmdirType ? 1 : 0);
+	//fprintf(stderr, "rm %s %d\n", fileRelPath.c_str(), rmdirType ? 1 : 0);
 	if (rmdirType)
 		RmdirBase::exit(process,state,syscallRetval);
 	else
@@ -58,6 +56,7 @@ void SyscallHandlers::UnlinkAt::entryLog(const processState& process, const Midd
 
 void SyscallHandlers::PathAtHolder::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)
 {
+	simpleSyscallHandler_base::entryLog(process, state, syscallNr);
 	strBuf << "(";
 	appendResolvedFilename(process, state, at, strBuf);
 	strBuf << "," << fileRelPath << ")";

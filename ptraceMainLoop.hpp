@@ -5,18 +5,23 @@
 #include <unistd.h> //syscall fn
 #include <cassert>
 #include "middleend/middleEnd.hpp"
+#include "platformSpecificSyscallHandling.hpp"
+#include "ptraceHelpers.hpp"
+#include "toBeClosedFd.hpp"
 
 //circular dependency hell
 struct syscallHandler;
+
+using traceeFileDescriptor = fileDescriptor;
 
 struct processState {
 	processState(pid_t pid);
 	processState(const processState&) = delete;
 	processState(processState&&) = delete;
 	pid_t pid;
-	fileDescriptor pidFD; //TODO: wrap me in a class.
-	fileDescriptor stealFD(fileDescriptor FD) const{ //todo: wrap the resul in a class
-		auto ret = syscall(SYS_pidfd_getfd, pidFD, FD,0);
+	ToBeClosedFd pidFD;
+	ToBeClosedFd stealFD(traceeFileDescriptor FD) const{
+		auto ret = syscall(SYS_pidfd_getfd, pidFD.get(), FD, 0);
 		assert(ret >= 0);
 		return ret;
 	}
@@ -33,6 +38,16 @@ struct processState {
 	} syscallState = outside;
 	std::unique_ptr<syscallHandler> syscallHandlerObj;
 	~processState();
+
+
+	template<int T>
+	long getSyscallParam() {
+		return ::getSyscallParam<T>(pid);
+	}
+
+	std::string ptrToStr(long ptr) {
+		return ::userPtrToString(pid, ptr);
+	}
 };
 
 void ptraceChildren();

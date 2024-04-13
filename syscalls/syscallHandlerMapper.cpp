@@ -1,5 +1,6 @@
 #include "syscallHandlerMapper.hpp"
 #include "../syscallMapping.hpp"
+#include "syscallHeaders.hpp"
 
 namespace {
 	using namespace SyscallHandlers;

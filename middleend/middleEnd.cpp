@@ -1,8 +1,14 @@
 #include "middleEnd.hpp"
+#include "../toBeClosedFd.hpp"
 
 #include <cassert>
 #include <optional>
 #include <fcntl.h>
+
+//stat
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 	std::optional<std::string> tryReadShellbang(fileDescriptor fd) {//TODO: can the filename contain spaces?
@@ -41,101 +47,151 @@ namespace {
 			return std::nullopt;
 		}
 	}
+
+	
+}
+
+
+MiddleEndState::running_thread_state& MiddleEndState::pidToObj(const pid_t process)
+{
+	auto val = processToInfo.find(process);
+	assert(val != processToInfo.end());
+	return val->second;
+}
+
+
+MiddleEndState::file_info* MiddleEndState::createUnbackedFD(absFilePath&& filename, MiddleEndState::file_info::FileType type)
+{
+	auto file = std::unique_ptr<MiddleEndState::file_info>(new file_info{
+		.realpath = filename,
+		.wasEverCreated = false,
+		.wasEverDeleted = false,
+		.isCurrentlyOnTheDisk = false,
+		.wasInitiallyOnTheDisk = false,
+		.type = type
+	});
+	auto raw = file.get();
+	nonFileDescriptors.emplace_back(std::move(file));
+	return raw;
+}
+
+MiddleEndState::file_info* MiddleEndState::createErrorFD(const char* errorMessage)
+{
+	fprintf(stderr,"%s", errorMessage);
+	auto filepath = "unknownFD ERROR" + std::to_string(++errorCount);
+	auto ptr = std::unique_ptr<MiddleEndState::file_info>(
+		new file_info{
+			.realpath = filepath,
+			.accessibleAs = {},
+			.wasEverCreated = std::nullopt,
+			.wasEverDeleted = std::nullopt,
+			.isCurrentlyOnTheDisk = std::nullopt,
+			.wasInitiallyOnTheDisk = std::nullopt,
+			.type = std::nullopt,
+		});
+	auto raw = ptr.get();
+	encounteredFilenames.emplace(filepath, std::move(ptr));
+	return raw;
+}
+
+MiddleEndState::file_info* MiddleEndState::tryFindFile(const absFilePath& filename)
+{
+	if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
+		auto& [_, info] = *it;
+		return info.get();
+	}
+	else {
+		return nullptr;
+	}
 }
 
 
 void MiddleEndState::trackNewProcess(pid_t process)
 {
 	auto val = processToInfo.find(process);
-	if (val != processToInfo.end()) { //I ahve already been created by teh other call. TODO: ensure this does not happen.
-		return;
+	if (val != processToInfo.end()) { //I have already been created by the other call or existed in the past.
+		if (val->second.exiting) { //did I ever exist in the past?
+			processToInfo.erase(val); //if so delete me and recreate
+		}
+		else { //I have accidentally been created twice.
+			return;
+		}
 	}
 
-	FD_Table* rawPtr;
-	{
-		auto tbl = std::make_unique<MiddleEndState::FD_Table>();
-		rawPtr = tbl.get();
-		FD_Tables.push_back(std::move(tbl));
-	}
-	std::unique_ptr<char, decltype(std::free)*>workdir{get_current_dir_name(), std::free};
+	auto fdTable = std::make_shared<MiddleEndState::FD_Table>(); //TODO: shared ptr instead.
+	auto rawTablePtr = fdTable.get();
+	std::unique_ptr<char, decltype(std::free)*>workdir{get_current_dir_name(), std::free}; //is there a better heuristic?
 
-	processToInfo.emplace(process, MiddleEndState::running_thread_state{ process, std::filesystem::path{workdir.get()} ,rawPtr});
-	if (processToInfo.size() == 1) {//TODO: a better solution for the initial setup?
-		auto in = new file_info{ 
-			.realpath = "stdin",
-			.wasEverCreated = false,
-			.wasEverDeleted = false,
-			.isCurrentlyOnTheDisk = false,
-			.wasInitiallyOnTheDisk = false,
-			.type = file_info::pipe};
-		nonFileDescriptors.emplace_back(in);
-		rawPtr->table.emplace(0, in);
-		auto& out = nonFileDescriptors.emplace_back(new file_info{
-			.realpath = "stdout",
-			.wasEverCreated = false,
-			.wasEverDeleted = false,
-			.isCurrentlyOnTheDisk = false,
-			.wasInitiallyOnTheDisk = false,
-			.type = file_info::pipe
-			});
-		rawPtr->table.emplace(1, out.get());
-		auto& err = nonFileDescriptors.emplace_back(new file_info{ 
-			.realpath = "stderr",
-			.wasEverCreated = false,
-			.wasEverDeleted = false,
-			.isCurrentlyOnTheDisk = false,
-			.wasInitiallyOnTheDisk = false,
-			.type = file_info::pipe
-			});
-		rawPtr->table.emplace(2, err.get());
+	processToInfo.emplace(process, MiddleEndState::running_thread_state{ process, std::make_shared<FS_Info>(std::filesystem::path{workdir.get()}) ,std::move(fdTable) });
+	if (!firstProcessInitialised) {
+		auto in = createUnbackedFD("stdin", file_info::pipe);
+		fdTable->table.emplace(0, in);
+		auto out = createUnbackedFD("stdout", file_info::pipe);
+		fdTable->table.emplace(1, out);
+		auto err = createUnbackedFD("stderr", file_info::pipe);
+		fdTable->table.emplace(2, err);
+
+		firstProcessInitialised = true;
 	}
 }
 
-void MiddleEndState::trackNewProcess(pid_t process, pid_t parent, bool copy, std::optional<pid_t> assumedChildPid)
+void MiddleEndState::trackNewProcess(pid_t process, pid_t parent, bool copy, std::optional<pid_t> assumedChildPid, bool cloneFS)
 {
 	if (assumedChildPid.has_value() && assumedChildPid != process) {
 		//we assigned wrong!
 		assert(false);//todo: error handling
 	}
-	//TODO: vfork issues.
 	if(processToInfo.find(process) == processToInfo.end())
 		trackNewProcess(process);//TODO: dont create the FD table whichh will only get replaced now
-	//TODO: do not error or child process already
-	auto proc = processToInfo.find(process);
-	auto val = processToInfo.find(parent);
-	assert(val != processToInfo.end());
-	assert(proc != processToInfo.end());
 
-	if (!copy) {
-		proc->second.fdTable = val->second.fdTable;
+	auto& proc = pidToObj(process);
+	auto& val = pidToObj(parent);
+
+	//TODO: support unshare
+
+
+	if (cloneFS) {
+		proc.fsInfo = val.fsInfo;
 	}
 	else {
-		auto tbl = std::make_unique<MiddleEndState::FD_Table>(*val->second.fdTable);
-		proc->second.fdTable = tbl.get();
-		FD_Tables.push_back(std::move(tbl));
+		proc.fsInfo = std::make_shared<FS_Info>(*val.fsInfo);
+	}
 
+	if (!copy) {
+		proc.fdTable = val.fdTable;//copy ptr
+	}
+	else {
+		proc.fdTable = std::make_shared<MiddleEndState::FD_Table>(*val.fdTable);//copy table itself
 	}
 
 }
 
-void MiddleEndState::createDirectory(pid_t process, absFilePath filename, relFilePath relativePath)
+void MiddleEndState::createDirectory(pid_t process,const absFilePath& filename,const relFilePath& relativePath)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
-	MiddleEndState::file_info* fileInfo;
-	if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
-		it->second->accessibleAs.emplace(process, relativePath, 0, false);
-		fileInfo = it->second.get();
-		assert(!fileInfo->isCurrentlyOnTheDisk);//TODO: handle multiple delete and open calls
-		fileInfo->type = file_info::dir;
+	auto& val = pidToObj(process);
+	auto access = access_info{
+			.pid = process,
+			.relPath = relativePath,
+			.flags = std::nullopt,
+			.executable = false,
+			.workdir = val.fsInfo->workdir };
 
+	MiddleEndState::file_info* fileInfo = tryFindFile(filename);
+	if (fileInfo) {
+		if (fileInfo->isCurrentlyOnTheDisk) {
+			fprintf(stderr, "Error in caching the filesystem image, new directory assumed to already exist.\n");
+		}
+		fileInfo->registerAccess(std::move(access));
+		fileInfo->type = file_info::dir; //TODO: historical data ever relevant?
+		fileInfo->isCurrentlyOnTheDisk = true;
+		fileInfo->wasEverCreated = true;
 
 	}
 	else {
 		auto ptr = std::unique_ptr<MiddleEndState::file_info>(
 			new file_info{
 				.realpath = filename,
-				.accessibleAs = {decltype(std::declval<MiddleEndState::file_info>().accessibleAs)::value_type{process, relativePath, 0, false, val->second.workdir}},
+				.accessibleAs = {std::move(access)},
 				.wasEverCreated = true,
 				.wasEverDeleted = false,
 				.isCurrentlyOnTheDisk = true,
@@ -145,28 +201,39 @@ void MiddleEndState::createDirectory(pid_t process, absFilePath filename, relFil
 		fileInfo = ptr.get();
 		encounteredFilenames.emplace(filename, std::move(ptr));
 	}
-	fileInfo->isCurrentlyOnTheDisk = true;
-	fileInfo->wasEverCreated = true;
-
 }
 
 void MiddleEndState::removeDirectory(pid_t process, absFilePath filename)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	auto& val = pidToObj(process);
 
-	if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
-		it->second->accessibleAs.emplace(process, filename, 0, false);
-		assert(it->second->isCurrentlyOnTheDisk);
-		assert(it->second->type == file_info::dir);
-		it->second->wasEverDeleted = true;
-		it->second->isCurrentlyOnTheDisk = false;
+	if (auto info = tryFindFile(filename)) {
+		info->registerAccess(access_info{
+				.pid = process,
+				.relPath = filename,
+				.flags = std::nullopt,
+				.executable = false,
+				.workdir = val.fsInfo->workdir
+			});
+		if (!info->isCurrentlyOnTheDisk) {
+			fprintf(stderr, "Error in caching the filesystem image, directory assumed to not exist.\n");
+		}
+		if (!info->type.has_value()) {
+			info->type = file_info::dir;
+		} else if (info->type != file_info::dir) {
+			fprintf(stderr, "rmdir succeeded on path %s but we expected the type not to be dir but %d", 
+				info->realpath.c_str(),
+				static_cast<int>(info->type.value()));
+			info->type = file_info::dir;
+		}
+		info->wasEverDeleted = true;
+		info->isCurrentlyOnTheDisk = false;
 	}
 	else {
 		auto ptr = std::unique_ptr<MiddleEndState::file_info>(
 			new file_info{
 				.realpath = filename,
-				.accessibleAs = {decltype(std::declval<MiddleEndState::file_info>().accessibleAs)::value_type{process, filename, 0, false, val->second.workdir}},
+				.accessibleAs = {decltype(std::declval<MiddleEndState::file_info>().accessibleAs)::value_type{process, filename, 0, false, val.fsInfo->workdir}},
 				.wasEverCreated = false,
 				.wasEverDeleted = true,
 				.isCurrentlyOnTheDisk = false,
@@ -175,25 +242,41 @@ void MiddleEndState::removeDirectory(pid_t process, absFilePath filename)
 			});
 		encounteredFilenames.emplace(filename, std::move(ptr));
 	}
+	//TODO:
+	// markDirectoryWritable(filename.parent_path());
+	// markDirectoriesSerchable(filename.parent_path());
+	
 }
 
 void MiddleEndState::removeNonDirectory(pid_t process, absFilePath filename)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	auto& val = pidToObj(process);
 
-	if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
-		it->second->accessibleAs.emplace(process, filename, 0, false);
-		assert(it->second->isCurrentlyOnTheDisk);
-		assert(it->second->type != file_info::dir);
-		it->second->isCurrentlyOnTheDisk = false;
-		it->second->wasEverDeleted = true;
+	auto access = access_info{
+				.pid = process,
+				.relPath = filename,
+				.flags = std::nullopt,
+				.executable = false,
+				.workdir = val.fsInfo->workdir
+	};
+
+	if (auto info = tryFindFile(filename)) {
+		info->registerAccess(std::move(access));
+		if (!info->isCurrentlyOnTheDisk) {
+			fprintf(stderr, "Error in caching the filesystem image, file assumed to not exist.\n");
+		}
+		if (info->type == file_info::dir) {
+			fprintf(stderr, "Error in caching the filesystem image, file assumed to be a directory.\n");
+			info->type = std::nullopt;
+		}
+		info->isCurrentlyOnTheDisk = false;
+		info->wasEverDeleted = true;
 	}
 	else {
 		auto ptr = std::unique_ptr<MiddleEndState::file_info>(
 			new file_info{
 				.realpath = filename,
-				.accessibleAs = {decltype(std::declval<MiddleEndState::file_info>().accessibleAs)::value_type{process, filename, 0, false, val->second.workdir}},
+				.accessibleAs = {std::move(access)},
 				.wasEverCreated = false,
 				.wasEverDeleted = true,
 				.isCurrentlyOnTheDisk = false,
@@ -204,192 +287,284 @@ void MiddleEndState::removeNonDirectory(pid_t process, absFilePath filename)
 	}
 }
 
+void MiddleEndState::changeDirectory(pid_t process, std::filesystem::path newWorkingDirectory)
+{
+	auto& val = pidToObj(process);
+
+	if (!newWorkingDirectory.is_absolute()) {
+		newWorkingDirectory = resolveToAbsoltute(process, newWorkingDirectory);
+	}
+	val.fsInfo->workdir = newWorkingDirectory;
+}
+
+void MiddleEndState::changeDirectory(pid_t process, fileDescriptor fileDescriptor)
+{
+	return changeDirectory(process, getFilePath<true>(process, fileDescriptor).value_or("/pathError"));
+}
+
+std::filesystem::path MiddleEndState::resolveToAbsoltute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor)
+{
+	if (fileDescriptor == AT_FDCWD) {
+		return resolveToAbsoltute(process, relativePath);
+	}
+	else {
+		try {
+			return std::filesystem::canonical(getFilePath<true>(process, fileDescriptor).value_or("") / relativePath);//TODO: weakly cannonical may prove to be enough sometimes.
+		}
+		catch (...) {
+			fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues", relativePath.c_str());
+			return getFilePath<true>(process, fileDescriptor).value_or("") / relativePath;
+		}
+	}
+}
+std::filesystem::path MiddleEndState::resolveToAbsoltuteDeleted(pid_t process, const std::filesystem::path& relativePath)
+{
+	if (relativePath.is_absolute()) {
+		return relativePath;
+	}
+	auto& val = pidToObj(process);
+
+	//https://en.cppreference.com/w/cpp/filesystem/absolute
+	/*
+	For POSIX-based operating systems, std::filesystem::absolute(p) is equivalent to std::filesystem::current_path() / p except for when p is the empty path.
+
+	For Windows, std::filesystem::absolute may be implemented as a call to GetFullPathNameW.
+	*/
+	return std::filesystem::weakly_canonical(val.fsInfo->workdir / relativePath);
+
+}
+
+std::filesystem::path MiddleEndState::resolveToAbsoltute(pid_t process,const std::filesystem::path& relativePath)
+{
+	if (relativePath.is_absolute()) {
+		return relativePath;
+	}
+	auto& val = pidToObj(process);
+	//https://en.cppreference.com/w/cpp/filesystem/absolute
+	/*
+	For POSIX-based operating systems, std::filesystem::absolute(p) is equivalent to std::filesystem::current_path() / p except for when p is the empty path.
+
+	For Windows, std::filesystem::absolute may be implemented as a call to GetFullPathNameW. 
+	*/
+	try {
+		return std::filesystem::canonical(val.fsInfo->workdir / relativePath);//TODO: weakly cannonical may prove to be enough sometimes.
+	}
+	catch (...) {
+		fprintf(stderr,"Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues", relativePath.c_str());
+		return val.fsInfo->workdir / relativePath;
+	}
+}
+
 void MiddleEndState::openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, bool existed)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
-	MiddleEndState::file_info* fileInfo;
-	if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
-		it->second->accessibleAs.emplace(process, relativePath, flags, false);
-		fileInfo = it->second.get();
-		assert(fileInfo->isCurrentlyOnTheDisk == existed);//TODO: don't fstat if we know
+	auto& val = pidToObj(process);
+	auto access = access_info{
+			.pid = process,
+			.relPath = relativePath,
+			.flags = flags,
+			.executable = false,
+			.workdir = val.fsInfo->workdir
+	};
+
+	MiddleEndState::file_info* fileInfo= tryFindFile(filename);
+	if (fileInfo) {
+		fileInfo->registerAccess(std::move(access));
+		if (fileInfo->isCurrentlyOnTheDisk != existed) {
+			fprintf(stderr, "When creating a file, a file was assumed to exist when it did not or vice versa.");
+			//TODO: don't fstat if we "know"
+		}
 		fileInfo->wasEverCreated = !existed;
 	}
 	else {
 		auto ptr = std::unique_ptr<MiddleEndState::file_info>(
 			new file_info{
 				.realpath = filename,
-				.accessibleAs = {decltype(std::declval<MiddleEndState::file_info>().accessibleAs)::value_type{process, relativePath, flags, false, val->second.workdir}},
+				.accessibleAs = {std::move(access)},
 				.wasEverCreated = !existed,
 				.wasEverDeleted = false,
 				.isCurrentlyOnTheDisk = true,
 				.wasInitiallyOnTheDisk = existed,
 				.type = file_info::file,
 			});
+		if (existed) {
+			ptr->type = std::nullopt;//todo: we need fstat info.
+		}
 		fileInfo = ptr.get();
 		encounteredFilenames.emplace(filename, std::move(ptr));
 	}
-	val->second.fdTable->table.emplace(fd, fileInfo);
+	val.registerFD(fd, fileInfo);
 }
 
-void MiddleEndState::execFile(pid_t process, absFilePath filename, relFilePath relativePath)//TODO: Binfmt_misc
+bool MiddleEndState::execFile(pid_t process, absFilePath filename, relFilePath relativePath,size_t depth, bool overrideFailed)//TODO: Binfmt_misc
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	//TODO: what if we first open a file before executing it? - shebangs fail
+	//TODO: what if we execute a fiule, change it and then proceed to execute it again? - shebangs fail
+	bool doRegisterAccess = overrideFailed;
+	bool failed = false;
 
-	MiddleEndState::file_info* fileInfo;
-	if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
-		it->second->accessibleAs.emplace(process, relativePath, std::nullopt, true);
-		fileInfo = it->second.get();
+	auto& val = pidToObj(process);
+	auto access = access_info{
+			.pid = process,
+			.relPath = relativePath,
+			.flags = std::nullopt,
+			.executable = true,
+			.workdir = val.fsInfo->workdir
+	};
+
+	if (auto info = tryFindFile(filename)) {
+		info->registerAccess(std::move(access));
 	}
 	else {
 		auto ptr = std::unique_ptr<MiddleEndState::file_info>(
 			new file_info{
 				.realpath = filename,
-				.accessibleAs = {decltype(std::declval<MiddleEndState::file_info>().accessibleAs)::value_type{process, relativePath, std::nullopt, true, val->second.workdir}},
+				.accessibleAs = {std::move(access)},
 				.wasEverCreated = false,
 				.wasEverDeleted = false,
 				.isCurrentlyOnTheDisk = true,
 				.wasInitiallyOnTheDisk = true,
-				.type = file_info::file,
+				.type = file_info::file,//TODO: The kernel allow for executing say a block device... It is extremely unklikely, though.
 			});
 			
-		fileInfo = ptr.get();
-		encounteredFilenames.emplace(filename, std::move(ptr));
-		int fd = open(filename.c_str(), O_RDONLY);//todo wrap me in a unique_ptr
-		assert(fd >= 0);
-		if (auto str = tryReadShellbang(fd); str.has_value()) {//TODO: this is essentially cached for further calls. Consider detecting if a given file was written since it had been executed and if it were, this needs to be redone.
-			absFilePath path{ str.value() };
-			assert(path.is_absolute());//TODO: add support for a relative path and the resulting resolution.
-			execFile(process,path,path);//TODO: a loop? How does the kernel handle that?
+		ToBeClosedFd fd = open(filename.c_str(), O_RDONLY);
+
+		
+		//todo: add checks for 
+		if (!fd) {
+			return true;
 		}
-		close(fd);
+		struct stat statData;
+		auto statOK = fstat(fd.get(), &statData);
+		if (!statOK || (!(S_IWUSR | S_IWGRP | S_IXOTH)& statData.st_mode)) { //todo: keep track of context for permissions.
+			return true;
+		}
+
+		if (auto str = tryReadShellbang((fileDescriptor)fd); str.has_value()) {//TODO: this is essentially cached for further calls. Consider detecting if a given file was written since it had been executed and if it were, this needs to be redone.
+			if (depth > 4) {
+				return true; //TODO: don't mark the stuff up untill now. 
+			}
+
+			absFilePath path{ str.value() };
+			if (!path.is_absolute()) {
+				//https://github.com/torvalds/linux/blob/2c71fdf02a95b3dd425b42f28fd47fb2b1d22702/fs/exec.c#L1903
+				//https://github.com/torvalds/linux/blob/2c71fdf02a95b3dd425b42f28fd47fb2b1d22702/fs/exec.c#L1803
+				//the kernel treats this as just about any other binary rewrite. 
+				//these are asuumed to be executed from the current wokr dir but I ahve not managed to find much info on that aside from random stack overflow threads.
+				//todo: testme
+				path = resolveToAbsoltute(process, path);//todo: if unresolvable return true immadietely.
+			}
+			//for recursion the kernel has a herd limit- has a hard limit see for example https://github.com/SerenityOS/serenity/blob/ee3dd7977d4c88c836bfb813adcf3e006da749a8/Kernel/Syscalls/execve.cpp#L881
+			//or the bin rewrite limit in linux.
+			failed = execFile(process, path, path, depth + 1);
+			doRegisterAccess = doRegisterAccess || !failed;
+		}
+		if(doRegisterAccess)
+			encounteredFilenames.emplace(filename, std::move(ptr));
 	}
-	//does not have an associated file descriptor.
+	return failed;
+
+	//todo search perms for directories
 }
 
-void MiddleEndState::closeFile(pid_t process, fileDescriptor fd)
+void MiddleEndState::closeFileDescriptor(pid_t process, fileDescriptor fd)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
-	val->second.fdTable->table.erase(fd);
+	auto& val = pidToObj(process);
+	val.fdTable->table.erase(fd);
 }
+void MiddleEndState::listDirectory(pid_t process, fileDescriptor fd)
+{
+	auto& val = pidToObj(process);
+	//todo:
+}
+
 /*
 * basically a 
 * newfd = oldFd
 */
 void MiddleEndState::registerFdAlias(pid_t process, fileDescriptor newFd, fileDescriptor oldFD)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
-	if (auto oldFile = val->second.fdTable->table.find(oldFD); oldFile != val->second.fdTable->table.end()) {
-		auto& replaceMe = val->second.fdTable->table[newFd];
-		replaceMe = oldFile->second;
+	auto& val = pidToObj(process);
+	if (auto oldFile = val.fdTable->table.find(oldFD); oldFile != val.fdTable->table.end()) {
+		auto& [oldFd, fileInfo] = *oldFile;
+		val.registerFD(newFd, fileInfo);
 	}
 	else {
-		assert(false);
+		auto fileInfo = createErrorFD("creating a duplicate of an unresolved file descriptor\n");
+		val.registerFD(oldFD, fileInfo);
+		val.registerFD(newFd, fileInfo);
 	}
 }
 
 void MiddleEndState::toBeDeleted(pid_t process)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
-	val->second.exiting = true;
-
+	auto& val = pidToObj(process);
+	val.exiting = true;
 }
 
 void MiddleEndState::registerPipe(pid_t process,fileDescriptor pipes[2])
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	auto& val = pidToObj(process);
 	auto pipe = ++this->pipeCount;
-	auto out = new file_info{ 
-		.realpath= "pipe_read_" + std::to_string(pipe), 
-		.wasEverCreated = false,
-		.wasEverDeleted = false,
-		.isCurrentlyOnTheDisk = false,
-		.wasInitiallyOnTheDisk = false,
-		.type= file_info::pipe 
-	};
-	nonFileDescriptors.emplace_back(out);
-	val->second.fdTable->table.emplace(pipes[0], out);
-	auto in = new file_info{ 
-		.realpath = "pipe_write_" + std::to_string(pipe) ,
-		.wasEverCreated = false,
-		.wasEverDeleted = false,
-		.isCurrentlyOnTheDisk = false,
-		.wasInitiallyOnTheDisk = false,
-		.type = file_info::pipe
-	};
-	nonFileDescriptors.emplace_back(in);
-	val->second.fdTable->table.emplace(pipes[1], in);
+	auto out = createUnbackedFD("pipe_read_" + std::to_string(pipe), file_info::pipe);
+	val.registerFD(pipes[0], out);
+
+	auto in = createUnbackedFD("pipe_write_" + std::to_string(pipe), file_info::pipe);
+	val.registerFD(pipes[1], out);
 }
 
 void MiddleEndState::registerSocket(pid_t process, fileDescriptor socket)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	auto& val = pidToObj(process);
 	auto socketNr = ++this->socketCount;
-	auto file = new file_info{
-		.realpath = "socket_" + std::to_string(socketNr),
-		.wasEverCreated = false,
-		.wasEverDeleted = false,
-		.isCurrentlyOnTheDisk = false,
-		.wasInitiallyOnTheDisk = false,
-		.type = file_info::socket
-	};
-	nonFileDescriptors.emplace_back(file);
-
-	val->second.fdTable->table.emplace(socket, file);
+	auto file = createUnbackedFD("socket_" + std::to_string(socketNr),file_info::socket);
+	val.registerFD(socket, file);
 }
 
 void MiddleEndState::registerSocket(pid_t process, fileDescriptor sockets[2])
 {
 	auto socketNr = ++this->socketCount;
 
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	auto& val = pidToObj(process);
 	{
-		auto file = new file_info{
-			.realpath = "socket_pair_1_" + std::to_string(socketNr),
-			.wasEverCreated = false,
-			.wasEverDeleted = false,
-			.isCurrentlyOnTheDisk = false,
-			.wasInitiallyOnTheDisk = false,
-			.type = file_info::socket
-		};
-		nonFileDescriptors.emplace_back(file);
-		val->second.fdTable->table.emplace(sockets[0], file);
+		auto file = createUnbackedFD("socket_pair_1_" + std::to_string(socketNr), file_info::socket);
+		val.registerFD(sockets[0], file);
+
 	}
 	{
-		auto file = new file_info{
-			.realpath = "socket_pair_2_" + std::to_string(socketNr),
-			.wasEverCreated = false,
-			.wasEverDeleted = false,
-			.isCurrentlyOnTheDisk = false,
-			.wasInitiallyOnTheDisk = false,
-			.type = file_info::socket
-		};
-		nonFileDescriptors.emplace_back(file);
-		val->second.fdTable->table.emplace(sockets[1], file);
+		auto file = createUnbackedFD("socket_pair_2_" + std::to_string(socketNr), file_info::socket);
+		val.registerFD(sockets[1], file);
 	}
 }
 
 void MiddleEndState::registerProcessFD(pid_t process, pid_t otherProcess,  fileDescriptor procFD)
 {
-	auto val = processToInfo.find(process);
-	assert(val != processToInfo.end());
+	auto& val = pidToObj(process);
 	auto processNR = ++this->processFD;
-	auto file = new file_info{
-		.realpath = "process_" + std::to_string(otherProcess) +"_"+ std::to_string(processNR),
-		.wasEverCreated = false,
-		.wasEverDeleted = false,
-		.isCurrentlyOnTheDisk = false,
-		.wasInitiallyOnTheDisk = false,
-		.type = file_info::process
-	};
-	nonFileDescriptors.emplace_back(file);
+	auto file = createUnbackedFD("process_" + std::to_string(otherProcess) + "_" + std::to_string(processNR), file_info::process);
+	val.registerFD(procFD, file);
+}
 
-	val->second.fdTable->table.emplace(procFD, file);
+void MiddleEndState::registerTimer(pid_t process, fileDescriptor timerFd)
+{
+	auto& val = pidToObj(process);
+	auto count = ++this->timerCount;
+	auto file = createUnbackedFD("timer_" + std::to_string(count), file_info::clock);
+	val.registerFD(timerFd, file);
+}
+
+void MiddleEndState::registerEpoll(pid_t process, fileDescriptor epollFD)
+{
+	auto& val = pidToObj(process);
+	auto count = ++this->epollCount;
+	auto file = createUnbackedFD("epoll_" + std::to_string(count), file_info::epoll);
+	val.registerFD(epollFD, file);
+}
+
+
+void MiddleEndState::registerEventFD(pid_t process, fileDescriptor eventFD)
+{
+	auto& val = pidToObj(process);
+	auto count = ++this->eventCount;
+	auto file = createUnbackedFD("event_" + std::to_string(count), file_info::eventFD);
+	val.registerFD(eventFD, file);
 }

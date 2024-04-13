@@ -27,6 +27,7 @@ namespace SyscallHandlers {
 	struct OpenAT2 : OpenBase {
 		void entry(processState& process, const MiddleEndState& state, long syscallNr) override;
 	};
+
 }
 
 HandlerClassDef(SYS_open) : public SyscallHandlers::Open{};

@@ -41,7 +41,7 @@ void SyscallHandlers::Clone::exit(processState& process, MiddleEndState& state, 
 {
 	assert(process.blockedInClone);//can be safely removed later on.
 	if (syscallRetval >= 0) {
-		state.trackNewProcess(syscallRetval, process.pid, !(process.blockedInClone->flags & CLONE_FILES), process.blockedInClone->cloneChildPid);
+		state.trackNewProcess(syscallRetval, process.pid, !(process.blockedInClone->flags & CLONE_FILES), process.blockedInClone->cloneChildPid, process.blockedInClone->flags & CLONE_FS);
 		if (fileDescriptorPtr && fileDescriptorPtr.value() != 0) {
 			auto ptr = userPtrToOwnPtr<pid_t>(process.pid,fileDescriptorPtr.value());
 			state.registerProcessFD(process.pid, syscallRetval, *ptr);
