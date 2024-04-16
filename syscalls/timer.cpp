@@ -1,6 +1,6 @@
 #include "timer.hpp"
 
-void SyscallHandlers::TimerfdCreate::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::TimerfdCreate::entry(processState& , const MiddleEndState& , long )
 {//TODO: close on exec
 }
 

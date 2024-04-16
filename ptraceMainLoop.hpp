@@ -23,7 +23,7 @@ struct processState {
 	ToBeClosedFd stealFD(traceeFileDescriptor FD) const{
 		auto ret = syscall(SYS_pidfd_getfd, pidFD.get(), FD, 0);
 		assert(ret >= 0);
-		return ret;
+		return ToBeClosedFd{ static_cast<fileDescriptor>(ret) };
 	}
 
 	struct ChildWaiting {
@@ -50,4 +50,4 @@ struct processState {
 	}
 };
 
-void ptraceChildren();
+void ptraceChildren(MiddleEndState& state);

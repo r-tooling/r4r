@@ -1,7 +1,7 @@
 #include "fnctl.hpp"
 
 
-void SyscallHandlers::Fcntl::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Fcntl::entry(processState & process, const MiddleEndState& , long )
 {
 	oldFd = getSyscallParam<1>(process.pid);
 	auto command = getSyscallParam<2>(process.pid);

@@ -1,6 +1,6 @@
 #include "epoll.hpp"
 
-void SyscallHandlers::EpollCreate::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::EpollCreate::entry(processState& , const MiddleEndState& , long )
 {
 	//todo: in the case of epoll_create1 CLOSE ON EXEC
 }

@@ -1,6 +1,6 @@
 #include "read.hpp"
 
-void SyscallHandlers::FileOperationLogger::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::FileOperationLogger::entry(processState & process, const MiddleEndState& , long )
 {
 	fd = getSyscallParam<1>(process.pid);
 }

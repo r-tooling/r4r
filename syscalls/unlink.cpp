@@ -16,19 +16,19 @@ void SyscallHandlers::RmdirBase::exit(processState& process, MiddleEndState& sta
 	}
 }
 
-void SyscallHandlers::Unlink::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Unlink::entry(processState& process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	fileRelPath = userPtrToString(process.pid,getSyscallParam<1>(process.pid));
 }
 
-void SyscallHandlers::Rmdir::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Rmdir::entry(processState& process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
 }
 
-void SyscallHandlers::UnlinkAt::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::UnlinkAt::entry(processState& process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	fileRelPath = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
@@ -51,7 +51,7 @@ void SyscallHandlers::UnlinkAt::entryLog(const processState& process, const Midd
 		RmdirBase::entryLog(process, state, syscallNr);
 	else
 		UnlinkBase::entryLog(process, state, syscallNr);
-	strBuf << "as " << rmdirType ? "rmdir" : "unlink";
+	strBuf << "as " << (rmdirType ? "rmdir" : "unlink");
 }
 
 void SyscallHandlers::PathAtHolder::entryLog(const processState& process, const MiddleEndState& state, long syscallNr)

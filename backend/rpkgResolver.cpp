@@ -1,6 +1,7 @@
 #include "rpkgResolver.hpp"
 #include "../processSpawnHelper.hpp"
 #include "../stringHelpers.hpp"
+#include "../cFileOptHelpers.hpp"
 #include <fcntl.h>
 #include <cassert>
 
@@ -17,50 +18,40 @@ namespace {
 	file$Built$R
 	[1] ‘4.3.3’
 	*/
-	enum parsingState {
-		entry,
-		versionHeader,
-		version,
-		packageHeader,
-		package,
-		rVersion,
-		done,
-		error,
-	};
-
-	void indirectDelete(char** ptr) { if (*ptr) free(*ptr); }
 
 	std::optional<backend::RpkgPackage> resolvePackageFromDescription(const std::filesystem::path& filePath) {
-		auto localToBeDeletedStore = fromConstCharArrayToCharPtrArray("-e", " file <- readRDS(\"" + filePath.native() + "\");"
-			+ "if(is.null(file$Built)){ q(\"no\",-1); };"
-			+ "file$DESCRIPTION[\"Version\"];"
-			+ "file$DESCRIPTION[\"Package\"];"
-			+ "file$Built$R;"
-			+ "q(\"no\",0)"
-		);
+		ArgvWrapper argv{ "-e", 
+			" file <- readRDS(\"" + filePath.native() + "\");"
+			"if(is.null(file$Built)){ q(\"no\",-1); };"
+			"file$DESCRIPTION[\"Version\"];"
+			"file$DESCRIPTION[\"Package\"];"
+			"file$Built$R;"
+			"q(\"no\",0)"
+		};
 
-		char* mutableArgv[3] = { localToBeDeletedStore[0].get(),localToBeDeletedStore[1].get(), nullptr };
-		auto rpkg = spawnReadOnlyProcess(backend::Rpkg::executablePath, mutableArgv, 2, []() {setlocale(LC_ALL, "C.UTF-8"); });
-		
-		std::unique_ptr<FILE, decltype(&fclose)> in{ fdopen(rpkg.stdoutFD.get(), "r") , fclose };
-		rpkg.stderrFD.reset();
-
+		auto rpkg = spawnStdoutReadProcess(backend::Rpkg::executablePath, argv, []() noexcept {setlocale(LC_ALL, "C.UTF-8"); });
 
 		backend::RpkgPackage result;
 
-		parsingState state = versionHeader;
-		char* buffer = nullptr;
-		
-		size_t bufferSize = 0;
-		while (size_t nrRead = getdelim(&buffer, &bufferSize, '\n', in.get())) {
-			if (nrRead == -1) {
-				break;
-			}
-			std::u8string_view data{ (const char8_t*)buffer,nrRead };
+		enum {
+			entry,
+			versionHeader,
+			version,
+			packageHeader,
+			package,
+			rVersion,
+			done,
+			error,
+		} state = versionHeader;
+
+		for(auto buffer : LineIterator{ rpkg.out.get() }) {
+
+			std::u8string_view data{ (const char8_t*)buffer.data(),buffer.size() };
+
 
 			switch (state)
 			{
-			case parsingState::entry://unused if using Rscript
+			case entry://unused if using Rscript
 				if (data == u8"\n") {
 					state = versionHeader;
 				}
@@ -68,16 +59,16 @@ namespace {
 					state = error;
 				}
 				break;
-			case parsingState::versionHeader:
-				if (trim(std::move(data), u8" \n\t") == u8"Version") {
+			case versionHeader:
+				if (trim(data, u8" \n\t") == u8"Version") {
 					state = version;
 				}
 				else {
 					state = error;
 				}
 				break;
-			case parsingState::version:
-				result.packageVersion = trim(std::move(data), u8" \n\t\""); //".*"\n
+			case version:
+				result.packageVersion = trim(data, u8" \n\t\""); //".*"\n
 				if (data.empty()) {
 					state = error;
 				}
@@ -85,16 +76,16 @@ namespace {
 					state = packageHeader;
 				}
 				break;
-			case parsingState::packageHeader:
-				if (trim(std::move(data), u8" \n\t") == u8"Package") {
+			case packageHeader:
+				if (trim(data, u8" \n\t") == u8"Package") {
 					state = package;
 				}
 				else {
 					state = error;
 				}
 				break;
-			case parsingState::package:
-				result.packageName = trim(std::move(data), u8" \n\t\""); //".*"\n
+			case package:
+				result.packageName = trim(data, u8" \n\t\""); //".*"\n
 				if (data.empty()) {
 					state = error;
 				}
@@ -102,9 +93,9 @@ namespace {
 					state = rVersion;
 				}
 				break;
-			case parsingState::rVersion:
+			case rVersion:
 				data.remove_prefix(3);
-				data = trim(std::move(data), u8"\xE2\x80\x98\xe2\x80\x99 \n\t\"\'\'"); //the amgic characters are ‘ and ’ cannot be inline unless we force the compiler to read them as utf-8
+				data = trim(data, u8"\xE2\x80\x98\xe2\x80\x99 \n\t\"\'\'"); //the magic characters are ‘ and ’ cannot be inline unless we force the compiler to read them as utf-8
 				result.rVersion = data;
 				if (data.empty()) {
 					state = error;
@@ -113,24 +104,22 @@ namespace {
 					state = done;
 				}
 				break;
-			case parsingState::done:
-				state = data == u8"\n" ? parsingState::done : parsingState::error; //allow trailing newline;
+			case done:
+				state = data == u8"\n" ? done : error; //allow trailing newline;
+				break;
 			default:
-				state = parsingState::error;
+				state = error;
 				break;
 			}
 		}
-		if (buffer)
-			free(buffer);
 
 		auto waitResult = rpkg.close();
 
-
-		if (!waitResult.has_value() || waitResult != 0) {
-			return {};
+		if (waitResult != 0) {
+			return std::nullopt;
 		}
 
-		if (state == parsingState::done) {
+		if (state == done) {
 			return result;
 		}
 		else {
@@ -145,7 +134,7 @@ std::optional<backend::RpkgPackage> backend::Rpkg::resolvePathToPackage(const st
 	std::optional<RpkgPackage> found = std::nullopt;
 
 	auto parent = fullpath.parent_path();
-	for (auto lastPath = fullpath; parent != lastPath; lastPath = parent, parent = parent.parent_path()) {
+	for (std::filesystem::path lastPath = fullpath; parent != lastPath; lastPath = parent, parent = parent.parent_path()) {
 		if (resolvedPaths.find(parent) != resolvedPaths.end()) {
 			found = resolvedPaths.at(parent);
 			break;
@@ -157,7 +146,7 @@ std::optional<backend::RpkgPackage> backend::Rpkg::resolvePathToPackage(const st
 		//if(!nzchar(pfile)) error //cannot be empty
 		// then read the description. Which internally checks that the Build value is set.
 		if (std::filesystem::exists(potentialPackageId)) {
-			ToBeClosedFd fd = open(potentialPackageId.c_str(),O_RDONLY| O_NONBLOCK); //C++ does not allow opening files ore reading in a good unblocking mode... THis also does not guarantee non blocking bt if it were say a socket bound to the filesystem...
+			ToBeClosedFd fd{ open(potentialPackageId.c_str(),O_RDONLY | O_NONBLOCK) }; //C++ does not allow opening files ore reading in a good unblocking mode... THis also does not guarantee non blocking bt if it were say a socket bound to the filesystem...
 			char buffer[1];
 			if (fd && read(fd.get(), &buffer, 1) == 1) {
 				//thie file exists! yay. Now we invoke R to read the package information itself.
@@ -167,6 +156,7 @@ std::optional<backend::RpkgPackage> backend::Rpkg::resolvePathToPackage(const st
 			//it is possible tor a package to be loaded without being installed. Sucha a package, however, is not suitable for automated downloading and running.
 			//as such, 
 			if (found != std::nullopt) {
+				packageNameToData.insert({ found.value().packageName, found.value() });
 				break;
 			}
 	
@@ -182,4 +172,15 @@ std::optional<backend::RpkgPackage> backend::Rpkg::resolvePathToPackage(const st
 		}
 	}
 	return found;
+}
+
+bool backend::Rpkg::isKnownRpkg(const std::filesystem::path& fullpath)
+{
+	auto parent = fullpath.parent_path();
+	for (std::filesystem::path lastPath = fullpath; parent != lastPath; lastPath = parent, parent = parent.parent_path()) {
+		if (auto found = resolvedPaths.find(parent); found != resolvedPaths.end()) {
+			return found->second.has_value();
+		}
+	}
+	return false;
 }

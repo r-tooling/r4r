@@ -16,9 +16,9 @@ NullOptHandlerClass(SYS_get_robust_list)
 /*
 https://github.com/torvalds/linux/blob/70293240c5ce675a67bfc48f419b093023b862b3/kernel/rseq.c#L362C1-L366C24
 
-/*
- * sys_rseq - setup restartable sequences for caller thread.
- /
+
+ sys_rseq - setup restartable sequences for caller thread.
+
 	SYSCALL_DEFINE4(rseq, struct rseq __user*, rseq, u32, rseq_len,
 		int, flags, u32, sig)
 */

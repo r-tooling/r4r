@@ -1,6 +1,6 @@
 #include "chroot.hpp"
 
-void SyscallHandlers::Chdir::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Chdir::entry(processState& process, const MiddleEndState& , long )
 {
 	newPath = process.ptrToStr(process.getSyscallParam<1>());
 }
@@ -32,7 +32,7 @@ void SyscallHandlers::Chdir::exitLog(const processState& process, const MiddleEn
 	}
 }
 
-void SyscallHandlers::GetCWD::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::GetCWD::entry(processState& process, const MiddleEndState& , long )
 {
 	ptr = process.getSyscallParam<1>();
 }

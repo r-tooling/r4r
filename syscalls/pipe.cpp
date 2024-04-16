@@ -1,6 +1,6 @@
 #include "pipe.hpp"
 
-void SyscallHandlers::Pipe::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Pipe::entry(processState & process, const MiddleEndState&, long)
 {
 	pipesPtr = getSyscallParam<1>(process.pid);
 	//todo: do we ever care about O_NONBLOCK and O_CLOEXEC

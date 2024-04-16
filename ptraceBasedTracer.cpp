@@ -4,6 +4,7 @@
 #include "ptraceMainLoop.hpp"
 #include "processSpawnHelper.hpp"
 #include "toBeClosedFd.hpp"
+#include "backend/backEnd.hpp"
 
 #include <cassert>
 
@@ -30,9 +31,9 @@ using std::size_t;
 
 
 
-void fileOpenFail(int err) {
+void fileOpenFail(int err) noexcept {
 	switch (err) {
-	case EACCES: printf("| The requested access to the file is not allowed, or search permission is denied for one of the directories in the"
+	case EACCES: fprintf(stderr,"| The requested access to the file is not allowed, or search permission is denied for one of the directories in the"
 		"path prefix of pathname, or the file did not exist yet and "
 		"write access to the parent directory is not allowed. \n"
 		"| Where O_CREAT is specified, the protected_fifos or "
@@ -41,15 +42,15 @@ void fileOpenFail(int err) {
 		"file is neither the current user nor the owner of the "
 		"containing directory, and the containing directory is both "
 		"world - or group - writable and sticky.\n"); break;
-	default: printf("unknown error %d", err); break;
+	default: fprintf(stderr, "unknown error %d", err); break;
 	}
 }
 
 
-int main(int argc, char * argv[])
+int main(int argc, char* argv[])
 {
 	/*
-	if (argc == 1) {//./ptraceBasedTracer 
+	if (argc == 1) {//./ptraceBasedTracer
 		const char* temp[] = { "ptraceBassedTracer", "/usr/bin/R", "-e", "system(\"R - f inputFile.txt \")",nullptr };
 		argc = sizeof(temp) / (sizeof(*temp)) - 1;
 		argv = (char**)malloc((argc + 1) * sizeof(char**));//hacks, remove me when you figure out how to do args in visual studio
@@ -59,7 +60,7 @@ int main(int argc, char * argv[])
 		}
 		argv[argc] = nullptr;
 	}*/
-	
+
 
 	assert(argc >= 2);//TODO: check args better.
 	{
@@ -71,37 +72,40 @@ int main(int argc, char * argv[])
 		assert(err >= 0 && err < 3);
 		assert(out >= 0 && out < 3);
 	}
-	
-	//create new file descriptors for the child.
-	
 
-	ToBeClosedFd outPipe = open("stdout.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR);
+	//create new file descriptors for the child.
+
+
+	ToBeClosedFd outPipe{ open("stdout.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR) };
 	auto err = errno;
 	if (outPipe.get() == -1) {
 		fileOpenFail(err);
 		return -1;
 	}
-	ToBeClosedFd errPipe = open("stderr.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR);
+	ToBeClosedFd errPipe{ open("stderr.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR) };
 	err = errno;
 	if (errPipe.get() == -1) {
 		fileOpenFail(errno);
 		return -1;
 	}
 	auto inPipe = writeClosedPipe();
-	
-	
+	auto Tofree = get_current_dir_name();
+	MiddleEndState state{Tofree,environ};
+	free(Tofree);
 
 
-	auto callback = []() {
+
+	auto callback = []()noexcept {
 		while (ptrace(PTRACE_TRACEME, 0, 0, 0) != -1);//wait utill parent is ready.  On error, all requests return -1. This should error out when parent is already attatched.
 		raise(SIGTRAP);
 		};
 
 	pid_t childPid = spawnProcessWithSimpleArgs(inPipe.get(), outPipe.get(), errPipe.get(), argv[1], argv + 2, argc - 2, callback);//arg 1 == my filename, arg 2 == his filename
 		//will recieve sigchild when it terminates and thus we can safely free the stack when taht happens. Though that should really be only done at the termination of main as otherwise we could get confused by getting sigchaild called from any other source. 
+	(void)childPid;
+	ptraceChildren(state);
+	csvBased(state, "accessedFiles.csv");
 
-	ptraceChildren();
-	
 	wait(nullptr);
 	return 0;
 }

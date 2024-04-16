@@ -1,6 +1,6 @@
 #include "dup.hpp"
 
-void SyscallHandlers::Dup23::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Dup23::entry(processState & process, const MiddleEndState& , long )
 {
 	oldFd = getSyscallParam<1>(process.pid);
 	newFd = getSyscallParam<2>(process.pid);
@@ -22,7 +22,7 @@ void SyscallHandlers::Dup23::entryLog(const processState& process, const MiddleE
 	strBuf << ")";
 }
 
-void SyscallHandlers::Dup::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Dup::entry(processState & process, const MiddleEndState& , long )
 {
 	oldFd = getSyscallParam<1>(process.pid);
 }

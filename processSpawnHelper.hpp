@@ -8,24 +8,97 @@
 #include <linux/close_range.h>
 
 #include "./toBeClosedFd.hpp"
+#include "./cFileOptHelpers.hpp"
 #include <sys/wait.h>
 
+namespace detail {
+	inline void NULLOPTFUNCTION() noexcept {};
 
-inline void NULLOPTFUNCTION() {};
+	inline std::unique_ptr<char*> unpackArray(size_t nrItems, std::unique_ptr<char[]>* param) {
+		std::unique_ptr<char*> result{ new char* [nrItems + 1] };
+		for (size_t iter = 0; iter < nrItems; iter++) {
+			result.get()[iter] = param[iter].get();
+		}
+		result.get()[nrItems] = nullptr;
+		return result;
+	}
 
+	inline std::unique_ptr<char[]> fromConstCharToCharPtr(const std::string_view charData) {
+		auto retval = std::make_unique_for_overwrite<char[]>(charData.size() + 1);
+		memcpy(retval.get(), charData.data(), charData.size());
+		retval.get()[charData.size()] = 0;
+		return retval;
+	}
+	template<class T>
+	concept ContainerContainingSV = requires(T x) {
+		x.begin();
+		x.end();
+		x.size();
+		{ *(x.begin()) } -> std::convertible_to<std::string_view>;
+	};
+
+	template<class Type>
+	concept stringView_OrContainerOfStringView = std::is_convertible_v<Type, std::string_view> || ContainerContainingSV<Type>;
+
+	template<std::convertible_to<std::string_view> Item>
+	constexpr size_t ItemsCount(Item&&) { return 1; };
+	template<ContainerContainingSV Item>
+	constexpr size_t ItemsCount(Item&& item) { return item.size(); };
+	template<stringView_OrContainerOfStringView ...Types>
+	constexpr size_t CountAll(Types&&...params) { return (0 + ... + ItemsCount(params)); };
+
+	template<std::convertible_to<std::string_view> Item>
+	constexpr void assignPtr(std::unique_ptr<char[]>*& ptr, Item&& item) {
+		*ptr = std::move(fromConstCharToCharPtr(item));
+		++ptr;
+	};
+	template<ContainerContainingSV Item>
+	constexpr void assignPtr(std::unique_ptr<char[]>*& ptr, Item&& arr) {
+		for (decltype(auto) convertibleItem : arr) {
+			*ptr = std::move(fromConstCharToCharPtr(convertibleItem));
+			++ptr;
+		}
+	};
+
+	template<stringView_OrContainerOfStringView ...Types>
+	inline std::unique_ptr<std::unique_ptr<char[]>[]> fromConstCharArrayToCharPtrArray(Types&& ...params) {
+		size_t argc = CountAll(params...);
+		auto buffer = std::make_unique_for_overwrite<std::unique_ptr<char[]>[]>(argc);
+		auto ptr = buffer.get();
+		(assignPtr(ptr, params), ...);
+		return buffer;
+	}
+}
+struct ArgvWrapper {
+
+	const size_t argc;
+	const std::unique_ptr<std::unique_ptr<char[]>[]> uniquePtrArr;
+	const std::unique_ptr<char*> uniqueToSimple;
+	auto get() noexcept{
+		return uniqueToSimple.get();
+	}
+
+	template<detail::stringView_OrContainerOfStringView ...Types>
+	ArgvWrapper(Types&& ...params)
+		:argc{ detail::CountAll(params...) },
+		uniquePtrArr{ detail::fromConstCharArrayToCharPtrArray(params...)},
+		uniqueToSimple{ detail::unpackArray(argc,uniquePtrArr.get()) }
+	{}
+
+};
 
 inline ToBeClosedFd readClosedPipe() {
 	int pipefd[2];
 	assert(pipe(pipefd) != -1);
 	close(pipefd[0]);//I will not be reading that, who knows what will happen to it though.
-	return pipefd[1];
+	return ToBeClosedFd{ pipefd[1] };
 }
 
 inline ToBeClosedFd writeClosedPipe() {
 	int pipefd[2];
 	assert(pipe(pipefd) != -1);
 	close(pipefd[1]);//write EOF.
-	return pipefd[0];
+	return ToBeClosedFd{ pipefd[0] };
 }
 
 inline void execFail(int error) {
@@ -63,8 +136,8 @@ typedef struct {
 } clone_args;
 
 template<class Callback>
-inline pid_t spawnProcess(int inFD, int outFD, int errFD, const char* programPath, char* const argv[], Callback callback) {
-
+inline pid_t spawnProcess(int inFD, int outFD, int errFD, const char* programPath, char* const argv[], Callback callback) noexcept {
+	static_assert(noexcept(callback()));
 	pid_t pid = fork();
 	if (pid != 0) { //master
 		/*auto temp = argv;
@@ -97,7 +170,7 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD, const char* programPat
 		close_range(3, ~0U, CLOSE_RANGE_CLOEXEC);
 
 		callback();
-		int ret = execvp(programPath, argv);//return error if any, otherwise the child thread will return the sub-program's error. WE SEARCH PATH HERE!
+		execvp(programPath, argv);//return error if any, otherwise the child thread will return the sub-program's error. WE SEARCH PATH HERE!
 		int error = errno;
 		dup2(tempErr, err);
 		fprintf(stderr, "Execv failed with errorcode %d :\n", error);
@@ -134,7 +207,7 @@ inline pid_t spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD, const st
 	auto newArgv = std::make_unique<char* []>(args.argc + 1);
 	newArgv[args.argc] = nullptr;
 	newArgv[0] = filename.get();
-	for (int i = 0; i < argc; ++i) {
+	for (size_t i = 0; i < argc; ++i) {
 		newArgv[i + 1] = argv[i];
 	}
 	args.argv = newArgv.get();
@@ -181,20 +254,24 @@ inline std::optional<int> waitForTermination(pid_t pid) {
 	}
 }
 
-class toBeClosedPid : public ToBeClosedGeneric<pid_t> {
+struct PidDeleter {
+	constexpr static pid_t invalidValue = -1;
+	std::optional<int> waitResult = std::nullopt;
 
-	void tryClose() noexcept override {
-		if (fd >= 0) {
-			waitResult = waitForTermination(fd);
+	void operator()(pid_t& pid) {
+		if (pid >= 0) {
+			waitResult = waitForTermination(pid);
+			pid = -1;
 		}
 	}
-	public:
-		std::optional<int> waitResult = std::nullopt;
-
-		toBeClosedPid(pid_t pid) :ToBeClosedGeneric(pid) {}
+	constexpr bool is_valid(const pid_t& fd) const noexcept {
+		return fd >= 0;
+	}
 };
 
-struct spawnedValues {
+using toBeClosedPid = ToBeClosedGeneric<pid_t, PidDeleter>;
+
+struct [[nodiscard]] SpawnedValues  {
 	toBeClosedPid pid; //ORDER MATTERS HERE! we first close the FDs and then wait for termination. Do not reorder unles defining your own destructor with explicit reset calls
 	ToBeClosedFd stderrFD;
 	ToBeClosedFd stdoutFD;
@@ -205,12 +282,34 @@ struct spawnedValues {
 		pid.reset();
 		return pid.waitResult;
 	}
+
+	SpawnedValues(pid_t pid, ToBeClosedFd err, ToBeClosedFd out) :pid(pid), stderrFD(std::move(err)), stdoutFD(std::move(out)) {}
+	SpawnedValues(pid_t pid, fileDescriptor err, fileDescriptor out) :pid(pid), stderrFD(std::move(err)), stdoutFD(std::move(out)) {}
+};
+
+struct [[nodiscard]] SpawnedValuesFilePtr {
+	toBeClosedPid pid; //ORDER MATTERS HERE! we first close the FDs and then wait for termination. Do not reorder unles defining your own destructor with explicit reset calls
+	ToBeClosedFileFD err;
+	ToBeClosedFileFD out;
+
+	std::optional<int> close() {
+		out.reset();
+		err.reset();
+		pid.reset();
+		return pid.waitResult;
+	}
+
+	SpawnedValuesFilePtr(pid_t pid, fileDescriptor err, fileDescriptor out) :pid(pid), err(ToBeClosedFd{ err }, "r"), out(ToBeClosedFd{ out }, "r") {}
+};
+
+template<typename T>
+concept ArgvWrapperLike = requires{
+	std::same_as<std::decay_t<ArgvWrapper>, T>;
 };
 
 
-
-template<class Callback = decltype(NULLOPTFUNCTION)*>
-inline spawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPath, char* const argv[], size_t argc, Callback&& callback = NULLOPTFUNCTION) {
+template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
+inline SpawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
 	int errfd[2];
 	assert(pipe(errfd) != -1);
 	//auto errfd = dup(fileno(stderr));
@@ -218,32 +317,26 @@ inline spawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPa
 	assert(pipe(outfd) != -1);
 
 	auto pipe = readClosedPipe();
-	auto res = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd[1], programPath, argv, argc, callback);
+	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd[1], programPath, argv.get(), argv.argc, callback);
 	close(outfd[1]);
 	close(errfd[1]);
-	return {
-		.pid = res,
-		.stderrFD = errfd[0],
-		.stdoutFD = outfd[0],
-	};
-
+	return {pid,errfd[0],outfd[0]};
 }
 
 
-inline std::unique_ptr<char[]> fromConstCharToCharPtr(const std::string_view charData) {
-	std::unique_ptr<char[]> retval{ new char[charData.size() + 1] };
-	memcpy(retval.get(), charData.data(), charData.size());
-	retval.get()[charData.size()] = 0;
-	return retval;
-}
 
-template<std::convertible_to<std::string_view> ...Types>
-std::unique_ptr<std::unique_ptr<char[]>[]> fromConstCharArrayToCharPtrArray(Types&& ...params ) {
-	std::unique_ptr<std::unique_ptr<char[]>[]> buffer{ new std::unique_ptr<char[]>[sizeof...(params)] };
-	size_t iter = 0;
-	for (decltype(auto) type : std::initializer_list<std::string_view>{ params... }) {
-		buffer.get()[iter] = std::move(fromConstCharToCharPtr(type));
-		++iter;
-	}
-	return buffer;
+template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
+inline SpawnedValuesFilePtr spawnStdoutReadProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
+	int errfd[2];
+	assert(pipe(errfd) != -1);
+	//auto errfd = dup(fileno(stderr));
+	int outfd[2];
+	assert(pipe(outfd) != -1);
+
+	auto pipe = readClosedPipe();
+	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd[1], programPath, argv.get(), argv.argc, callback);
+	close(outfd[1]);
+	close(errfd[1]);
+	close(errfd[0]);
+	return { pid,-1,outfd[0] };
 }

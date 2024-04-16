@@ -3,9 +3,7 @@
 
 namespace SyscallHandlers {
 	struct Event : simpleSyscallHandler_base {
-		void entry(processState& process, const MiddleEndState& state, long syscallNr) override
-		{//nullopt
-		};
+		void entry(processState&, const MiddleEndState&, long) override {};
 		void exit(processState& process, MiddleEndState& state, long syscallRetval) override;
 		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override;
 	};

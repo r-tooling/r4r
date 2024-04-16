@@ -32,7 +32,7 @@ void SyscallHandlers::Clone::entry(processState & process, const MiddleEndState&
 	handleEntryState(process, state, syscallNr);
 }
 
-void SyscallHandlers::Clone::handleEntryState(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Clone::handleEntryState(processState& process, const MiddleEndState& , long )
 {
 	process.blockedInClone = { std::nullopt, flags }; //TODO: maybe just save &this?
 }

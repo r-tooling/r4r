@@ -1,12 +1,12 @@
 #include "mkdir.hpp"
 
-void SyscallHandlers::Mkdir::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Mkdir::entry(processState& process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
 }
 
-void SyscallHandlers::MkdirAt::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::MkdirAt::entry(processState& process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	fileRelPath = userPtrToString(process.pid, getSyscallParam<2>(process.pid));

@@ -49,8 +49,8 @@ public:
 
 
 	struct const_iterator {
-		std::size_t offset;
 		const T val;
+		std::size_t offset;
 		constexpr const_iterator(const T& p) :val(p), offset(0) {}
 		constexpr const_iterator(sentinel) : val{}, offset(sizeof(T)) {}
 
@@ -145,8 +145,8 @@ inline std::unique_ptr<unsigned char[]> userPtrToOwnPtr(pid_t processPid, long p
 	local->iov_base = reinterpret_cast<void*>(localPtr.get());
 	local->iov_len = count;
 
-	assert(process_vm_readv(processPid, local, 1, remote, 1, 0) == count);// "error reading X bytes from the tracee"
-	return std::move(localPtr);
+	assert(process_vm_readv(processPid, local, 1, remote, 1, 0) == static_cast<ssize_t>(count));// "error reading X bytes from the tracee"
+	return localPtr;
 }
 template<class pointsToStruct>
 inline std::unique_ptr<pointsToStruct, decltype(std::free)*> userPtrToOwnPtr(pid_t processPid, long ptr) {

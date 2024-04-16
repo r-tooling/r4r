@@ -74,7 +74,7 @@ void SyscallHandlers::OpenBase::checkIfExists(const processState& process)
 }
 
 
-void SyscallHandlers::Open::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Open::entry(processState & process, const MiddleEndState& , long )
 {
 	fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
 	flags = getSyscallParam<2>(process.pid);
@@ -82,7 +82,7 @@ void SyscallHandlers::Open::entry(processState & process, const MiddleEndState& 
 	checkIfExists(process);
 }
 
-void SyscallHandlers::OpenAT::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::OpenAT::entry(processState & process, const MiddleEndState& , long )
 {
 	fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };
 	at = getSyscallParam<1>(process.pid);
@@ -91,7 +91,7 @@ void SyscallHandlers::OpenAT::entry(processState & process, const MiddleEndState
 }
 
 
-void SyscallHandlers::OpenAT2::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::OpenAT2::entry(processState & process, const MiddleEndState& , long )
 {
 	auto structSize = getSyscallParam<4>(process.pid);
 	assert(structSize == sizeof(open_how));
@@ -107,7 +107,7 @@ void SyscallHandlers::OpenAT2::entry(processState & process, const MiddleEndStat
 	checkIfExists(process);
 }
 
-void SyscallHandlers::Creat::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Creat::entry(processState & process, const MiddleEndState& , long )
 {
 	//I am the open syscall with a couple of flags. https://github.com/torvalds/linux/blob/484193fecd2b6349a6fd1554d306aec646ae1a6a/fs/open.c#L1493
 	fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };

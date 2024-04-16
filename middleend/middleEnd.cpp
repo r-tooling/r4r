@@ -1,6 +1,6 @@
 #include "middleEnd.hpp"
 #include "../toBeClosedFd.hpp"
-
+#include "../cFileOptHelpers.hpp"
 #include <cassert>
 #include <optional>
 #include <fcntl.h>
@@ -60,10 +60,30 @@ MiddleEndState::running_thread_state& MiddleEndState::pidToObj(const pid_t proce
 }
 
 
+MiddleEndState::MiddleEndState(absFilePath initialWorkdir, char* initialEnv[]) :initialDir(initialWorkdir.native())
+{
+	auto ptr = std::unique_ptr<MiddleEndState::file_info>(
+		new file_info{
+			.realpath = initialWorkdir,
+			.accessibleAs = {},
+			.wasEverCreated = false,
+			.wasEverDeleted = false,
+			.isCurrentlyOnTheDisk = true,
+			.wasInitiallyOnTheDisk = true,
+			.type = file_info::dir,
+		});
+	encounteredFilenames.emplace(initialWorkdir, std::move(ptr));
+	while(initialEnv != nullptr && *initialEnv != nullptr){
+		env.emplace_back(*initialEnv);
+		++initialEnv;
+	}
+}
+
 MiddleEndState::file_info* MiddleEndState::createUnbackedFD(absFilePath&& filename, MiddleEndState::file_info::FileType type)
 {
 	auto file = std::unique_ptr<MiddleEndState::file_info>(new file_info{
 		.realpath = filename,
+		.accessibleAs = {},
 		.wasEverCreated = false,
 		.wasEverDeleted = false,
 		.isCurrentlyOnTheDisk = false,
@@ -118,9 +138,8 @@ void MiddleEndState::trackNewProcess(pid_t process)
 		}
 	}
 
-	auto fdTable = std::make_shared<MiddleEndState::FD_Table>(); //TODO: shared ptr instead.
-	auto rawTablePtr = fdTable.get();
-	std::unique_ptr<char, decltype(std::free)*>workdir{get_current_dir_name(), std::free}; //is there a better heuristic?
+	auto fdTable = std::make_shared<MiddleEndState::FD_Table>();
+	FreeUniquePtr workdir{ get_current_dir_name() }; //is there a better heuristic?
 
 	processToInfo.emplace(process, MiddleEndState::running_thread_state{ process, std::make_shared<FS_Info>(std::filesystem::path{workdir.get()}) ,std::move(fdTable) });
 	if (!firstProcessInitialised) {
@@ -426,22 +445,29 @@ bool MiddleEndState::execFile(pid_t process, absFilePath filename, relFilePath r
 				.type = file_info::file,//TODO: The kernel allow for executing say a block device... It is extremely unklikely, though.
 			});
 			
-		ToBeClosedFd fd = open(filename.c_str(), O_RDONLY);
+		ToBeClosedFd fd{ open(filename.c_str(), O_RDONLY) };
 
 		
 		//todo: add checks for 
 		if (!fd) {
-			return true;
+			if(!overrideFailed)
+				return true;
+			else {
+				encounteredFilenames.emplace(filename, std::move(ptr));
+				return true;
+			}
 		}
 		struct stat statData;
 		auto statOK = fstat(fd.get(), &statData);
-		if (!statOK || (!(S_IWUSR | S_IWGRP | S_IXOTH)& statData.st_mode)) { //todo: keep track of context for permissions.
-			return true;
+		if (!statOK || (! ((S_IXUSR | S_IXGRP | S_IXOTH)& statData.st_mode))) { //todo: keep track of context for permissions.
+			if (!overrideFailed) {
+				return true;
+			}
 		}
 
 		if (auto str = tryReadShellbang((fileDescriptor)fd); str.has_value()) {//TODO: this is essentially cached for further calls. Consider detecting if a given file was written since it had been executed and if it were, this needs to be redone.
 			if (depth > 4) {
-				return true; //TODO: don't mark the stuff up untill now. 
+				return true;
 			}
 
 			absFilePath path{ str.value() };
@@ -455,7 +481,7 @@ bool MiddleEndState::execFile(pid_t process, absFilePath filename, relFilePath r
 			}
 			//for recursion the kernel has a herd limit- has a hard limit see for example https://github.com/SerenityOS/serenity/blob/ee3dd7977d4c88c836bfb813adcf3e006da749a8/Kernel/Syscalls/execve.cpp#L881
 			//or the bin rewrite limit in linux.
-			failed = execFile(process, path, path, depth + 1);
+			failed = execFile(process, path, path, depth + 1,overrideFailed);
 			doRegisterAccess = doRegisterAccess || !failed;
 		}
 		if(doRegisterAccess)
@@ -473,8 +499,10 @@ void MiddleEndState::closeFileDescriptor(pid_t process, fileDescriptor fd)
 }
 void MiddleEndState::listDirectory(pid_t process, fileDescriptor fd)
 {
-	auto& val = pidToObj(process);
-	//todo:
+	(void)process;
+	(void)fd;
+	//auto& val = pidToObj(process);
+	//todo: add the requirement for all directory contents.
 }
 
 /*
@@ -509,7 +537,7 @@ void MiddleEndState::registerPipe(pid_t process,fileDescriptor pipes[2])
 	val.registerFD(pipes[0], out);
 
 	auto in = createUnbackedFD("pipe_write_" + std::to_string(pipe), file_info::pipe);
-	val.registerFD(pipes[1], out);
+	val.registerFD(pipes[1], in);
 }
 
 void MiddleEndState::registerSocket(pid_t process, fileDescriptor socket)

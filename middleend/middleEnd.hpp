@@ -40,6 +40,9 @@ struct std::hash<access_info> {
 
 class MiddleEndState {
 public:
+	std::vector<std::string> env;
+	std::string initialDir;
+
 	struct file_info {
 		absFilePath realpath;
 		std::unordered_set<access_info> accessibleAs; //but we would need to know where it is relative from right now... Assuming programs do not move their current directory.
@@ -105,7 +108,7 @@ private:
 
 		running_thread_state() = delete;
 
-		running_thread_state(pid_t pid, std::shared_ptr<FS_Info>&& fsInfo, std::shared_ptr<FD_Table>&& fdTable) : pid(pid), fsInfo(fsInfo), fdTable(fdTable) {}
+		running_thread_state(pid_t pid, std::shared_ptr<FS_Info>&& fsInfo, std::shared_ptr<FD_Table>&& fdTable) : pid(pid), fdTable(fdTable), fsInfo(fsInfo) {}
 		running_thread_state(const running_thread_state&) = delete;
 		running_thread_state(running_thread_state&& other) noexcept = default;
 		
@@ -131,7 +134,8 @@ private:
 	running_thread_state& pidToObj(const pid_t process);
 
 public:
-	MiddleEndState() = default;
+	MiddleEndState() = delete;
+	MiddleEndState(absFilePath initialWorkdir, char* initailEnv[]);
 	MiddleEndState(const MiddleEndState&) = delete;
 	MiddleEndState(MiddleEndState&&) = delete;
 
@@ -200,7 +204,6 @@ public:
 		}
 		return std::nullopt;
 	}
-	;
 };
 
 

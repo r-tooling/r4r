@@ -1,6 +1,6 @@
 #include "socket.hpp"
 
-void SyscallHandlers::Socket::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Socket::entry(processState& process, const MiddleEndState& , long )
 {
 	parseDomain(process.getSyscallParam<1>());
 }
@@ -18,7 +18,7 @@ void SyscallHandlers::Socket::entryLog(const processState& process, const Middle
 	printDomain(strBuf);
 }
 
-void SyscallHandlers::SocketPair::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::SocketPair::entry(processState& process, const MiddleEndState&, long)
 {
 	ptr = process.getSyscallParam<4>();
 	parseDomain(process.getSyscallParam<1>());
@@ -38,7 +38,7 @@ void SyscallHandlers::SocketPair::entryLog(const processState& process, const Mi
 	printDomain(strBuf);
 }
 
-void SyscallHandlers::Connect::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Connect::entry(processState& process, const MiddleEndState&, long)
 {
 	fd = process.getSyscallParam<1>();
 	ptr = process.getSyscallParam<2>();
@@ -47,6 +47,7 @@ void SyscallHandlers::Connect::entry(processState& process, const MiddleEndState
 
 void SyscallHandlers::Connect::exit(processState& process, MiddleEndState& state, long syscallRetval)
 {
+	(void)process; (void)state; (void)syscallRetval;
 	if (syscallRetval == 0) {
 		//auto addr = userPtrToOwnPtr<struct sockaddr>(process.pid, ptr);
 		//socketFileInfo info = state.resolveSocketData(process.pid, fd);

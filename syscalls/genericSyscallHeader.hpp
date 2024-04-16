@@ -10,16 +10,16 @@
 
 
 struct nullOptHandler :syscallHandler {
-	void entry(processState & process, const MiddleEndState& state, long syscallNr) override {};
-	void exit(processState& process, MiddleEndState& state, long syscallRetval) override {};
+	void entry(processState &, const MiddleEndState&, long ) override {};
+	void exit(processState&, MiddleEndState& , long ) override {};
 
-	void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override {};
-	void exitLog(const processState& process, const MiddleEndState& state, long syscallRetval) override {};
+	void entryLog(const processState& , const MiddleEndState& , long ) override {};
+	void exitLog(const processState& , const MiddleEndState& , long ) override {};
 };
 
 
 struct errorHandler :nullOptHandler {
-	void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) {
+	void entryLog(const processState&, const MiddleEndState& , long syscallNr) {
 		fprintf(stderr, "entering unhandled syscall! %s \n", getSyscallName(syscallNr).value_or("Unknown").data());
 	};
 };
@@ -28,14 +28,14 @@ struct errorHandler :nullOptHandler {
 struct simpleSyscallHandler_base : virtual syscallHandler {
 	std::stringstream strBuf; //TODO: could I make do without this member variable? It is LARGE
 
-	void exitLog(const processState& process, const MiddleEndState& state, long syscallRetval) override
+	void exitLog(const processState& process, const MiddleEndState& , long syscallRetval) override
 	{
 		auto str = strBuf.str();
 		printf("%d: %s = %ld\n", process.pid, str.empty() ? "Unknown syscall" : str.c_str(), syscallRetval);
 		strBuf.clear();
 	}
 
-	void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) {
+	void entryLog(const processState& , const MiddleEndState&, long syscallNr) {
 		strBuf << syscallNr << "->" << getSyscallName(syscallNr).value_or(std::string_view{ "Unknown" }) << "";
 	}
 
@@ -56,8 +56,8 @@ struct simpleSyscallHandler_base : virtual syscallHandler {
 
 namespace SyscallHandlers {
 	struct onlyEntryLog : public simpleSyscallHandler_base {
-		void entry(processState& process, const MiddleEndState& state, long syscallNr) override {};
-		void exit(processState& process, MiddleEndState& state, long syscallRetval) override {};
+		void entry(processState& , const MiddleEndState& , long) override {};
+		void exit(processState& , MiddleEndState& , long ) override {};
 
 		void entryLog(const processState& process, const MiddleEndState& state, long syscallNr) override {
 			simpleSyscallHandler_base::entryLog(process, state, syscallNr);
@@ -65,7 +65,7 @@ namespace SyscallHandlers {
 			printf("%d : %s", process.pid, strBuf.str().c_str());
 			strBuf.clear();
 		};
-		void exitLog(const processState& process, const MiddleEndState& state, long syscallRetval) override {};
+		void exitLog(const processState& , const MiddleEndState& , long ) override {};
 	};
 
 	struct FileOperationLogger : simpleSyscallHandler_base {

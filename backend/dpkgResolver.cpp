@@ -1,7 +1,7 @@
 #include "./dpkgResolver.hpp"
 #include "../processSpawnHelper.hpp"
 #include "../stringHelpers.hpp"
-
+#include "../cFileOptHelpers.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <vector>
@@ -73,35 +73,23 @@ namespace {
 		   the locale to C.UTF-8 to get reproducible results.
 	*/
 
-	std::vector<resolvedData> resolveString(const std::string& param) {
+	template<class ...T>
+	std::vector<resolvedData> resolveString(const T& ...param) {
 		using std::operator""sv;
 		//format("{} -S '{}'")
 
 		//I want these to get cleaned up automatically and yet need raw pointers. Honestly a vector of strings is how this should be done.
 
-		auto localToBeDeletedStore = fromConstCharArrayToCharPtrArray("-S", param);
-
-		char* mutableArgv[3] = { localToBeDeletedStore[0].get(),localToBeDeletedStore[1].get(), nullptr };
-
-		auto dpkgProcess = spawnReadOnlyProcess(backend::Dpkg::executablePath, mutableArgv, 2, []() {
+		auto dpkgProcess = spawnStdoutReadProcess(backend::Dpkg::executablePath, ArgvWrapper{ "-S", param... }, []() noexcept {
 			setlocale(LC_ALL, "C.UTF-8");
-			});
-
-		std::unique_ptr<FILE, decltype(&fclose)> in{ fdopen(dpkgProcess.stdoutFD.get(), "r") , fclose };
-		dpkgProcess.stderrFD.reset();
-
-
+		});
 
 		std::vector<resolvedData> results;
 
-		char* buffer = nullptr;
-		size_t bufferSize = 0;
-		while (size_t nrRead = getdelim(&buffer, &bufferSize, '\n', in.get())) {
-			if (nrRead == -1) {
-				break;
-			}
+		for(auto buffer : LineIterator{ dpkgProcess.out.get() }) {
+
 			std::vector<std::u8string> packages;
-			std::u8string_view data{ (const char8_t*)buffer,nrRead };
+			std::u8string_view data{ (const char8_t*)buffer.data(),buffer.size() };
 			//needs c++ 23 and maybe newer gcc version than 11...
 			/*
 			for (const auto package : std::views::split(data, ","sv)) {
@@ -115,11 +103,14 @@ namespace {
 			* packagename may include a :!!!
 			* packagename [,packagename]: filePath
 			*/
-			while (end != nrRead && end != data.npos) {
+			while (end != data.size() && end != data.npos) {
 				end = data.find(u8", "sv, begin);
 				auto split = data.substr(begin, end);
-				assert(split.size() > 0);
-				if (end == nrRead || end == data.npos) {
+				if (split.starts_with(u8"diversion by"sv)) {
+					//ignore this line one of the lines should be the usual format.
+					break;
+				}
+				if (end == data.size() || end == data.npos) {
 					//the last part thereby packagename: filepath
 					auto pos = split.rfind(u8": "sv); //last of and hoping the filename does not contain :. TODO: count them maybe?
 					auto potentialSv = std::u8string_view{ split };
@@ -132,30 +123,24 @@ namespace {
 						split = split.substr(0, pos); //we know how long the package name was.
 					}
 
-					packages.emplace_back(trim(std::move(split)));
+					packages.emplace_back(trim(split));
 					results.emplace_back(std::move(packages), potentialSv);
 					break;
 				}
 				else {
-					packages.emplace_back(trim(std::move(split)));
+					packages.emplace_back(trim(split));
 					begin = end + 2;
 				}
 			}
 		};
-
-
-		/*TODO: solve
-		diversion by dash from: /bin/sh
-diversion by dash to: /bin/sh.distrib
-dash
-
-		*/
-		if (buffer)
-			free(buffer);
-		in.reset();
 		
 		auto processRes = dpkgProcess.close();
-		return processRes == 0 ? results : std::vector<resolvedData>{};
+		if constexpr (sizeof...(param) == 1) {
+			return processRes == 0 ? results : std::vector<resolvedData>{};
+		}
+		else {
+			return results;
+		}
 	}
 
 	struct context {
@@ -210,67 +195,82 @@ dash
 		return std::nullopt;
 	}
 
-	std::u8string resolveNameToVersion(const std::u8string& name) {
+	std::pair<std::u8string,std::u8string> resolveNameToVersion(const std::u8string& name) {
 		using std::operator""sv;
 
 		//this is a hack because c++ and utf8 sucks
 		std::string_view nameSV{ reinterpret_cast<const char*>(name.data()), name.size() };
 
-		auto localToBeDeletedStore = fromConstCharArrayToCharPtrArray("-s", nameSV);
-
-		char* mutableArgv[3] = { localToBeDeletedStore[0].get(),localToBeDeletedStore[1].get(), nullptr };
-
-		auto dpkgProcess = spawnReadOnlyProcess(backend::Dpkg::executablePath, mutableArgv, 2, []() {
+		auto dpkgProcess = spawnStdoutReadProcess(backend::Dpkg::executablePath, ArgvWrapper{ "-s", nameSV }, []() noexcept {
 			setlocale(LC_ALL, "C.UTF-8");
-			});
-		std::unique_ptr<FILE, decltype(&fclose)> in{ fdopen(dpkgProcess.stdoutFD.get(), "r") , fclose };
-		dpkgProcess.stderrFD.reset();
+		});
 
-		std::u8string result;
-		char* buffer = nullptr;
-		size_t bufferSize = 0;
-		while (size_t nrRead = getdelim(&buffer, &bufferSize, '\n', in.get())) {
-			if (nrRead == -1) {
-				break;
+		std::u8string packageName = u8"ERROR_NOT_FOUND";
+		std::u8string version;
+
+		for (auto buffer : LineIterator{dpkgProcess.out.get()}) {
+			std::u8string_view data{ (const char8_t*)buffer.data(),buffer.size()};
+			{
+				auto start = u8"Version:"sv;
+				if (data.starts_with(start)) {
+					data.remove_prefix(start.size());
+
+					version = std::u8string{ trim(data, u8" \n\t\""sv) };
+				}
 			}
-			std::u8string_view data{ (const char8_t*)buffer,nrRead };
-			auto start = u8"Version:"sv;
-			if (data.starts_with(start)) {
-				data.remove_prefix(start.size());
-				return std::u8string{ trim(std::move(data), u8" \n\t\"") };
+			{
+				auto start = u8"Package:"sv;
+				if (data.starts_with(start)) {
+					data.remove_prefix(start.size());
+					packageName = std::u8string{ trim(data, u8" \n\t\""sv) };
+				}
 			}
 		}
-		return u8"ERROR_NOT_FOUND";
+		return { packageName, version};
 		//we do not care for the return code here.
 	}
 
+	
 }
-//todo: only pass references but that has issues with optionals...
+
+
 const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& name) {
 	if (auto find = packageNameToData.find(name); find != packageNameToData.end()) {
 		return find->second;
 	}
 	else {
-		auto emplaced = packageNameToData.try_emplace(name, name, resolveNameToVersion(name));
+		auto [actualName, version] = resolveNameToVersion(name);
+		auto [apt_version, packageRepoMangledName] = aptResolver.resolveNameToSourceRepo(actualName);
+		if (apt_version != version) {
+			fprintf(stderr, "mismatch dpkg and apt info: %s ;;; %s using APT version for script.\n", reinterpret_cast<const char*>(apt_version.c_str()), reinterpret_cast<const char*>(version.c_str()));
+		}
+		auto& translatedPackage = aptResolver.translatePackageToIdentify(packageRepoMangledName);
+
+		auto emplaced = packageNameToData.try_emplace(name,actualName, apt_version, translatedPackage.source);
 		return emplaced.first->second;
 	}
 }
 
-
+//todo: only pass references but that has issues with optionals...
 std::optional<backend::DpkgPackage> backend::Dpkg::resolvePathToPackage(std::filesystem::path path)
 {
 	context con{ path };
-	return 
+	return
 		optTransform(
-		optOR(
-		tryResolveVector(resolveString(path.generic_string()), con), //try the package full path
-		[&]() {
-			return optOR(
-				tryResolveVector(resolveString("*/" + path.filename().native()), con), //try just the package name 
+			optOR(
+				tryResolveVector(resolveString(path.generic_string()), con), //try the package full path
 				[&]() {
-					return tryResolveVector(resolveString("*/" + path.filename().native()+".*"), con);//try just the package name	
+					return optOR(
+						tryResolveVector(resolveString("*/" + path.filename().native()), con), //try just the package name 
+						[&]() {
+							return tryResolveVector(resolveString("*/" + path.filename().native() + ".*"), con);//try just the package name	
+						}
+					);
 				}
-			);
-		}
 	), [&](std::u8string name) {return this->nameToObject(name); });
+	/*
+	return
+		optTransform(
+		tryResolveVector(resolveString(path.generic_string(), "* /" + path.filename().native(), "* /" + path.filename().native() + ".*"), con)
+	, [&](std::u8string name) {return this->nameToObject(name); });*/ //results in false negatives donno why
 }

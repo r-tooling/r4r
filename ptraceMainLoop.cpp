@@ -1,6 +1,5 @@
 ﻿#include "ptraceMainLoop.hpp"
 #include "syscallMapping.hpp"
-#include "backend/backEnd.hpp"
 #include "platformSpecificSyscallHandling.hpp"
 #include "ptraceHelpers.hpp"
 #include "syscalls/syscallHandlerMapper.hpp"
@@ -9,7 +8,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
-#include <functional>
 #include <memory>
 #include <type_traits>
 
@@ -52,15 +50,14 @@ namespace {
 	void removeProcessHandling(processState& process) {
 		processing.erase(process.pid);
 	}
-	bool processsesLeft() {
-		return !processing.empty();
-	}
+
 	bool tryWait(siginfo_t& status) {
 		int waitStatus;
 		while (true) {
 			waitStatus = waitid(P_ALL, 0, &status, WSTOPPED | WCONTINUED | WEXITED); //tracing all children, they SHOULD be ptraced, but hey, what if they are not? In that case we at least get a ptrace error down the line.
 			if (waitStatus == -1) {
 				auto waitError = errno;//todo: check that this is due to no more children
+				assert(waitError == ECHILD);
 				return false;
 			}
 			assert(waitStatus == 0);
@@ -75,10 +72,9 @@ namespace {
 
 
 
-void ptraceChildren()
+void ptraceChildren(MiddleEndState& state)
 {
 	static const syscallHandlerMapperOfAll mapper{};
-	MiddleEndState state{};
 	siginfo_t status;
 	while (tryWait(status)) {
 		bool doPtrace = true;
@@ -136,13 +132,10 @@ void ptraceChildren()
 			}
 		}
 	}
-	csvBased(state, "accessedFiles.csv");
-	//report(state);
-	//chrootBased(state);
 }
 //intentionally here this way as otherwise the unique_ptr will not compile
 processState::processState(pid_t pid) :pid(pid),pidFD(-1) {
-	pidFD = syscall(SYS_pidfd_open, pid, 0); //cannot default init as that results in invalid errno
+	pidFD.reset(static_cast<fileDescriptor>(syscall(SYS_pidfd_open, pid, 0))); //cannot default init as that results in invalid errno
 	auto err = errno; 
 	if (!pidFD) { //error state
 		fprintf(stderr, "pidfd_open(%d): ",pid);

@@ -2,7 +2,7 @@
 #include <fcntl.h> //AT flags
 #include <string_view>
 
-void SyscallHandlers::StatHandler::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::StatHandler::exit(processState& , MiddleEndState& , long syscallRetval)
 {
 	/*
 		These functions return information about a file. 
@@ -32,28 +32,28 @@ void SyscallHandlers::StatHandler::entryLog(const processState& process, const M
 	strBuf << "," << path << "," << flags << ")";
 }
 
-void SyscallHandlers::Stat::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Stat::entry(processState & process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	path = userPtrToString(process.pid,getSyscallParam<1>(process.pid));
 	flags = 0;
 }
 
-void SyscallHandlers::FStat::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::FStat::entry(processState & process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	path = "";
 	flags = AT_EMPTY_PATH;
 }
 
-void SyscallHandlers::LStat::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::LStat::entry(processState & process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
 	flags = AT_SYMLINK_NOFOLLOW;
 }
 
-void SyscallHandlers::NewFStatAt::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::NewFStatAt::entry(processState & process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
@@ -61,7 +61,7 @@ void SyscallHandlers::NewFStatAt::entry(processState & process, const MiddleEndS
 }
 
 
-void SyscallHandlers::StatX::entry(processState & process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::StatX::entry(processState & process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
@@ -69,7 +69,7 @@ void SyscallHandlers::StatX::entry(processState & process, const MiddleEndState&
 }
 
 
-void SyscallHandlers::AccessHandler::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::AccessHandler::exit(processState& , MiddleEndState& , long )
 {
 	//TODO: we care for the access rights to the given files as they shall be mirrored 1:1
 }
@@ -83,7 +83,7 @@ void SyscallHandlers::AccessHandler::entryLog(const processState& process, const
 	strBuf << "," << path << "," << flags << ")";
 }
 
-void SyscallHandlers::Access::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::Access::entry(processState& process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
@@ -91,25 +91,25 @@ void SyscallHandlers::Access::entry(processState& process, const MiddleEndState&
 	//todo: mode ignored?
 }
 
-void SyscallHandlers::FAccessAt::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::FAccessAt::entry(processState& process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
 	flags = 0;
 }
 
-void SyscallHandlers::FAccessAt2::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::FAccessAt2::entry(processState& process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
 	flags = getSyscallParam<4>(process.pid);
 }
 
-void SyscallHandlers::ReadLinkHandler::exit(processState& process, MiddleEndState& state, long syscallRetval)
+void SyscallHandlers::ReadLinkHandler::exit(processState& process, MiddleEndState& , long syscallRetval)
 {
 	//TODO: we care for symoblic links as we need to re-create these mappings
 	if (syscallRetval > 0) {
-		if (syscallRetval == maxBufferSize) {
+		if (syscallRetval == static_cast<long>(maxBufferSize)) {
 			//todo: add handling that this linkdata may be incomplete and should be treated as such.
 		}
 		returnedData = userPtrToOwnPtr(process.pid, userPtr,syscallRetval); //todo: check the validity based on the string being 0 terminated perhaps?
@@ -132,7 +132,7 @@ void SyscallHandlers::ReadLinkHandler::exitLog(const processState& process, cons
 		auto str = strBuf.str();
 		printf("%d: %s = ", process.pid, str.empty() ? "Unknown syscall" : str.c_str());
 		fflush(stdout);
-		write(fileno(stdout), returnedData.get(), syscallRetval);//TODO: use c++ stringview instead perhaps?
+		write(fileno(stdout), returnedData.get(), syscallRetval);
 		write(fileno(stdout), "\n", 1);
 		strBuf.clear();
 	}
@@ -141,7 +141,7 @@ void SyscallHandlers::ReadLinkHandler::exitLog(const processState& process, cons
 	}
 }
 
-void SyscallHandlers::ReadLink::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::ReadLink::entry(processState& process, const MiddleEndState& , long )
 {
 	at = AT_FDCWD;
 	path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
@@ -149,7 +149,7 @@ void SyscallHandlers::ReadLink::entry(processState& process, const MiddleEndStat
 	maxBufferSize = getSyscallParam<3>(process.pid);
 }
 
-void SyscallHandlers::ReadLinkAt::entry(processState& process, const MiddleEndState& state, long syscallNr)
+void SyscallHandlers::ReadLinkAt::entry(processState& process, const MiddleEndState& , long )
 {
 	at = getSyscallParam<1>(process.pid);
 	path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
