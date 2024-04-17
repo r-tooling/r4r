@@ -21,6 +21,9 @@ namespace backend {
 	};
 
 	struct Rpkg {
+		bool exectuablePresent;
+		Rpkg();
+
 		static inline const auto executablePath = std::string("Rscript");
 		std::unordered_map<std::u8string, RpkgPackage> packageNameToData;
 		std::unordered_map<std::filesystem::path, std::optional<RpkgPackage>> resolvedPaths;

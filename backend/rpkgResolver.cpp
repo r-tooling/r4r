@@ -126,8 +126,15 @@ namespace {
 			return std::nullopt;
 		}
 	}
+	//Rscript --help. I could just check that the file exists somewhere in path but that would involve path variable resolution.
+	std::optional<int> checkExist() {
+		auto rpkg = spawnStdoutReadProcess(backend::Rpkg::executablePath, ArgvWrapper{"--help"});
+		return rpkg.close();
+	}
 
 }
+
+backend::Rpkg::Rpkg():exectuablePresent(checkExist() == 0){}
 
 std::optional<backend::RpkgPackage> backend::Rpkg::resolvePathToPackage(const std::filesystem::path& fullpath)
 {

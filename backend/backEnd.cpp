@@ -325,6 +325,7 @@ void csvBased(const MiddleEndState& state, absFilePath output)
 	}
 	//todo: check R version
 	if (!rpkgResolver.packageNameToData.empty()) {
+		//TODO: what if the actual location of the package matters as well eg. a directory is hardcoded.
 		dockerImage << "RUN Rscript -e 'install.packages(\"remotes\"); require(remotes); ";
 		for (auto& [name, package] : rpkgResolver.packageNameToData) {
 			//todo: how about default-bundled packages? do we need to check their version as well?

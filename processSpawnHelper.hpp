@@ -6,6 +6,7 @@
 #include <cassert>
 #include <filesystem>
 #include <linux/close_range.h>
+#include <optional>
 
 #include "./toBeClosedFd.hpp"
 #include "./cFileOptHelpers.hpp"
