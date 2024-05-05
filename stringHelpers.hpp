@@ -48,3 +48,18 @@ inline std::u8string trim(std::u8string&& str)
 inline std::string toNormal(std::u8string str) {
 	return std::string{ reinterpret_cast<const char*>(str.data()),str.length() };
 }
+
+template<class Trim = std::u8string_view>
+inline std::vector<std::u8string_view> explodeMul(std::u8string_view str, Trim splitOn) {
+	std::vector<std::u8string_view> results;//a range-based soultion which rust gives a lazy iterator would be prefferable.
+	while (!str.empty()) {
+		ltrim(str, splitOn);//ignore this part on the left
+		auto end = str.find_first_of(splitOn);
+		auto split = str.substr(0, end);
+		if (!split.empty()) {
+			results.push_back(split);
+			str.remove_prefix(split.size());
+		}
+	}
+	return results;
+}

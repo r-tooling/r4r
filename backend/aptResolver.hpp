@@ -1,10 +1,12 @@
 #pragma once
 #include <string>
-#include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#include "../memberTypeHashCompare.hpp"
 
 namespace backend {
 	struct AptInfo {
+		std::u8string mangledPackageRepoName;
 		//a line in sources.list which includes the given repository
 		std::u8string source;
 
@@ -17,12 +19,23 @@ namespace backend {
 	};
 
 	struct Apt {
+		using AptInfoMap = std::unordered_set<AptInfo,
+			Hasher<&AptInfo::mangledPackageRepoName>,
+			Compare<&AptInfo::mangledPackageRepoName>>;
+
+
 		Apt();
-		AptLookupInfo resolveNameToSourceRepo(const std::u8string& name);
-		AptInfo& translatePackageToIdentify(const std::u8string& packageRepoMangledName);
+		AptLookupInfo resolveNameToSourceRepo(const std::u8string& packageName);
+		//items are never invalidated. this is depended upon elsewhere in the project, retain.
+		const AptInfo& translatePackageToIdentify(const std::u8string& packageRepoMangledName);
+
+		const AptInfoMap& encounteredRepositories() {
+			return repoInstalLookup;
+		}
 
 	private:
 		std::vector<std::u8string> allRepoInstalls;
-		std::unordered_map<std::u8string, AptInfo> repoInstalLookup;
+		AptInfoMap repoInstalLookup;
+
 	};
 }

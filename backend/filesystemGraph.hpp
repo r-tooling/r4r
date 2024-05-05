@@ -1,15 +1,16 @@
 #pragma once
-
+#include <string>
+#include <memory>
 struct Graph;
 
-struct Hasher {
+struct GraphHasher {
 	using is_transparent = void;
 	size_t operator()(const std::unique_ptr < Graph>& value) const;
 	size_t operator()(const std::string& value) const {
 		return std::hash<std::string>{}(value);
 	}
 };
-struct Compare {
+struct GraphCompare {
 	using is_transparent = void;
 	bool operator()(const std::unique_ptr <Graph>& lhs, const std::unique_ptr <Graph>& rhs) const;
 	bool operator()(const std::string& lhs, const std::string& rhs) const {
@@ -27,7 +28,7 @@ struct Graph {
 		directory//all items in the directory not directly mentioned are special cased.
 	};
 
-	using ref = std::unordered_set<std::unique_ptr<Graph>, Hasher, Compare>;
+	using ref = std::unordered_set<std::unique_ptr<Graph>, GraphHasher, GraphCompare>;
 
 	const std::string dir;
 	ref files;
@@ -47,16 +48,16 @@ struct Graph {
 	Graph(const Graph&) = delete;
 	Graph(Graph&&) = default;
 };
-size_t Hasher::operator()(const std::unique_ptr < Graph>& value) const
+size_t GraphHasher::operator()(const std::unique_ptr < Graph>& value) const
 {
 	return std::hash<std::string>{}(value->dir);
 }
-bool Compare::operator()(const std::unique_ptr<Graph>& lhs, const std::unique_ptr<Graph>& rhs) const
+bool GraphCompare::operator()(const std::unique_ptr<Graph>& lhs, const std::unique_ptr<Graph>& rhs) const
 {
 	return lhs->dir == rhs->dir;
 }
 
-bool Compare::operator()(const std::string& lhs, const std::unique_ptr<Graph>& rhs) const
+bool GraphCompare::operator()(const std::string& lhs, const std::unique_ptr<Graph>& rhs) const
 {
 	return lhs == rhs->dir;
 }

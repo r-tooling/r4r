@@ -1,9 +1,8 @@
-﻿
-
-#include "ptraceBasedTracer.hpp"
-#include "ptraceMainLoop.hpp"
+﻿#include "ptraceBasedTracer.hpp"
+#include "frontend/ptraceMainLoop.hpp"
 #include "processSpawnHelper.hpp"
 #include "toBeClosedFd.hpp"
+#include "./cFileOptHelpers.hpp"
 #include "backend/backEnd.hpp"
 
 #include <cassert>
@@ -27,40 +26,36 @@ using std::size_t;
 
 #include <sched.h>
 
+namespace {
 
+	void fileOpenFail(int err) noexcept {
+		switch (err) {
+		case EACCES: fprintf(stderr, "| The requested access to the file is not allowed, or search permission is denied for one of the directories in the"
+			"path prefix of pathname, or the file did not exist yet and "
+			"write access to the parent directory is not allowed. \n"
+			"| Where O_CREAT is specified, the protected_fifos or "
+			"protected_regular sysctl is enabled, the file already "
+			"exists and is a FIFO or regular file, the owner of the "
+			"file is neither the current user nor the owner of the "
+			"containing directory, and the containing directory is both "
+			"world - or group - writable and sticky.\n"); break;
+		default: fprintf(stderr, "unknown error %d", err); break;
+		}
+	}
 
-
-
-void fileOpenFail(int err) noexcept {
-	switch (err) {
-	case EACCES: fprintf(stderr,"| The requested access to the file is not allowed, or search permission is denied for one of the directories in the"
-		"path prefix of pathname, or the file did not exist yet and "
-		"write access to the parent directory is not allowed. \n"
-		"| Where O_CREAT is specified, the protected_fifos or "
-		"protected_regular sysctl is enabled, the file already "
-		"exists and is a FIFO or regular file, the owner of the "
-		"file is neither the current user nor the owner of the "
-		"containing directory, and the containing directory is both "
-		"world - or group - writable and sticky.\n"); break;
-	default: fprintf(stderr, "unknown error %d", err); break;
+	void printUsage(const char* argv0) {
+		printf("This tracer is used for analysing the dependencies of other computer programs. Usage:\n"
+			"%s [programName] <argsToProgram>", argv0);
 	}
 }
 
-
 int main(int argc, char* argv[])
 {
-	/*
-	if (argc == 1) {//./ptraceBasedTracer
-		const char* temp[] = { "ptraceBassedTracer", "/usr/bin/R", "-e", "system(\"R - f inputFile.txt \")",nullptr };
-		argc = sizeof(temp) / (sizeof(*temp)) - 1;
-		argv = (char**)malloc((argc + 1) * sizeof(char**));//hacks, remove me when you figure out how to do args in visual studio
-		for (int a = 0; a < argc; a++) {
-			argv[a] = (char*)malloc((strlen(temp[a]) + 1) * sizeof(*temp[a]));
-			strcpy(argv[a], temp[a]);
-		}
-		argv[argc] = nullptr;
-	}*/
 
+	if (argc < 2) {
+		printUsage(argc == 1 ? argv[0] : "ptraceBasedTracer");
+		return -2;
+	}
 
 	assert(argc >= 2);//TODO: check args better.
 	{
@@ -73,8 +68,9 @@ int main(int argc, char* argv[])
 		assert(out >= 0 && out < 3);
 	}
 
-	//create new file descriptors for the child.
-
+	/*
+		redirect the ran program outputs to predefined files.
+	*/
 
 	ToBeClosedFd outPipe{ open("stdout.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IWUSR) };
 	auto err = errno;
@@ -89,9 +85,14 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 	auto inPipe = writeClosedPipe();
-	auto Tofree = get_current_dir_name();
-	MiddleEndState state{Tofree,environ};
-	free(Tofree);
+	auto Tofree = FreeUniquePtr{ get_current_dir_name() };
+	std::vector<std::string> args = {};
+	for (auto it = 1; it < argc; ++it) {
+		args.emplace_back(argv[it]);
+	}
+
+	middleend::MiddleEndState state{ Tofree.get(),environ,args };
+	Tofree.reset();
 
 
 
@@ -101,10 +102,12 @@ int main(int argc, char* argv[])
 		};
 
 	pid_t childPid = spawnProcessWithSimpleArgs(inPipe.get(), outPipe.get(), errPipe.get(), argv[1], argv + 2, argc - 2, callback);//arg 1 == my filename, arg 2 == his filename
-		//will recieve sigchild when it terminates and thus we can safely free the stack when taht happens. Though that should really be only done at the termination of main as otherwise we could get confused by getting sigchaild called from any other source. 
+	//will recieve sigchild when it terminates and thus we can safely free the stack when taht happens. 
+	//Though that should really be only done at the termination of main as otherwise we could get confused by getting sigchaild called from any other source. 
+	// so not waiting for this PID is intentional.
 	(void)childPid;
-	ptraceChildren(state);
-	csvBased(state, "accessedFiles.csv");
+	frontend::ptraceChildren(state);
+	backend::csvBased(state, "accessedFiles.csv");
 
 	wait(nullptr);
 	return 0;

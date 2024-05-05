@@ -88,7 +88,7 @@ namespace {
 
 		for(auto buffer : LineIterator{ dpkgProcess.out.get() }) {
 
-			std::vector<std::u8string> packages;
+			std::vector<std::u8string> packages; 
 			std::u8string_view data{ (const char8_t*)buffer.data(),buffer.size() };
 			//needs c++ 23 and maybe newer gcc version than 11...
 			/*
@@ -236,23 +236,23 @@ namespace {
 
 const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& name) {
 	if (auto find = packageNameToData.find(name); find != packageNameToData.end()) {
-		return find->second;
+		return *find;
 	}
 	else {
 		auto [actualName, version] = resolveNameToVersion(name);
 		auto [apt_version, packageRepoMangledName] = aptResolver.resolveNameToSourceRepo(actualName);
 		if (apt_version != version) {
-			fprintf(stderr, "mismatch dpkg and apt info: %s ;;; %s using APT version for script.\n", reinterpret_cast<const char*>(apt_version.c_str()), reinterpret_cast<const char*>(version.c_str()));
+			fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) using APT version for script.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
 		}
 		auto& translatedPackage = aptResolver.translatePackageToIdentify(packageRepoMangledName);
 
-		auto emplaced = packageNameToData.try_emplace(name,actualName, apt_version, translatedPackage.source);
-		return emplaced.first->second;
+		auto emplaced = packageNameToData.emplace(actualName, apt_version, translatedPackage);
+		return *emplaced.first;
 	}
 }
 
 //todo: only pass references but that has issues with optionals...
-std::optional<backend::DpkgPackage> backend::Dpkg::resolvePathToPackage(std::filesystem::path path)
+std::optional<const backend::DpkgPackage*> backend::Dpkg::resolvePathToPackage(std::filesystem::path path)
 {
 	context con{ path };
 	return
@@ -267,7 +267,7 @@ std::optional<backend::DpkgPackage> backend::Dpkg::resolvePathToPackage(std::fil
 						}
 					);
 				}
-	), [&](std::u8string name) {return this->nameToObject(name); });
+	), [&](std::u8string name) {return &nameToObject(name); });
 	/*
 	return
 		optTransform(

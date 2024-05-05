@@ -13,8 +13,13 @@
 #include <sys/wait.h>
 
 namespace detail {
+	/*
+		Helper function to be used as a decltype argument, easier to understand than a typedef.
+	*/
 	inline void NULLOPTFUNCTION() noexcept {};
-
+	/**
+		Creates a new array of char * from an array of unique_ptrs to char *
+	*/
 	inline std::unique_ptr<char*> unpackArray(size_t nrItems, std::unique_ptr<char[]>* param) {
 		std::unique_ptr<char*> result{ new char* [nrItems + 1] };
 		for (size_t iter = 0; iter < nrItems; iter++) {
@@ -23,13 +28,19 @@ namespace detail {
 		result.get()[nrItems] = nullptr;
 		return result;
 	}
-
+	/*
+		Used for creating a mutable zero terminated char[] from immutable const char*
+		
+	*/
 	inline std::unique_ptr<char[]> fromConstCharToCharPtr(const std::string_view charData) {
 		auto retval = std::make_unique_for_overwrite<char[]>(charData.size() + 1);
 		memcpy(retval.get(), charData.data(), charData.size());
 		retval.get()[charData.size()] = 0;
 		return retval;
 	}
+	/*
+	* A container of stringviews
+	*/
 	template<class T>
 	concept ContainerContainingSV = requires(T x) {
 		x.begin();
@@ -37,17 +48,23 @@ namespace detail {
 		x.size();
 		{ *(x.begin()) } -> std::convertible_to<std::string_view>;
 	};
-
 	template<class Type>
 	concept stringView_OrContainerOfStringView = std::is_convertible_v<Type, std::string_view> || ContainerContainingSV<Type>;
-
+	/*
+	* Overloads for getting the number of string views in a generic argument
+	*/
 	template<std::convertible_to<std::string_view> Item>
 	constexpr size_t ItemsCount(Item&&) { return 1; };
 	template<ContainerContainingSV Item>
 	constexpr size_t ItemsCount(Item&& item) { return item.size(); };
+	/*
+		How many string views does a list of string views or containers of string views contain?
+	*/
 	template<stringView_OrContainerOfStringView ...Types>
 	constexpr size_t CountAll(Types&&...params) { return (0 + ... + ItemsCount(params)); };
-
+	/*
+	* Creates a mutable copy of a string view list and assignes to an output array.
+	*/
 	template<std::convertible_to<std::string_view> Item>
 	constexpr void assignPtr(std::unique_ptr<char[]>*& ptr, Item&& item) {
 		*ptr = std::move(fromConstCharToCharPtr(item));
@@ -60,7 +77,10 @@ namespace detail {
 			++ptr;
 		}
 	};
-
+	/*
+		Take a list of just about any argument which could then be turned into a string view or a range of string views. 
+		Turn those into a mutable char* array.
+	*/
 	template<stringView_OrContainerOfStringView ...Types>
 	inline std::unique_ptr<std::unique_ptr<char[]>[]> fromConstCharArrayToCharPtrArray(Types&& ...params) {
 		size_t argc = CountAll(params...);
@@ -70,6 +90,11 @@ namespace detail {
 		return buffer;
 	}
 }
+/*
+* Used for specifying arguments of a system call in an ergonomic way. Does not preppend the program name
+* Allocates new memory for the wrapped arguments.
+* Can be created with just about anything convertible to string_view or a a range of string_views.
+*/
 struct ArgvWrapper {
 
 	const size_t argc;
@@ -87,21 +112,30 @@ struct ArgvWrapper {
 	{}
 
 };
+//TODO: gracefully ahndle the asserts in this file.
 
+/*
+	Create a pipe which can be written but the output will be discarded.
+*/
 inline ToBeClosedFd readClosedPipe() {
 	int pipefd[2];
 	assert(pipe(pipefd) != -1);
 	close(pipefd[0]);//I will not be reading that, who knows what will happen to it though.
 	return ToBeClosedFd{ pipefd[1] };
 }
-
+/*
+	Create a pipe which can only be read from but will never be written.
+	Thus reads EOF but is a valid FD.
+*/
 inline ToBeClosedFd writeClosedPipe() {
 	int pipefd[2];
 	assert(pipe(pipefd) != -1);
 	close(pipefd[1]);//write EOF.
 	return ToBeClosedFd{ pipefd[0] };
 }
-
+/*
+* Exec fail nice messages.
+*/
 inline void execFail(int error) {
 	switch (error) {
 	case E2BIG: fprintf(stderr,"Too many args"); break;
@@ -130,22 +164,18 @@ inline void execFail(int error) {
 
 }
 
-typedef struct {
-	const char* filename;
-	const size_t argc;
-	char* const* argv;
-} clone_args;
 
+/*
+Spawns a new process using fork - so the arguments can be freed right after the call.
+If the exec fails, the child is not allowed to return and exits.
+The child invokes the callback right before spawing with valid file descriptors marked for close on exec - can be used to for example revert some of the automated markings.
+*/
 template<class Callback>
 inline pid_t spawnProcess(int inFD, int outFD, int errFD, const char* programPath, char* const argv[], Callback callback) noexcept {
 	static_assert(noexcept(callback()));
 	pid_t pid = fork();
 	if (pid != 0) { //master
-		/*auto temp = argv;
-		while (*temp != nullptr) {
-			printf("arg: %s\n\n\n", *temp);
-			++temp;
-		}*/
+		assert(pid > 0);//TODO: error handling cannot fork.
 		return pid;
 	}
 	else { //I am the child
@@ -157,7 +187,7 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD, const char* programPat
 
 		This could in theory also be noe with clone and setting of correct flags.
 		*/
-		//These could be realistically constants.
+		//These could be realistically constants but I doubt the overhead matters.
 		int in = fileno(stdin);
 		int out = fileno(stdout);
 		int err = fileno(stderr);
@@ -167,20 +197,30 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD, const char* programPat
 		dup2(inFD, in);
 		dup2(outFD, out);
 		dup2(errFD, err);
-		// in-out == 0-2
+		// in-out == 0-2 - had been asserted in main();
 		close_range(3, ~0U, CLOSE_RANGE_CLOEXEC);
 
 		callback();
 		execvp(programPath, argv);//return error if any, otherwise the child thread will return the sub-program's error. WE SEARCH PATH HERE!
 		int error = errno;
-		dup2(tempErr, err);
+		dup2(tempErr, err); //restore old stderr to valid state.
 		fprintf(stderr, "Execv failed with errorcode %d :\n", error);
 		execFail(error);
 
 		exit(255);//we cannot be allowed to return from here.
 	}
 };
-
+/*
+* A simple wrapper for all the arguments a clone call needs.
+*/
+struct clone_args {
+	const char* filename;
+	const size_t argc;
+	char* const* argv;
+};
+/*
+* Spawns a process with argc error handling and pre-pending the filename to the argv array
+*/
 template<class Callback>
 inline pid_t spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD, const std::filesystem::path& programPath, char* const argv[], size_t argc, Callback callback) {
 	if (argc < 1) {
@@ -218,11 +258,13 @@ inline pid_t spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD, const st
 
 };
 
-
+/*
+	Wait untill a child process specified by pid finishes execution. 
+*/
 inline std::optional<int> waitForTermination(pid_t pid) {
 	int status;
 	do {
-		auto returnStatus = waitpid(pid, &status, 0);//TODO: wrap me in an object, just in case of exceptions
+		auto returnStatus = waitpid(pid, &status, 0);
 		if (returnStatus == -1) {
 			int error = errno;
 			switch (error) {
@@ -242,7 +284,7 @@ inline std::optional<int> waitForTermination(pid_t pid) {
 			break;
 		}
 		else {
-			assert(returnStatus == pid);//this could change in the case of catching the wait of another pid.
+			assert(returnStatus == pid);//this could change in the case of catching the wait of another pid. THIS SHOULD BE IMPOSSIBLE DUE TO THE NATURE OF THE CALL
 		}
 	} while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
@@ -269,9 +311,14 @@ struct PidDeleter {
 		return fd >= 0;
 	}
 };
-
+/*
+	A helper which will wait for a process to exit when going out of scope.
+	Care, since assinging a new pid will not purge the last wait result.
+*/
 using toBeClosedPid = ToBeClosedGeneric<pid_t, PidDeleter>;
-
+/*
+All the relevant parts of a spawned process wrapped in a class
+*/
 struct [[nodiscard]] SpawnedValues  {
 	toBeClosedPid pid; //ORDER MATTERS HERE! we first close the FDs and then wait for termination. Do not reorder unles defining your own destructor with explicit reset calls
 	ToBeClosedFd stderrFD;
@@ -287,7 +334,10 @@ struct [[nodiscard]] SpawnedValues  {
 	SpawnedValues(pid_t pid, ToBeClosedFd err, ToBeClosedFd out) :pid(pid), stderrFD(std::move(err)), stdoutFD(std::move(out)) {}
 	SpawnedValues(pid_t pid, fileDescriptor err, fileDescriptor out) :pid(pid), stderrFD(std::move(err)), stdoutFD(std::move(out)) {}
 };
-
+/*
+All the relevant parts of a spawned process wrapped in a class with the bonus of using C-style FILE*
+It does not igev c++ streams as there is no method for creating a stream from a FILE* nor from a file descriptor.
+*/
 struct [[nodiscard]] SpawnedValuesFilePtr {
 	toBeClosedPid pid; //ORDER MATTERS HERE! we first close the FDs and then wait for termination. Do not reorder unles defining your own destructor with explicit reset calls
 	ToBeClosedFileFD err;
@@ -308,12 +358,13 @@ concept ArgvWrapperLike = requires{
 	std::same_as<std::decay_t<ArgvWrapper>, T>;
 };
 
-
+/*
+* A high level function for spawning a process with file descriptor returns.
+*/
 template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
 inline SpawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
 	int errfd[2];
 	assert(pipe(errfd) != -1);
-	//auto errfd = dup(fileno(stderr));
 	int outfd[2];
 	assert(pipe(outfd) != -1);
 
@@ -325,12 +376,13 @@ inline SpawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPa
 }
 
 
-
+/*
+* A high level function for spawning a process which is only meant to write to stdout.
+*/
 template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
 inline SpawnedValuesFilePtr spawnStdoutReadProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
 	int errfd[2];
 	assert(pipe(errfd) != -1);
-	//auto errfd = dup(fileno(stderr));
 	int outfd[2];
 	assert(pipe(outfd) != -1);
 

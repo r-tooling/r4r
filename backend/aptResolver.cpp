@@ -25,7 +25,6 @@ backend::Apt::Apt() :allRepoInstalls(listAllRepos()), repoInstalLookup{} {
 
 }
 
-//returns installedVersion;source
 backend::AptLookupInfo backend::Apt::resolveNameToSourceRepo(const std::u8string& name) {
 	using std::operator""sv;
 
@@ -118,9 +117,9 @@ Version table:
 				ltrim(data, u8"* ");//may begin with ***space
 				rtrim(data, u8"1234567890");//will end with priority number
 				trim(data);//all that remains is the version;
-				fprintf(stderr, "Error finding repo for installed versionof of %s = %s", toNormal(name).c_str(), toNormal(version).c_str());
+				fprintf(stderr, "Error finding repo for installed version of package %s = %s \n", toNormal(name).c_str(), toNormal(version).c_str());
 				version = data;
-				fprintf(stderr, " looking up  fallback version %s ", toNormal(version).c_str());
+				fprintf(stderr, " looking up  fallback version %s \n", toNormal(version).c_str());
 				state = sourceLookup;
 			}
 			else {
@@ -146,11 +145,11 @@ Version table:
 	return { version, packageRepo };
 }
 
-backend::AptInfo& backend::Apt::translatePackageToIdentify(const std::u8string& packageRepo)
+const backend::AptInfo& backend::Apt::translatePackageToIdentify(const std::u8string& packageRepo)
 {
 
 	if (auto it = repoInstalLookup.find(packageRepo); it != repoInstalLookup.end()) {
-		return it->second;
+		return *it;
 	}
 
 	std::u8string translatedPackage;
@@ -193,7 +192,7 @@ backend::AptInfo& backend::Apt::translatePackageToIdentify(const std::u8string& 
 	}
 	for (auto& it : allRepoInstalls) {//try exact match
 		if (it.find(translatedPackage) != it.npos) {
-			return repoInstalLookup.try_emplace(packageRepo, it).first->second;
+			return *repoInstalLookup.emplace(packageRepo, it).first;
 		}
 	}
 	for (auto& it : allRepoInstalls) {//oh well, try piecewise
@@ -209,9 +208,9 @@ backend::AptInfo& backend::Apt::translatePackageToIdentify(const std::u8string& 
 				}
 			}
 			if (!anyFail)
-				return repoInstalLookup.try_emplace(packageRepo, it).first->second;
+				return *repoInstalLookup.emplace(packageRepo, it).first;
 		}
 	}
 
-	return repoInstalLookup.try_emplace(packageRepo, u8"deb" + translatedPackage).first->second;
+	return *repoInstalLookup.emplace(packageRepo, u8"deb" + translatedPackage).first;
 }

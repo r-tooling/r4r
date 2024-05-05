@@ -17,10 +17,14 @@ struct FilePtrDeleter {
 		return fp != nullptr;
 	}
 };
-
+/*
+	Unique-ptr like class for FILE
+	*/
 using ToBeClosedFile = ToBeClosedGeneric<FILE*, FilePtrDeleter>;
 
-
+/*
+	Unique-ptr like class for FILE* constructed from a file descriptor - and taking ownership of it.
+*/
 struct ToBeClosedFileFD : protected ToBeClosedFile {
 	fileDescriptor underlyingFD;
 	/*
@@ -63,8 +67,8 @@ struct ToBeClosedFileFD : protected ToBeClosedFile {
 
 template<class T>
 struct freeDeleter {
-	static_assert(std::is_trivially_destructible_v<T>);
-	constexpr static T** invalidValue = nullptr;
+	static_assert(std::is_trivially_destructible_v<T>,"Override this, if you really want the underlying class to be freed and not have desrtuctor called.");
+	constexpr static T* invalidValue = nullptr;
 
 	void operator()(T*& ptr) const noexcept {
 		if (ptr) {
@@ -77,9 +81,14 @@ struct freeDeleter {
 	}
 
 };
+/*
+unique_ptr with a free call instead of delete
+*/
 template<class Value>
 using FreeUniquePtr = ToBeClosedGeneric<Value*, freeDeleter<Value>>;
-
+/*
+This is used to allow the internal pointer to be referenced and modified by the outside API. IF they decide to set it to nullptr, it is assumed to be deleted.
+*/
 template<class T>
 struct OpaqueUniquePtr : public ToBeClosedGeneric<T*, freeDeleter<T>> {
 	using ToBeClosedGeneric<T*, freeDeleter<T>>::ToBeClosedGeneric;
@@ -88,7 +97,9 @@ struct OpaqueUniquePtr : public ToBeClosedGeneric<T*, freeDeleter<T>> {
 		return this->fd;
 	}
 };
-
+/*
+A helper iterator for iterating over a FILE* line by line. Returns the buffer as a string_view into the buffer.
+*/
 struct LineIterator {
 	FILE* file;
 
