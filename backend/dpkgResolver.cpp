@@ -118,7 +118,7 @@ namespace {
 						//we have found a potentiall delimiter for the path
 						potentialSv.remove_prefix(pos); //remove the potential package name
 						potentialSv.remove_prefix(2); //remove the : and whitespace around
-						potentialSv.remove_suffix(1); //newline
+						potentialSv.remove_suffix(std::min(size_t{ 1 }, potentialSv.size())); //newline
 
 						split = split.substr(0, pos); //we know how long the package name was.
 					}
@@ -242,11 +242,16 @@ const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& nam
 		auto [actualName, version] = resolveNameToVersion(name);
 		auto [apt_version, packageRepoMangledName] = aptResolver.resolveNameToSourceRepo(actualName);
 		if (apt_version != version) {
+			if (apt_version == u8"(none)" || packageRepoMangledName == u8"") {
+				fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) Apt version not found. Scripts will be broken.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
+				auto emplaced = packageNameToData.emplace(actualName, version, u8"");
+				return *emplaced.first;
+			}
 			fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) using APT version for script.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
-		}
+		} 
 		auto& translatedPackage = aptResolver.translatePackageToIdentify(packageRepoMangledName);
 
-		auto emplaced = packageNameToData.emplace(actualName, apt_version, translatedPackage);
+		auto emplaced = packageNameToData.emplace(actualName, apt_version, translatedPackage);//TODO: the usage of "actual name" breaks lookup in case of errors
 		return *emplaced.first;
 	}
 }

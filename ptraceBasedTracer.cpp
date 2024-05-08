@@ -57,12 +57,11 @@ int main(int argc, char* argv[])
 		return -2;
 	}
 
-	assert(argc >= 2);//TODO: check args better.
 	{
 		int in = fileno(stdin);
 		int out = fileno(stdout);
 		int err = fileno(stderr);
-
+		(void)in; (void)out; (void)err;
 		assert(in >= 0 && in < 3);//should be true anywhere.
 		assert(err >= 0 && err < 3);
 		assert(out >= 0 && out < 3);

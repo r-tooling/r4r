@@ -323,7 +323,7 @@ namespace middleend {
 		auto& val = pidToObj(process);
 		auto result = newWorkingDirectory;//this makes the semantics of what actually gets copied explicit. No need to implicity copy in the argument
 		if (!result.is_absolute()) {
-			result = resolveToAbsoltute(process, newWorkingDirectory);
+			result = resolveToAbsolute(process, newWorkingDirectory);
 		}
 		val.fsInfo->workdir = std::move(result);
 	}
@@ -333,23 +333,25 @@ namespace middleend {
 		return changeDirectory(process, getFilePath<true>(process, fileDescriptor).value_or("/pathError"));
 	}
 
-	absFilePath MiddleEndState::resolveToAbsoltute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor) const
+	absFilePath MiddleEndState::resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor,bool log) const
 	{
 		if (fileDescriptor == AT_FDCWD) {
-			return resolveToAbsoltute(process, relativePath);
+			return resolveToAbsolute(process, relativePath,log);
 		}
 		else {
 			try {
 				return std::filesystem::canonical(getFilePath<true>(process, fileDescriptor).value_or("") / relativePath);//TODO: weakly cannonical may prove to be enough sometimes.
 			}
 			catch (...) {
-				fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues", relativePath.c_str());
+				if (log) {
+					fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues", relativePath.c_str());
+				}
 				return getFilePath<true>(process, fileDescriptor).value_or("") / relativePath;
 			}
 		}
 	}
 
-	absFilePath MiddleEndState::resolveToAbsoltuteDeleted(pid_t process, const std::filesystem::path& relativePath) const
+	absFilePath MiddleEndState::resolveToAbsoluteDeleted(pid_t process, const std::filesystem::path& relativePath) const
 	{
 		if (relativePath.is_absolute()) {
 			return relativePath;
@@ -369,7 +371,7 @@ namespace middleend {
 
 	}
 
-	absFilePath MiddleEndState::resolveToAbsoltute(pid_t process, const std::filesystem::path& relativePath) const
+	absFilePath MiddleEndState::resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath,bool log) const
 	{
 		if (relativePath.is_absolute()) {
 			return relativePath;
@@ -388,7 +390,8 @@ namespace middleend {
 			return std::filesystem::canonical(val.fsInfo->workdir / relativePath);//TODO: weakly cannonical may prove to be enough sometimes.
 		}
 		catch (...) {
-			fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues", relativePath.c_str());
+			if(log)
+				fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues\n", relativePath.c_str());
 			return val.fsInfo->workdir / relativePath;
 		}
 	}
@@ -408,7 +411,7 @@ namespace middleend {
 		if (fileInfo) {
 			fileInfo->registerAccess(std::move(access));
 			if (fileInfo->isCurrentlyOnTheDisk != existed) {
-				fprintf(stderr, "When creating a file, a file was assumed to exist when it did not or vice versa.");
+				fprintf(stderr, "When creating a file, a file was assumed to exist when it did not or vice versa.\n");
 				//TODO: don't fstat if we "know"
 			}
 			fileInfo->wasEverCreated = !existed;
@@ -422,7 +425,7 @@ namespace middleend {
 					.wasEverDeleted = false,
 					.isCurrentlyOnTheDisk = true,
 					.wasInitiallyOnTheDisk = existed,
-					.type = file_info::file,
+					.type = std::nullopt, //could be literally anything. - stat?
 					.requiresAllSubEntities = std::nullopt,
 				});
 			if (existed) {
@@ -498,7 +501,7 @@ namespace middleend {
 					//the kernel treats this as just about any other binary rewrite. 
 					//these are asuumed to be executed from the current wokr dir but I ahve not managed to find much info on that aside from random stack overflow threads.
 					//todo: testme
-					path = resolveToAbsoltute(process, path);//todo: if unresolvable return true immadietely.
+					path = resolveToAbsolute(process, path);//todo: if unresolvable return true immadietely.
 				}
 				//for recursion the kernel has a herd limit- has a hard limit see for example https://github.com/SerenityOS/serenity/blob/ee3dd7977d4c88c836bfb813adcf3e006da749a8/Kernel/Syscalls/execve.cpp#L881
 				//or the bin rewrite limit in linux.
@@ -523,6 +526,7 @@ namespace middleend {
 		auto& val = pidToObj(process);
 		
 		if (auto info = val.fdTable->table.find(fd); info != val.fdTable->table.end()) {
+			info->second->type = file_info::dir; //add warn
 			info->second->requiresAllSubEntities = true;//todo: be more specific about which files are required.
 		}
 		else {
@@ -629,9 +633,10 @@ namespace middleend {
 		//TODO: how about other flags
 		//TODO: check if we already know about file
 		//TODO: alternatvelly, the file could be querried for using the at descriptor of the process itself. Requires getting a pidfd consistently.
-		auto abs = resolveToAbsoltute(process, fileRelPath, at);
+		auto abs = resolveToAbsolute(process, fileRelPath, at,false);
 		state = fstatat(AT_FDCWD, abs.c_str(),&data, (flags & O_NOFOLLOW) ? AT_SYMLINK_NOFOLLOW : 0);
 		err = errno;
+		(void)err;
 		assert(state == 0 || (state = -1 && err == ENOENT)); //todo: handle other errors
 		return state == 0;
 	}
@@ -641,4 +646,5 @@ namespace middleend {
 			fprintf(stderr, "%s\n", message);
 		}
 	}
+
 }

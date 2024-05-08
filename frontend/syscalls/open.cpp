@@ -37,8 +37,7 @@ namespace frontend::SyscallHandlers {
 			//TODO: log open failed and file is non existent. Check retval for error.
 		}
 		else {
-			auto resolvedPath = state.resolveToAbsoltute(process.pid, fileRelPath, at);
-			assert(resolvedPath.is_absolute());
+			auto resolvedPath = state.resolveToAbsolute(process.pid, fileRelPath, at);
 			state.openHandling(process.pid, resolvedPath, std::move(fileRelPath), FD, flags, existed);//the order is undefined otherwise
 
 		}

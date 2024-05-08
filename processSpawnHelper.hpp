@@ -119,8 +119,10 @@ struct ArgvWrapper {
 */
 inline ToBeClosedFd readClosedPipe() {
 	int pipefd[2];
-	assert(pipe(pipefd) != -1);
+	auto pipe_res = pipe(pipefd);
+	assert(pipe_res != -1);
 	close(pipefd[0]);//I will not be reading that, who knows what will happen to it though.
+	(void)pipe_res;
 	return ToBeClosedFd{ pipefd[1] };
 }
 /*
@@ -129,8 +131,10 @@ inline ToBeClosedFd readClosedPipe() {
 */
 inline ToBeClosedFd writeClosedPipe() {
 	int pipefd[2];
-	assert(pipe(pipefd) != -1);
+	auto pipe_res = pipe(pipefd);
+	assert(pipe_res != -1);
 	close(pipefd[1]);//write EOF.
+	(void)pipe_res;
 	return ToBeClosedFd{ pipefd[0] };
 }
 /*
@@ -364,9 +368,13 @@ concept ArgvWrapperLike = requires{
 template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
 inline SpawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
 	int errfd[2];
-	assert(pipe(errfd) != -1);
+	auto pipe_res = pipe(errfd);
+	assert(pipe_res != -1);
+	
 	int outfd[2];
-	assert(pipe(outfd) != -1);
+	pipe_res = pipe(outfd);
+	(void)pipe_res;
+	assert(pipe_res != -1);
 
 	auto pipe = readClosedPipe();
 	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd[1], programPath, argv.get(), argv.argc, callback);
@@ -382,10 +390,12 @@ inline SpawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPa
 template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
 inline SpawnedValuesFilePtr spawnStdoutReadProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
 	int errfd[2];
-	assert(pipe(errfd) != -1);
+	auto pipe_res = pipe(errfd);
+	assert(pipe_res != -1);
 	int outfd[2];
-	assert(pipe(outfd) != -1);
-
+	pipe_res = pipe(outfd);
+	(void)pipe_res;
+	assert(pipe_res != -1);
 	auto pipe = readClosedPipe();
 	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd[1], programPath, argv.get(), argv.argc, callback);
 	close(outfd[1]);

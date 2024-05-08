@@ -163,14 +163,14 @@ const backend::AptInfo& backend::Apt::translatePackageToIdentify(const std::u8st
 		data.remove_suffix(std::u8string_view{ u8" amd64" }.size());
 	}
 	auto pkgURI = data.substr(0, data.find_first_of(u8" "));
-	data.remove_prefix(pkgURI.size() + 1);
+	data.remove_prefix(std::min(pkgURI.size() + 1,data.size()));
 	translatedPackage += pkgURI;
 	translatedPackage += u8" ";
 
 	std::vector<std::u8string_view> props;
 	//if we were with a higher c++ version I'd ipplay range transforms here with splits but alas.
 	//(.*)/[^ ](.*) => \1 \2
-	while (!data.empty()) {
+	while (!data.empty() && data != u8"") {
 		auto offset = data.find_first_of(u8"/");
 		if (offset == data.npos) {
 			translatedPackage += data;

@@ -17,7 +17,7 @@ namespace frontend::SyscallHandlers {
 	{
 		//TODO: search perms in path.
 		if (syscallRetval == 0) {
-			auto resolvedPath = state.resolveToAbsoltute(process.pid, fileRelPath, at);
+			auto resolvedPath = state.resolveToAbsolute(process.pid, fileRelPath, at);
 			state.createDirectory(process.pid, resolvedPath, std::move(fileRelPath));//the order is undefined otherwise
 		}
 	}

@@ -65,6 +65,7 @@ namespace frontend::SyscallHandlers {
 	void Clone3::entry(processState& process, const middleend::MiddleEndState& state, long syscallNr)
 	{
 		size_t size = getSyscallParam<2>(process.pid);
+		(void)size;
 		assert(size == sizeof(clone_args));
 		auto data = userPtrToOwnPtr<clone_args>(process.pid, getSyscallParam<1>(process.pid));
 		flags = data->flags & ~0xff;

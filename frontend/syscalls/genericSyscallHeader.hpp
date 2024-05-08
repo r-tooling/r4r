@@ -30,7 +30,7 @@ namespace frontend::SyscallHandlers {
 		};
 	};
 	struct ErrorHandler :NullOptHandler {
-		void entryLog(const processState&, const middleend::MiddleEndState&, long syscallNr) {
+		void entry(processState&, const middleend::MiddleEndState&, long syscallNr) override {
 			fprintf(stderr, "entering unhandled syscall! %s \n", getSyscallName(syscallNr).value_or("Unknown").data());
 		};
 	};

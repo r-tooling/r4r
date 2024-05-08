@@ -154,7 +154,7 @@ namespace {
 		static const auto root = 
 		n("/", 
 			l("proc", dir),
-			l("etc", dir),
+			//l("etc", dir),
 			l("sys", dir),
 			l("dev", dir),
 			n("usr", n("lib", n("locale", l("locale-archive", exa))))
@@ -201,8 +201,8 @@ namespace {
 	
 	
 	void writeScriptLaunch(std::ostream& str, const middleend::MiddleEndState& state) {
-		str << "!/bin/sh" << std::endl;
-		str << "cd '" << state.initialDir << "'"; //todo:escaping
+		str << "#!/bin/sh" << std::endl;
+		str << "cd '" << state.initialDir << "'" <<std::endl; //todo:escaping
 		//todo switch to user
 
 		for (auto& env : state.env) {
@@ -234,7 +234,11 @@ namespace backend {
 	void chrootBased(const middleend::MiddleEndState& state)
 	{
 		char dirName[]{ "chrootTestXXXXXX\0" }; //NOT STATIC very intentionally, gets modified. Null byte because of paranoia if this ever gets changed it will need to be thought of.
-		assert(mkdtemp(dirName) != nullptr);
+		auto res =  mkdtemp(dirName);
+		if (res == nullptr) {
+			fprintf(stderr, "Unable to create temp directory \n");
+			return;
+		}
 		ToBeClosedFd dir{ open(dirName, O_DIRECTORY) };
 		//auto err = errno;
 		if (!dir) {
@@ -273,9 +277,10 @@ namespace backend {
 		auto dpkgResolver = backend::Dpkg{};
 
 		std::vector<middleend::MiddleEndState::file_info*> unmatchedFiles;
+		std::vector<middleend::MiddleEndState::file_info*> executed;
 
 		auto openedFile = std::ofstream{ output,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
-		openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << ", source dpkg package" << ", source R package" << std::endl;
+		openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << ", needsSubfolders" << ", source dpkg package" << ", source R package" << std::endl;
 		for (auto& [path, info] : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
 			auto flags = 0;
 			for (auto& relative : info->accessibleAs) {
@@ -295,10 +300,11 @@ namespace backend {
 				}
 
 			}
-			openedFile << "\"" << replaceAll(std::move(info->realpath.string()), "\""s, "\"\"\""s) << "\"" << "," << flags_to_str(flags)
+			openedFile << "\"" << replaceAll(std::move(info->realpath.string()), "\""s, "\"\"\""s)
+				<< "\"" << "," << flags_to_str(flags)
 				<< "," << (info->wasInitiallyOnTheDisk.value_or(false) ? "F" : "T")
-				<< "," << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T");
-
+				<< "," << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T")
+				<< "," << (info->requiresAllSubEntities.value_or(false) ? "T" : "F");
 
 
 			auto dpkg = dpkgResolver.resolvePathToPackage(info->realpath);
@@ -308,17 +314,21 @@ namespace backend {
 				std::string compat{ reinterpret_cast<const char*>(resolved.data()),resolved.length() };
 				openedFile << ", \"" << compat << "\"";
 			}
+
 			auto rpkg = rpkgResolver.resolvePathToPackage(info->realpath);//always resolve all dependencies, the time overlap is marginal and I need to know the version even in dpkg packages.
 			{
 				auto resolved = replaceAll(rpkg ? std::u8string(**rpkg) : u8""s, u8"\""s, u8"\"\"\""s);
 				std::string compat{ reinterpret_cast<const char*>(resolved.data()),resolved.length() };
 				openedFile << ", \"" << compat << "\"";
 			}
-			openedFile << std::endl;
 			if (!rpkg && !dpkg) {
 				unmatchedFiles.emplace_back(info.get());
 			}
 
+			if (flags & fileAccessFlags::execute) {
+				executed.emplace_back(info.get());
+			}
+			openedFile << std::endl;
 		}
 
 		auto dockerImage = std::ofstream{ output.parent_path() / "dockerImage" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
@@ -333,7 +343,7 @@ namespace backend {
 				" || echo '" << toNormal(repo.source) << "' >> /etc/apt/sources.list"; //try to avoid duplicates. Maybe just ef it and use apt-add-repository? - this drastically increases the image size though
 			//TODO: keys https://stackoverflow.com/questions/68992799/warning-apt-key-is-deprecated-manage-keyring-files-in-trusted-gpg-d-instead/71384057#71384057
 		}
-		dockerImage << std::endl << "RUN apt-get update;" << std::endl; //ensure packages can be loaded, no upgrade?
+		dockerImage << "\\\n && apt-get update;" << std::endl; //ensure packages can be loaded, no upgrade?
 		//temp solution: --allow-unauthenticated
 		//todo: escaping
 		if (!dpkgResolver.packageNameToData.empty()) {
@@ -350,23 +360,48 @@ namespace backend {
 		///usr/lib/R/etc/Renviron.site coudl get modified. So coudl probably any other file in dpkg packages...
 		//this can be done before the program is ever run
 		//todo: what if it is deleted now?
-		for (auto file : unmatchedFiles) {
-			if (file->wasInitiallyOnTheDisk.value_or(false)) {
-				if (!isSpecialCased(file)) {
-					if (file->type == std::remove_reference_t<decltype(file->type.value())>::dir) {
-						//TODO: remove duplicates, handle symlinks
-						dockerImage << "RUN mkdir -p " << file->realpath << "" << std::endl;//autoquoted
-					}
-					else {
-						dockerImage << "RUN mkdir -p " << file->realpath.parent_path() << "" << std::endl;
+		std::unordered_map<absFilePath, std::string> dockerPathTranslator;
+
+		{
+			//TODO: handle symlinks
+			std::unordered_set<std::filesystem::path> folders = rpkgResolver.getLibraryPaths();
+			for (auto file : unmatchedFiles) {
+				if (file->wasInitiallyOnTheDisk.value_or(false) && file->isCurrentlyOnTheDisk.value_or(true)) {
+					if (!isSpecialCased(file)) {
+						if (file->type == std::remove_reference_t<decltype(file->type.value())>::dir
+							|| (!file->type.has_value() && std::filesystem::is_directory(file->realpath))) {
+							folders.emplace(file->realpath);
+							//TODO: handle symlinks
+						}
+						else if (file->type == std::remove_reference_t<decltype(file->type.value())>::file 
+							|| (!file->type.has_value() && std::filesystem::is_regular_file(file->realpath))) {
+							dockerPathTranslator.emplace(file->realpath, std::to_string(dockerPathTranslator.size()));
+							folders.emplace(file->realpath.parent_path());
+						}
+						else {
+							folders.emplace(file->realpath.parent_path());
+						}
 					}
 				}
 			}
-		}
 
+			if (!folders.empty()) {
+				dockerImage << "RUN mkdir -p ";
+				for (auto& folder : folders) {
+					dockerImage << folder << " ";//autoquoted
+				}
+				dockerImage << std::endl;
+			}
+		}
+		
+
+		auto RpkgDirect = rpkgResolver.packageNameToData.size();
 		//todo: check R version
 		if (!rpkgResolver.packageNameToData.empty()) {
-			dockerImage << "RUN Rscript -e '"
+			//this will break if ran directly due to too large a string argument. I do not know the specifics but passing it into a file and executing the file works.
+
+
+			dockerImage << "RUN echo '"
 				"cores = min(parallel::detectCores(),4);"//parallel is a part of the core on ubuntu...
 				"tmpDir <- tempdir();"
 				"install.packages(\"remotes\",lib=c(tmpDir));"
@@ -382,7 +417,7 @@ namespace backend {
 				// this works due to a combination of things explained here https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
 				// and here https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
 				dockerImage << "install_version(\"" << toNormal(package.packageName) << "\",\"" << toNormal(package.packageVersion) << "\"" <<
-					",upgrade = \"never\", dependencies=F,lib=c("<<package.whereLocated<<"), Ncpus=cores" << "); ";//topsorted
+					",upgrade = \"never\", dependencies=F,lib=c("<<package.whereLocated.parent_path()<<"), Ncpus=cores" << "); ";//topsorted
 				//unfortunatelly upgrade=never is not sufficient
 				// the package may depend on other packages which are not installed and such packages would then get installed at possibly higher versions than intended
 				//TODO: add parsing of the source param to get the potential github and such install rather than this api.
@@ -392,32 +427,27 @@ namespace backend {
 				// but most likely will just end up
 
 			}
-			dockerImage << "'" << std::endl;
+			dockerImage << "' > R_Install && Rscript R_Install" << std::endl;
 		}
 
-		std::unordered_map<absFilePath, std::string> dockerPathTranslator;
 
 
-		for (auto file : unmatchedFiles) {
-			if (file->wasInitiallyOnTheDisk.value_or(false)) {
-				if (!isSpecialCased(file)) {
-					if (file->type != std::remove_reference_t<decltype(file->type.value())>::dir) {
+		//COPY src dest does not work as it quickly exhaust the maximum layer depth
+		//instead a folder with all the relevant data is serialised to and then added to the image where it is unserialised.
 
-						dockerPathTranslator.emplace(file->realpath, std::to_string(dockerPathTranslator.size()));
 
-						//todo: accessible as handling - make sure simlinks are in existence.
-						dockerImage << "COPY DockerData/" << dockerPathTranslator.at(file->realpath) << " " << file->realpath << std::endl;
-
-					}
-				}
-
-			}
-		}
 		auto file = createLaunchScript(".",state);
 		auto absPath = std::filesystem::absolute(file).lexically_normal();
 		dockerPathTranslator.emplace(absPath, std::to_string(dockerPathTranslator.size()));
+		if (!dockerPathTranslator.empty()) {
+			dockerImage << "ADD DockerData /tmp/DockerData" << std::endl;
 
-		dockerImage << "COPY  DockerData/" << dockerPathTranslator.at(absPath) << " " << absPath << std::endl;
+			dockerImage << "RUN " ;//unpack
+			for (auto& [path, key] : dockerPathTranslator) {
+				dockerImage << "mv /tmp/DockerData/" << key << " " << path << " && ";
+			}
+			dockerImage << "true" << std::endl;
+		}
 
 
 		for (auto& env : state.env) {
@@ -426,10 +456,27 @@ namespace backend {
 		dockerImage << "WORKDIR " << state.initialDir << std::endl;
 		//TODO: state.users;
 
-		dockerBuildScript << "#!/bin/sh" << std::endl << "mkdir 'DockerData'; cd DockerData; ";
+		dockerBuildScript << "#!/bin/sh" << std::endl << "mkdir 'DockerData'; cd 'DockerData'; ";
 		for (const auto& [source, dest] : dockerPathTranslator) {
-			dockerBuildScript << "ln " << source << " " << dest << std::endl; //todo: escaping
+			dockerBuildScript << "cp " << source << " " << dest << std::endl; //todo: escaping, ln if the file is on the same filesystem. Or amybe create a condition if ln fails, fall back to cp.
 		}
-		dockerBuildScript << "cd ..; docker build -t 'diplomka:test' -f dockerImage ." << std::endl;
+		dockerBuildScript << "cd ..; echo '*' > '.dockerignore'; echo '!DockerData' >> '.dockerignore';";
+		dockerBuildScript << "docker build -t 'diplomka:test' -f dockerImage .; " << std::endl;
+		dockerBuildScript << "rm -rf 'DockerData'; rm '.dockerignore';" << std::endl;
+		dockerBuildScript << "docker run  -it --entrypoint bash  diplomka:test" << std::endl;
+
+		auto report = std::ofstream{ output.parent_path() / "report.txt",std::ios::openmode::_S_trunc | std::ios::openmode::_S_out };
+
+		report << "Discovered " << state.encounteredFilenames.size() << " different file dependencies" << std::endl;
+		report << "Of those " << unmatchedFiles.size() << " were not installed using any form of package manager" << std::endl;
+		report << "Dpkg provides " << dpkgResolver.packageNameToData.size() << " different packages the program depends on. " << " This does not include dependencies of the packages which were not directly used during the program runtime " << std::endl;
+		report << "R provides " << RpkgDirect << " packages used directly and " << rpkgResolver.packageNameToData.size() << " packages the program directly or indirectly depends on." << std::endl;
+		
+		
+		report << "The program incuding itself executed " << executed.size() << " files. Namely:" << std::endl;
+		for (decltype(auto) it : executed) {
+			report << it->realpath << std::endl;
+		}
 	}
+
 }

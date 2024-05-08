@@ -211,15 +211,16 @@ namespace middleend{
 		/*
 			At explicit file descriptor
 		*/
-		absFilePath resolveToAbsoltute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor) const;
+		absFilePath resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor, bool log = true) const;
+
 		/*
 			at FDCWD
 		*/
-		absFilePath resolveToAbsoltute(pid_t process, const std::filesystem::path& relativePath) const;
+		absFilePath resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, bool log = true) const;
 		/*
 			for paths after calling unlink and such. - the resolution algorithm will not fail on inexiistent directories
 		*/
-		absFilePath resolveToAbsoltuteDeleted(pid_t process, const std::filesystem::path& relativePath) const;
+		absFilePath resolveToAbsoluteDeleted(pid_t process, const std::filesystem::path& relativePath) const;
 
 	
 		//Open file
@@ -282,6 +283,4 @@ namespace middleend{
 		*/
 		void syscallWarn(int nr, const char * message);
 	};
-
-
 }

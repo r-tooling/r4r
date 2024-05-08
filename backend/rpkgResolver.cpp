@@ -6,7 +6,28 @@
 #include <cassert>
 
 namespace {
-	static const std::unordered_set<std::u8string_view> basePackages = { u8"base",u8"datasets",u8"utils",u8"grDevices"};
+	static const std::unordered_set<std::u8string_view> basePackages = { 
+		/*
+		heuristics - description "License: Part of R 4.4.0", "Version: 4.4.0" where the number fits the version.install.packages("tcltk") -> Warning message:
+package ‘tcltk’ is a base package, and should not be updated 
+
+	the packages are also located in the default R install dir.*/
+		u8"base",
+		u8"datasets",
+		u8"utils",
+		u8"grDevices",
+		u8"tools",
+		u8"graphics",
+		u8"compiler",
+		u8"stats",
+		u8"methods",
+		u8"grid",
+		u8"parallel",
+		u8"stats4",
+		u8"splines",
+		u8"tcltk",
+
+	};
 
 
 	/*
@@ -242,6 +263,32 @@ std::unordered_set<std::filesystem::path> backend::Rpkg::getLibraryPaths()
 		paths.insert(package.whereLocated.parent_path());
 	}
 	return paths;
+}
+
+
+//this is assumed to be only called after we have resolved all other files.
+
+backend::TopSortIterator backend::Rpkg::topSortedPackages() noexcept {
+	//emplace may cause rehas and this iterator invalidation, so the entire thing is done in batches.
+	{//TODO: multiple R versions break this. Hard. Only the first instance of a package is considered...
+		RpkgSet AllPackages = packageNameToData;
+		RpkgSet toAdd;
+		bool toAddEmpty = false;
+		do {
+			for (const auto& package : AllPackages) {
+				for (const auto& deps : package.dependsOn) {
+					if (!AllPackages.contains(deps) && !toAdd.contains(deps)) {
+						toAdd.emplace(resolvePackageToName_noinsert(deps));
+					}
+				}
+			}
+			toAddEmpty = toAdd.empty();
+			AllPackages.merge(std::move(toAdd));
+		} while (!toAddEmpty);
+		packageNameToData = AllPackages;
+	}//end lifetime guard
+
+	return TopSortIterator{ packageNameToData };
 }
 
 backend::RpkgPackage backend::Rpkg::resolvePackageToName_noinsert(const std::u8string& packageName)

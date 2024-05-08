@@ -4,7 +4,7 @@ namespace frontend::SyscallHandlers {
 	{
 		//fprintf(stderr, "unlink %s %ld\n", fileRelPath.c_str(), syscallRetval);
 		if (syscallRetval == 0) {
-			state.removeNonDirectory(process.pid, state.resolveToAbsoltuteDeleted(process.pid, fileRelPath));
+			state.removeNonDirectory(process.pid, state.resolveToAbsoluteDeleted(process.pid, fileRelPath));
 		}
 	}
 
@@ -12,7 +12,7 @@ namespace frontend::SyscallHandlers {
 	{
 		//fprintf(stderr, "rmdir %s %ld\n", fileRelPath.c_str(), syscallRetval);
 		if (syscallRetval == 0) {
-			state.removeDirectory(process.pid, state.resolveToAbsoltuteDeleted(process.pid, fileRelPath));
+			state.removeDirectory(process.pid, state.resolveToAbsoluteDeleted(process.pid, fileRelPath));
 		}
 	}
 

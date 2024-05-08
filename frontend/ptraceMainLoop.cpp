@@ -56,10 +56,18 @@ namespace {
 		while (true) {
 			//tracing all children, they SHOULD be ptraced, but hey, what if they are not? In that case we at least get a ptrace error down the line.
 			waitStatus = waitid(P_ALL, 0, &status, WSTOPPED | WCONTINUED | WEXITED); 
+			auto waitError = errno;
 			if (waitStatus == -1) {
-				auto waitError = errno;//todo: what in the other cases? At least log
-				assert(waitError == ECHILD);
-				return false;
+				if (waitStatus == EAGAIN) {
+					continue;
+				}
+				else if(waitError == ECHILD) {
+					return false;
+				}
+				else {
+					fprintf(stderr, "Wait error %d", waitError);
+					return false;
+				}
 			}
 			assert(waitStatus == 0);
 			//TODO: add qquick cases for when we just proceed to wait as this is not a relevant handling point.
@@ -99,7 +107,7 @@ namespace frontend{
 						//logSyscallExit(process, val);
 						if (process.syscallHandlerObj) {
 							process.syscallHandlerObj->exit(process, state, val);
-							process.syscallHandlerObj->exitLog(process,state,val);
+							//process.syscallHandlerObj->exitLog(process,state,val);
 							process.syscallHandlerObj = nullptr;
 						}
 						process.syscallState = processState::outside;
@@ -111,9 +119,8 @@ namespace frontend{
 						long syscall_id = getSyscallNr(process.pid);
 						auto ptr = mapper.get(syscall_id);
 						ptr->entry(process, state, syscall_id);
-						ptr->entryLog(process, state, syscall_id);
+						//ptr->entryLog(process, state, syscall_id);
 						process.syscallHandlerObj = std::move(ptr);
-						//logSyscallEntry(process, syscall_id, state);
 						process.syscallState = processState::inside;
 					}
 

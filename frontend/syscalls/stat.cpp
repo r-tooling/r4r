@@ -28,7 +28,7 @@ namespace frontend::SyscallHandlers {
 		simpleSyscallHandler_base::entryLog(process, state, syscallNr);
 
 		strBuf << "(";
-		appendResolvedFilename(process, state, at, strBuf);
+		appendResolvedFilename<false>(process, state, at, strBuf); 
 		strBuf << "," << path << "," << flags << ")";
 	}
 
@@ -132,8 +132,10 @@ namespace frontend::SyscallHandlers {
 			auto str = strBuf.str();
 			printf("%d: %s = ", process.pid, str.empty() ? "Unknown syscall" : str.c_str());
 			fflush(stdout);
-			write(fileno(stdout), returnedData.get(), syscallRetval);
-			write(fileno(stdout), "\n", 1);
+			auto written = write(fileno(stdout), returnedData.get(), syscallRetval);
+			written = write(fileno(stdout), "\n", 1);
+			(void)written; //thsi is marked nodiscard as it should be chacked. But at the end of the day, this not writing anything is fine.
+
 			strBuf.clear();
 		}
 		else {

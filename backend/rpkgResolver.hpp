@@ -143,28 +143,7 @@ namespace backend {
 		std::unordered_set < std::filesystem::path > getLibraryPaths();
 
 		//this is assumed to be only called after we have resolved all other files.
-		TopSortIterator topSortedPackages() noexcept {
-			//emplace may cause rehas and this iterator invalidation, so the entire thing is done in batches.
-			{
-				RpkgSet AllPackages = packageNameToData;
-				RpkgSet toAdd;
-				bool toAddEmpty = false;
-				do{
-					for (const auto& package : AllPackages) {
-						for (const auto& deps : package.dependsOn) {
-							if (!AllPackages.contains(deps) && !toAdd.contains(deps)) {
-								toAdd.emplace(resolvePackageToName_noinsert(deps));
-							}
-						}
-					}
-					toAddEmpty = toAdd.empty();
-					AllPackages.merge(std::move(toAdd));
-				} while (!toAddEmpty);
-				packageNameToData = AllPackages;
-			}//end lifetime guard
-
-			return TopSortIterator{ packageNameToData };
-		}
+		TopSortIterator topSortedPackages() noexcept;
 	private:
 		RpkgPackage resolvePackageToName_noinsert(const std::u8string& packageName);
 	};

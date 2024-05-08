@@ -8,10 +8,11 @@ namespace frontend::SyscallHandlers {
 
 	void Exec::exit(processState& process, middleend::MiddleEndState& state, long syscallRetval)
 	{
-		auto resolvedPath = state.resolveToAbsoltute(process.pid, fileRelPath);//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
-		auto failed = state.execFile(process.pid, resolvedPath, fileRelPath, 0, false);
-		if (failed && syscallRetval == 0) {
-			state.execFile(process.pid, resolvedPath, std::move(fileRelPath), 0, true); // Middle end decided the exec should fail but it does not. Force it to keep a hold of this reality.
+		if (syscallRetval == 0) {
+			auto resolvedPath = state.resolveToAbsolute(process.pid, fileRelPath);//avoid having to re-implement this in the middle end and possibly add more bugs in the implementation. TODD: handle chroot.
+			auto failed = state.execFile(process.pid, resolvedPath, fileRelPath, 0, false);
+			if(failed)
+				state.execFile(process.pid, resolvedPath, std::move(fileRelPath), 0, true); // Middle end decided the exec should fail but it does not. Force it to keep a hold of this reality.
 		}
 
 	}

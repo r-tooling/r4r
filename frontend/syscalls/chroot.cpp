@@ -41,6 +41,7 @@ namespace frontend::SyscallHandlers {
 	{
 		if (syscallRetval > 0) {
 			auto str = std::filesystem::path(process.ptrToStr(ptr));
+			(void)state;
 			assert(str == state.getCWD(process.pid)); //TODO: remove me for release.
 		}
 	}

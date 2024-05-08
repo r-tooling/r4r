@@ -137,15 +137,19 @@ namespace frontend {
 
 
 	inline std::unique_ptr<unsigned char[]> userPtrToOwnPtr(pid_t processPid, long ptr, size_t count) {
-		iovec remote[1];
-		remote[0].iov_base = reinterpret_cast<void*>(ptr);
-		remote[0].iov_len = count;
+		iovec remote[1] = {
+			iovec{
+			.iov_base = reinterpret_cast<void*>(ptr),
+			.iov_len = count
+			}
+		};
 		iovec local[1];
 		auto localPtr = std::make_unique<unsigned char[]>(count);
 		local->iov_base = reinterpret_cast<void*>(localPtr.get());
 		local->iov_len = count;
-
-		assert(process_vm_readv(processPid, local, 1, remote, 1, 0) == static_cast<ssize_t>(count));// "error reading X bytes from the tracee"
+		auto read_count = process_vm_readv(processPid, local, 1, remote, 1, 0);
+		(void)read_count;
+		assert(read_count == static_cast<ssize_t>(count));// "error reading X bytes from the tracee"
 		return localPtr;
 	}
 	template<class pointsToStruct>
@@ -158,8 +162,9 @@ namespace frontend {
 		auto localPtr = malloc(count);
 		local->iov_base = localPtr;
 		local->iov_len = count;
-
-		assert(process_vm_readv(processPid, local, 1, remote, 1, 0) == count);// "error reading X bytes from the tracee"
+		auto read_count = process_vm_readv(processPid, local, 1, remote, 1, 0);
+		(void)read_count;
+		assert(read_count == count);// "error reading X bytes from the tracee"
 		return { reinterpret_cast<pointsToStruct*>(localPtr),std::free };
 	}
 	//TODO: figure out how to make it possible to specify the array size in the return type.
@@ -173,8 +178,9 @@ namespace frontend {
 		auto localPtr = malloc(count);
 		local->iov_base = localPtr;
 		local->iov_len = count;
-
-		assert(process_vm_readv(processPid, local, 1, remote, 1, 0) == count);// "error reading X bytes from the tracee"
+		auto read_count = process_vm_readv(processPid, local, 1, remote, 1, 0);
+		(void)read_count;
+		assert(read_count == count);// "error reading X bytes from the tracee"
 		return { reinterpret_cast<pointsToStruct*>(localPtr),std::free };
 	}
 }
