@@ -49,4 +49,5 @@ Building the image will probably take long. Access to the internet is necessary.
 131 R packages took around 1500 seconds
 Your mileage will vary but this should show just how long a build process can take.
 
-In case of errors, delete the offending library/file from the dockerfile and re-run. It will still probably work due to system defaults.
+In case of errors, delete the offending library/file from the dockerfile and re-run. This may involve removing the movement of files or installation of individual packages. The environment will still probably work due to system defaults.
+If a step successfully completes, due to the nature of docker only the un-compiled steps will be repeated.

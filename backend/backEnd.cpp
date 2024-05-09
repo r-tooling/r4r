@@ -306,7 +306,6 @@ namespace backend {
 				<< "," << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T")
 				<< "," << (info->requiresAllSubEntities.value_or(false) ? "T" : "F");
 
-
 			auto dpkg = dpkgResolver.resolvePathToPackage(info->realpath);
 			{
 
