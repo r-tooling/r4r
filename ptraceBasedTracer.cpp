@@ -16,7 +16,6 @@
 
 #include <fcntl.h>//open, close...
 
-
 using std::size_t;
 
 #include <sys/wait.h>
@@ -106,6 +105,7 @@ int main(int argc, char* argv[])
 	// so not waiting for this PID is intentional.
 	(void)childPid;
 	frontend::ptraceChildren(state);
+	printf("Child process terminated! Analysing data.\n");
 	backend::csvBased(state, "accessedFiles.csv");
 
 	wait(nullptr);
