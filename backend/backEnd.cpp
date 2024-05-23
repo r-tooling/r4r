@@ -422,9 +422,6 @@ namespace backend {
 				//TODO: add parsing of the source param to get the potential github and such install rather than this api.
 				//TODO: add check that the version is detected here first
 
-				//TODO: this may involve `interesting` applications of checking random paths on the system to ensure that the package is found.
-				// but most likely will just end up
-
 			}
 			dockerImage << "' > R_Install && Rscript R_Install" << std::endl;
 		}
