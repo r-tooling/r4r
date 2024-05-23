@@ -110,29 +110,56 @@ inline void logPtraceError(int err) {
 }
 namespace frontend {
 
-	inline std::string userPtrToString(pid_t processPid, long processPtr) {
-		std::vector<char> v;
-		bool zeroReched = false;
-		std::size_t offset = 0;
-		while (!zeroReched) {
-			errno = 0;
-			auto res = ptrace(PTRACE_PEEKDATA, processPid, processPtr + (offset * sizeof(processPtr)), nullptr);
-			if (res == -1 && errno != 0) {
+	//using PTRACE_PEEKDATA is very slow. And it results in  thousands of calls. Instead I querry for a bunch of values at once and hope that the string is not at a nasty boundary which would require more handling which is currently not present.
+	template<class result = std::string>
+	inline result userPtrToString(pid_t processPid, const long processPtr) {
+		constexpr static size_t readSize = 32;
+		constexpr static size_t bufferSize = 256;
+		constexpr static size_t bufferCount = bufferSize /readSize;
 
-				return {};//try to continue as if nothing happened. will probably break everything.
+		std::vector<char> v;
+
+		std::size_t offset = 0;
+
+		iovec local[bufferCount];
+		iovec remote[bufferCount];
+
+		auto resizeBuffer = [&]() {
+			v.resize(v.size() + bufferSize);
+			for (size_t i = 0; i < bufferCount; i++) {
+				char* buffer = v.data() + offset;
+				local[i].iov_base = &buffer[i * readSize];
+				local[i].iov_len = readSize;
+				remote[i].iov_base = reinterpret_cast<void*>(processPtr + ((offset + (i*readSize))));
+				remote[i].iov_len = readSize;
 			}
-			for (auto i : BytesIterator(res)) {
-				if (i == 0) {
+		};
+
+
+		bool zeroReched = false;
+		bool readAll = true;
+		while (!zeroReched && readAll) {
+			resizeBuffer();
+			auto read_count = process_vm_readv(processPid, local, bufferCount, remote, bufferCount, 0);
+			if (read_count != bufferSize) {//TODO: error logs and checks?
+				readAll = false;
+			}
+			else if (read_count < 0) {
+				break;//todo: log error
+			}
+			auto end = v.end() - (bufferSize - read_count);
+			for (auto it = v.begin() + offset; it != end; ++it) {
+				if (*it == 0) {
 					zeroReched = true;
+					v.erase(it, v.end());//the zero is automagically appended in the string
 					break;
 				}
-				v.push_back(i);//this "needs" to be here as otherwise we create a string which contains a 0 byte as the last byte while sctr compare will be fine, string comapre will fail.
 			}
-			++offset;
+			offset += read_count;
 		}
 		//reallocations are unfortunatelly bound to happen here a lot. I need to sloooowly parse the entire string utilll I get to the 0 byte.
 		//consider process_vm_readv instead for reading larger blocks at once. Or any other adress space-sharing mechanism.
-		return std::string(v.begin(), v.end());
+		return { v.begin(), v.end() };
 	}
 
 
