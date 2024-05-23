@@ -9,12 +9,13 @@
 #include "ptraceHelpers.hpp"
 #include "../toBeClosedFd.hpp"
 
+#include "sys/user.h"
+
 namespace frontend{
 
-	//circular dependency hell resolution
-	namespace SyscallHandlers{
-		struct SyscallHandler;
-	}
+	namespace SyscallHandlers {
+		struct HandlerWrapper;
+	};
 
 	using traceeFileDescriptor = fileDescriptor;
 	/*
@@ -44,7 +45,7 @@ namespace frontend{
 			outside,
 			inside
 		} syscallState = outside;
-		std::unique_ptr<SyscallHandlers::SyscallHandler> syscallHandlerObj;
+		std::unique_ptr<frontend::SyscallHandlers::HandlerWrapper> syscallHandlerObj;//needs to be a pointer to avoid dependency hell.
 		~processState();
 
 
@@ -52,8 +53,8 @@ namespace frontend{
 		long getSyscallParam() {
 			return frontend::getSyscallParam<T>(pid);
 		}
-
-		std::string ptrToStr(long ptr) {
+		template<class result = std::string>
+		result ptrToStr(long ptr) {
 			return frontend::userPtrToString(pid, ptr);
 		}
 	};

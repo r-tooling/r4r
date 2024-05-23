@@ -8,4 +8,6 @@ Syscalls are handled using dynamic dispatch, though a cast-based solution is eas
 The SyscallHandler class provides the virtual base API. Though the handler implementation is a speciallisation of the  TemplatedSyscallHandler template.
 This is done for the ease of creating the SyscallHandlerMapperOfAll class.
 
-When creating a new syscall handler it is included in the template due to template specialisations. But it will need to be included in the 
+When creating a new syscall handler it is included in the template due to template specialisations. But it will need to be included in the syscalMappinh.hpp file.
+
+If using the inline mapping, you also need to use the other executable to genereate a macro definition and copy it over.

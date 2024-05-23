@@ -2,7 +2,8 @@
 #include "syscallMapping.hpp"
 #include "platformSpecificSyscallHandling.hpp"
 #include "ptraceHelpers.hpp"
-#include "syscalls/syscallHandlerMapper.hpp"
+#include "syscalls/syscallHandlerMapperInline.hpp"
+
 
 #include <cassert>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <string>
 #include <memory>
 #include <type_traits>
+#include <functional>
 
 #include <sys/ptrace.h>
 #include <sys/wait.h>
@@ -17,6 +19,7 @@
 #include <sys/user.h>
 #include <fcntl.h> //open, AT_FDCWD
 
+#include <signal.h>//sigterm handling
 
 namespace {
 	using namespace frontend;
@@ -33,7 +36,9 @@ namespace {
 			auto emplaced = processing.emplace(pid, pid);
 			assert(emplaced.second);
 			auto& process = emplaced.first->second;
-			ptrace(PTRACE_SETOPTIONS, process.pid, nullptr, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE | PTRACE_O_TRACESYSGOOD);
+			//if the PTRACE_O_TRACEEXEC is not set the ptrace will issue a breakpoint after every exec. 
+			//if it is set, it will instead notify before the exec terminates, or so it seems.
+			ptrace(PTRACE_SETOPTIONS, process.pid, nullptr, PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK | PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |  PTRACE_O_TRACESYSGOOD);
 
 			for (auto& [pid, oldProcess] : processing) {
 				//todo: consider keeping the list in a separate structure.
@@ -51,11 +56,30 @@ namespace {
 		}
 	};
 
-	bool tryWait(siginfo_t& status) {
-		int waitStatus;
+
+	struct SignalInfo {
+		pid_t pid;
+
+		int status;
+		enum state {
+			signal,
+			exit,
+			stop,
+			cont,
+			err
+		} code;
+
+		int signalNr;
+		int extendedSignalInfo;
+	};
+
+	bool tryWait(SignalInfo& info) {
 		while (true) {
 			//tracing all children, they SHOULD be ptraced, but hey, what if they are not? In that case we at least get a ptrace error down the line.
-			waitStatus = waitid(P_ALL, 0, &status, WSTOPPED | WCONTINUED | WEXITED); 
+			//I could have kept using the waitid as it turns out. But it gives me no new data and all documentation talks about this...
+			//for waitid usage see fields described in https://www.man7.org/linux/man-pages/man2/sigaction.2.html
+			pid_t waitStatus = waitpid(-1,&info.status,0);
+
 			auto waitError = errno;
 			if (waitStatus == -1) {
 				if (waitStatus == EAGAIN) {
@@ -69,46 +93,111 @@ namespace {
 					return false;
 				}
 			}
-			assert(waitStatus == 0);
+			info.pid = waitStatus;
+			info.code = WIFEXITED(info.status) ? SignalInfo::exit
+				: WIFSIGNALED(info.status) ? SignalInfo::signal
+				: WIFSTOPPED(info.status) ? SignalInfo::stop
+				: WIFCONTINUED(info.status) ? SignalInfo::cont
+				: SignalInfo::err;
+			if (info.code == SignalInfo::stop) {
+				info.signalNr = WSTOPSIG(info.status);
+				info.extendedSignalInfo = info.status >> 8;
+			}
 			//TODO: add qquick cases for when we just proceed to wait as this is not a relevant handling point.
 			break;
 		}
 		return true;
 	}
+
+
+	//this si dirty but the handler does not actually take a user-provided pointer...
+	//if this ever gets threading support, give me guards! I am global!
+	std::optional<std::function<void()>> registeredHandler;
+
+
+	void sigterm_handler(int signalNr, siginfo_t*, void*) {
+		(void)signalNr;
+		assert(signalNr == SIGTERM);//
+		if (registeredHandler)
+			registeredHandler.value()();
+
+	}
+
 }
 
 namespace frontend{
 
 	void ptraceChildren(middleend::MiddleEndState& state)
 	{
-		static const SyscallHandlers::SyscallHandlerMapperOfAll mapper{};
+		//TODO: how about exception handling? unregister in finally?
+		struct sigaction oldHandler;
+		struct sigaction handler; 
+		handler.sa_sigaction = sigterm_handler;
+		handler.sa_flags = SA_RESETHAND | SA_SIGINFO;
+		handler.sa_mask = sigset_t{0};
+
+
+		auto handlerInstall = sigaction(SIGINT, &handler, &oldHandler);
+		if (handlerInstall == -1) {
+			fprintf(stderr, "Unable to set sigterm handler\n");
+		}
 		ProcessingData processesInfo{};
-		siginfo_t status;
+		SignalInfo status;
+		bool initialSigtrap = true;
 		while (tryWait(status)) {
+			registeredHandler = [&]() {
+				fprintf(stderr, "SIGINT received. Passing to children. This is not a deterministic action, take care.\n");
+				for (auto& child : processesInfo.processing) {
+					kill(child.first, SIGINT);
+				}
+			};
+
 			bool doPtrace = true;
+			void* signalToPass = 0;
 			{
-				auto& process = processesInfo.getProcesState(status.si_pid, state);
-				switch (status.si_code)
+				auto& process = processesInfo.getProcesState(status.pid, state);
+				switch (status.code)
 				{
-				case CLD_EXITED:
-				case CLD_KILLED:
-				case CLD_DUMPED:
+				case SignalInfo::exit:
+				case SignalInfo::signal:
 					//does not delete as we may have cought the parent exit before the child exec and we need the FD table to be shared properly. Will error on any more syscalls but not error on trace new with the same PID
 					state.toBeDeleted(process.pid);
 					processesInfo.removeProcessHandling(process);
 					doPtrace = false;
 					break;
-				case CLD_TRAPPED: //(traced child has trapped);
-					if (status.si_status != (SIGTRAP | 0x80)) {
-						break;//manual sigtrap
+				case SignalInfo::stop: //(traced child has trapped);
+					if (status.signalNr != (SIGTRAP | 0x80)) {
+						if (status.signalNr == SIGTRAP && initialSigtrap) {//manual sigtrap
+							initialSigtrap = false; //we sigtrap once in the entry callback.
+							break;
+						}
+						if(status.extendedSignalInfo == (SIGTRAP | (PTRACE_EVENT_CLONE << 8))
+							|| status.extendedSignalInfo == (SIGTRAP | (PTRACE_EVENT_FORK << 8))
+							|| status.extendedSignalInfo == (SIGTRAP | (PTRACE_EVENT_VFORK << 8))
+							|| status.extendedSignalInfo == (SIGTRAP | (PTRACE_EVENT_VFORK_DONE << 8))
+							|| status.extendedSignalInfo == (SIGTRAP | (PTRACE_EVENT_EXEC << 8))
+							) {
+							break;
+						}
+						else {
+							//this seems to be delivered when a new process spawns. I have no clue how to catch this properly using waitid.
+							//all non-ptrace signals should just get passed along.
+							signalToPass = reinterpret_cast<void*>(status.signalNr);
+						}
 					}
-					if (process.syscallState == processState::inside) {
+					/*
+					WHY THIS WORKS?
+
+					Syscall-enter-stop and syscall-exit-stop are indistinguishable from each other by the tracer. The tracer needs to keep track of the sequence of ptrace-stops in order 
+					to not misinterpret syscall-enter-stop as syscall-exit-stop or vice versa. The rule is that syscall-enter-stop is always followed by syscall-exit-stop, 
+					PTRACE_EVENT stop or the tracee's death; no other kinds of ptrace-stop can occur in between. 
+					*/
+					else if (process.syscallState == processState::inside) {
 						long val = getSyscallRetval(process.pid);
-						//logSyscallExit(process, val);
-						if (process.syscallHandlerObj) {
+						if (process.syscallHandlerObj->operator bool()) {
 							process.syscallHandlerObj->exit(process, state, val);
 							//process.syscallHandlerObj->exitLog(process,state,val);
-							process.syscallHandlerObj = nullptr;
+							process.syscallHandlerObj->destroy();
 						}
 						process.syscallState = processState::outside;
 					}
@@ -117,31 +206,31 @@ namespace frontend{
 							assert(false); //i was not a syscall or was not syscall entry point.
 						};
 						long syscall_id = getSyscallNr(process.pid);
-						auto ptr = mapper.get(syscall_id);
-						ptr->entry(process, state, syscall_id);
-						//ptr->entryLog(process, state, syscall_id);
-						process.syscallHandlerObj = std::move(ptr);
+						process.syscallHandlerObj->create(syscall_id);
+						process.syscallHandlerObj->entry(process, state, syscall_id);
+						//process.syscallHandlerObj->entryLog(process, state, syscall_id);
 						process.syscallState = processState::inside;
 					}
-
-				case CLD_STOPPED: //(child stopped by signal); - dont care unless we add a state where the child is stopped
-				case CLD_CONTINUED: //(child continued by SIGCONT) - dont care
+					break;
+				case SignalInfo::cont: //(child continued by SIGCONT) - dont care
 					break;
 				default:
 					assert(false);
 					break;
 				}
 			}//the process object may be currently invalid
-			if (doPtrace) { 
-				if (ptrace(PTRACE_SYSCALL, status.si_pid, nullptr, nullptr) != 0) {
+			if (doPtrace) {
+				if (ptrace(PTRACE_SYSCALL, status.pid, nullptr, signalToPass) != 0) {
 					//TODO: check that this is because all children have quit;
 					//the loop itself will terminate due to wait.
 				}
 			}
 		}
+		registeredHandler = std::nullopt;
+		sigaction(SIGTERM, &oldHandler, nullptr);
 	}
 	//intentionally here this way as otherwise the unique_ptr will not compile
-	processState::processState(pid_t pid) :pid(pid){
+	processState::processState(pid_t pid) :pid(pid), syscallHandlerObj(new frontend::SyscallHandlers::HandlerWrapper{}) {
 		/*
 		* TODO: get this value consistently for threads as well.
 		pidFD.reset(static_cast<fileDescriptor>(syscall(SYS_pidfd_open, pid, 0))); //cannot default init as that results in invalid errno

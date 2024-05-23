@@ -1,6 +1,15 @@
 #pragma once
 
+namespace frontend {
+	struct processState;
+}
+namespace frontend::SyscallHandlers {
+	struct SyscallHandler;
+};
+
 #include "../ptraceMainLoop.hpp"
+
+//circular dependency hell resolution
 
 //this is just a wrapper to ensure the API is set.
 namespace frontend::SyscallHandlers {
@@ -24,6 +33,6 @@ namespace frontend::SyscallHandlers {
 		*/
 		virtual void exitLog(const processState& process, const middleend::MiddleEndState& state, long syscallRetval) = 0;
 
-		virtual ~SyscallHandler() = default;
+		virtual ~SyscallHandler() noexcept = default;
 	};
 };
