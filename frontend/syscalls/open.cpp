@@ -37,8 +37,7 @@ namespace frontend::SyscallHandlers {
 			//TODO: log open failed and file is non existent. Check retval for error.
 		}
 		else {
-			auto resolvedPath = state.resolveToAbsolute(process.pid, fileRelPath, at);
-			state.openHandling(process.pid, resolvedPath, std::move(fileRelPath), FD, flags, existed);//the order is undefined otherwise
+			state.openHandling(process.pid, resolvedPath, std::move(fileRelPath), FD, flags, statResults);//the order is undefined otherwise
 
 		}
 	}
@@ -51,12 +50,8 @@ namespace frontend::SyscallHandlers {
 
 	void OpenBase::checkIfExists(const processState& process, const middleend::MiddleEndState& middleEnd)
 	{
-		if (!(flags & O_CREAT)) { //had already existed, if it did indeed exist, then we just error out
-			existed = true;
-			return;
-		}
-		existed = middleEnd.checkFileExists(process.pid,at,fileRelPath,flags);
-		return;
+		resolvedPath = middleEnd.resolveToAbsolute(process.pid, fileRelPath, at,false, (flags & AT_SYMLINK_NOFOLLOW) ? middleend::MiddleEndState::nofollow_simlink : 0);
+		statResults = middleEnd.checkFileInfo(resolvedPath);
 	}
 
 

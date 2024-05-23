@@ -53,9 +53,12 @@ namespace frontend::SyscallHandlers {
 		NullOptHandlerClass(SYS_sigaltstack) //should not affect us in any way
 
 		NullOptHandlerClass(SYS_clock_nanosleep)//sleep, should be safe.
-			WarnHandlerClass(SYS_clock_gettime)//TODO; consider using a time namespace
+		WarnHandlerClass(SYS_clock_gettime)//TODO; consider using a time namespace
 
 		NullOptHandlerClass(SYS_sched_yield)//just optimisations
 
 		NullOptHandlerClass(SYS_tgkill) //TODO: do I care about cross-process signals?
+		WarnHandlerClass(SYS_rt_sigreturn)//THis call is used by the kernel in the context of returing from a signal handler. Potential implications for intentionally calling this are unexplored.
+
+
 }

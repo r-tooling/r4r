@@ -28,17 +28,20 @@ case 0: NAME<TemplatedSyscallHandler<0>>( __VA_ARGS__ ); break; \
  case 63: NAME<TemplatedSyscallHandler<63>>( __VA_ARGS__ ); break; \
  case 72: NAME<TemplatedSyscallHandler<72>>( __VA_ARGS__ ); break; \
  case 79: NAME<TemplatedSyscallHandler<79>>( __VA_ARGS__ ); break; \
+ case 82: NAME<TemplatedSyscallHandler<82>>( __VA_ARGS__ ); break; \
  case 83: NAME<TemplatedSyscallHandler<83>>( __VA_ARGS__ ); break; \
  case 84: NAME<TemplatedSyscallHandler<84>>( __VA_ARGS__ ); break; \
  case 85: NAME<TemplatedSyscallHandler<85>>( __VA_ARGS__ ); break; \
  case 87: NAME<TemplatedSyscallHandler<87>>( __VA_ARGS__ ); break; \
  case 89: NAME<TemplatedSyscallHandler<89>>( __VA_ARGS__ ); break; \
- case 230: NAME<TemplatedSyscallHandler<230>>( __VA_ARGS__ ); break; \
- case 435: NAME<TemplatedSyscallHandler<435>>( __VA_ARGS__ ); break; \
+ case 97: NAME<TemplatedSyscallHandler<97>>( __VA_ARGS__ ); break; \
+ case 98: NAME<TemplatedSyscallHandler<98>>( __VA_ARGS__ ); break; \
  case 13: NAME<TemplatedSyscallHandler<13>>( __VA_ARGS__ ); break; \
  case 267: NAME<TemplatedSyscallHandler<267>>( __VA_ARGS__ ); break; \
+ case 15: NAME<TemplatedSyscallHandler<15>>( __VA_ARGS__ ); break; \
  case 269: NAME<TemplatedSyscallHandler<269>>( __VA_ARGS__ ); break; \
  case 283: NAME<TemplatedSyscallHandler<283>>( __VA_ARGS__ ); break; \
+ case 284: NAME<TemplatedSyscallHandler<284>>( __VA_ARGS__ ); break; \
  case 58: NAME<TemplatedSyscallHandler<58>>( __VA_ARGS__ ); break; \
  case 439: NAME<TemplatedSyscallHandler<439>>( __VA_ARGS__ ); break; \
  case 8: NAME<TemplatedSyscallHandler<8>>( __VA_ARGS__ ); break; \
@@ -46,6 +49,8 @@ case 0: NAME<TemplatedSyscallHandler<0>>( __VA_ARGS__ ); break; \
  case 290: NAME<TemplatedSyscallHandler<290>>( __VA_ARGS__ ); break; \
  case 113: NAME<TemplatedSyscallHandler<113>>( __VA_ARGS__ ); break; \
  case 318: NAME<TemplatedSyscallHandler<318>>( __VA_ARGS__ ); break; \
+ case 107: NAME<TemplatedSyscallHandler<107>>( __VA_ARGS__ ); break; \
+ case 234: NAME<TemplatedSyscallHandler<234>>( __VA_ARGS__ ); break; \
  case 39: NAME<TemplatedSyscallHandler<39>>( __VA_ARGS__ ); break; \
  case 293: NAME<TemplatedSyscallHandler<293>>( __VA_ARGS__ ); break; \
  case 77: NAME<TemplatedSyscallHandler<77>>( __VA_ARGS__ ); break; \
@@ -58,24 +63,23 @@ case 0: NAME<TemplatedSyscallHandler<0>>( __VA_ARGS__ ); break; \
  case 247: NAME<TemplatedSyscallHandler<247>>( __VA_ARGS__ ); break; \
  case 80: NAME<TemplatedSyscallHandler<80>>( __VA_ARGS__ ); break; \
  case 334: NAME<TemplatedSyscallHandler<334>>( __VA_ARGS__ ); break; \
- case 98: NAME<TemplatedSyscallHandler<98>>( __VA_ARGS__ ); break; \
+ case 20: NAME<TemplatedSyscallHandler<20>>( __VA_ARGS__ ); break; \
  case 274: NAME<TemplatedSyscallHandler<274>>( __VA_ARGS__ ); break; \
- case 97: NAME<TemplatedSyscallHandler<97>>( __VA_ARGS__ ); break; \
  case 78: NAME<TemplatedSyscallHandler<78>>( __VA_ARGS__ ); break; \
  case 332: NAME<TemplatedSyscallHandler<332>>( __VA_ARGS__ ); break; \
  case 273: NAME<TemplatedSyscallHandler<273>>( __VA_ARGS__ ); break; \
- case 302: NAME<TemplatedSyscallHandler<302>>( __VA_ARGS__ ); break; \
- case 291: NAME<TemplatedSyscallHandler<291>>( __VA_ARGS__ ); break; \
- case 114: NAME<TemplatedSyscallHandler<114>>( __VA_ARGS__ ); break; \
- case 110: NAME<TemplatedSyscallHandler<110>>( __VA_ARGS__ ); break; \
+ case 435: NAME<TemplatedSyscallHandler<435>>( __VA_ARGS__ ); break; \
+ case 316: NAME<TemplatedSyscallHandler<316>>( __VA_ARGS__ ); break; \
  case 3: NAME<TemplatedSyscallHandler<3>>( __VA_ARGS__ ); break; \
  case 257: NAME<TemplatedSyscallHandler<257>>( __VA_ARGS__ ); break; \
+ case 291: NAME<TemplatedSyscallHandler<291>>( __VA_ARGS__ ); break; \
+ case 114: NAME<TemplatedSyscallHandler<114>>( __VA_ARGS__ ); break; \
+ case 302: NAME<TemplatedSyscallHandler<302>>( __VA_ARGS__ ); break; \
  case 32: NAME<TemplatedSyscallHandler<32>>( __VA_ARGS__ ); break; \
  case 286: NAME<TemplatedSyscallHandler<286>>( __VA_ARGS__ ); break; \
  case 109: NAME<TemplatedSyscallHandler<109>>( __VA_ARGS__ ); break; \
- case 284: NAME<TemplatedSyscallHandler<284>>( __VA_ARGS__ ); break; \
- case 234: NAME<TemplatedSyscallHandler<234>>( __VA_ARGS__ ); break; \
- case 107: NAME<TemplatedSyscallHandler<107>>( __VA_ARGS__ ); break; \
+ case 230: NAME<TemplatedSyscallHandler<230>>( __VA_ARGS__ ); break; \
+ case 110: NAME<TemplatedSyscallHandler<110>>( __VA_ARGS__ ); break; \
  case 218: NAME<TemplatedSyscallHandler<218>>( __VA_ARGS__ ); break; \
  case 217: NAME<TemplatedSyscallHandler<217>>( __VA_ARGS__ ); break; \
  case 158: NAME<TemplatedSyscallHandler<158>>( __VA_ARGS__ ); break; \
@@ -91,6 +95,7 @@ case 0: NAME<TemplatedSyscallHandler<0>>( __VA_ARGS__ ); break; \
  case 11: NAME<TemplatedSyscallHandler<11>>( __VA_ARGS__ ); break; \
  case 138: NAME<TemplatedSyscallHandler<138>>( __VA_ARGS__ ); break; \
  case 10: NAME<TemplatedSyscallHandler<10>>( __VA_ARGS__ ); break; \
+ case 264: NAME<TemplatedSyscallHandler<264>>( __VA_ARGS__ ); break; \
  case 137: NAME<TemplatedSyscallHandler<137>>( __VA_ARGS__ ); break; \
  case 9: NAME<TemplatedSyscallHandler<9>>( __VA_ARGS__ ); break; \
  case 263: NAME<TemplatedSyscallHandler<263>>( __VA_ARGS__ ); break; \

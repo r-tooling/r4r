@@ -48,6 +48,34 @@ namespace {
 		}
 	}
 
+	std::filesystem::path resolveToAbsolute_impl(const std::filesystem::path& base, const std::filesystem::path& relativePath, bool log, middleend::MiddleEndState::resolveFlagSet flags ) {
+		/*
+		For POSIX-based operating systems, std::filesystem::absolute(p) is equivalent to std::filesystem::current_path() / p except for when p is the empty path.
+
+		For Windows, std::filesystem::absolute may be implemented as a call to GetFullPathNameW.
+		*/
+		if (flags & middleend::MiddleEndState::nofollow_simlink) {
+			flags &= ~middleend::MiddleEndState::nofollow_simlink;
+			auto lastElem = relativePath.filename(); //TODO: this only works sometimes!!!
+			auto relativeRest = relativePath.parent_path();
+			return resolveToAbsolute_impl(base, relativeRest, log, flags) / lastElem;
+		}
+		else {
+
+			if (relativePath.is_absolute() && base != "") {
+				return resolveToAbsolute_impl("", relativePath, log, flags);//need to make it canonical still
+			}
+
+			std::error_code code;
+			std::filesystem::path resultingPath = std::filesystem::canonical(base / relativePath, code);
+			if (code) {
+				if (log)
+					fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues\n", relativePath.c_str());
+				resultingPath = std::filesystem::weakly_canonical(base / relativePath);
+			}
+			return resultingPath;
+		}
+	}
 	
 }
 namespace middleend {
@@ -122,7 +150,7 @@ namespace middleend {
 		return raw;
 	}
 
-	MiddleEndState::file_info* MiddleEndState::tryFindFile(const absFilePath& filename)
+	MiddleEndState::file_info* MiddleEndState::tryFindFile(const absFilePath& filename) const
 	{
 		if (auto it = encounteredFilenames.find(filename); it != encounteredFilenames.end()) {
 			auto& [_, info] = *it;
@@ -322,9 +350,7 @@ namespace middleend {
 	{
 		auto& val = pidToObj(process);
 		auto result = newWorkingDirectory;//this makes the semantics of what actually gets copied explicit. No need to implicity copy in the argument
-		if (!result.is_absolute()) {
-			result = resolveToAbsolute(process, newWorkingDirectory);
-		}
+		result = resolveToAbsolute(process, newWorkingDirectory);
 		val.fsInfo->workdir = std::move(result);
 	}
 
@@ -333,22 +359,23 @@ namespace middleend {
 		return changeDirectory(process, getFilePath<true>(process, fileDescriptor).value_or("/pathError"));
 	}
 
-	absFilePath MiddleEndState::resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor,bool log) const
+	absFilePath MiddleEndState::resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor,bool log, resolveFlagSet flags) const
 	{
 		if (fileDescriptor == AT_FDCWD) {
-			return resolveToAbsolute(process, relativePath,log);
+			return resolveToAbsolute(process, relativePath,log, flags);
+		}
+		if (log) {
+			return resolveToAbsolute_impl(getFilePath<true>(process, fileDescriptor).value_or(""), relativePath, log, flags);
 		}
 		else {
-			try {
-				return std::filesystem::canonical(getFilePath<true>(process, fileDescriptor).value_or("") / relativePath);//TODO: weakly cannonical may prove to be enough sometimes.
-			}
-			catch (...) {
-				if (log) {
-					fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues", relativePath.c_str());
-				}
-				return getFilePath<true>(process, fileDescriptor).value_or("") / relativePath;
-			}
+			return resolveToAbsolute_impl(getFilePath<false>(process, fileDescriptor).value_or(""), relativePath, log, flags);
 		}
+	}
+
+	absFilePath MiddleEndState::resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, bool log, resolveFlagSet flags) const
+	{
+		auto& val = pidToObj(process);
+		return resolveToAbsolute_impl(val.fsInfo->workdir, relativePath, log, flags);
 	}
 
 	absFilePath MiddleEndState::resolveToAbsoluteDeleted(pid_t process, const std::filesystem::path& relativePath) const
@@ -364,39 +391,14 @@ namespace middleend {
 
 		For Windows, std::filesystem::absolute may be implemented as a call to GetFullPathNameW.
 		*/
-		if (relativePath == "" || relativePath == "./") {
+		if (relativePath == "" || relativePath == "./" || relativePath == ".") {
 			return val.fsInfo->workdir;
 		}
-		return std::filesystem::weakly_canonical(val.fsInfo->workdir / relativePath);
+		return std::filesystem::weakly_canonical(val.fsInfo->workdir / relativePath).lexically_normal();
 
 	}
 
-	absFilePath MiddleEndState::resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath,bool log) const
-	{
-		if (relativePath.is_absolute()) {
-			return relativePath;
-		}
-		auto& val = pidToObj(process);
-		//https://en.cppreference.com/w/cpp/filesystem/absolute
-		/*
-		For POSIX-based operating systems, std::filesystem::absolute(p) is equivalent to std::filesystem::current_path() / p except for when p is the empty path.
-
-		For Windows, std::filesystem::absolute may be implemented as a call to GetFullPathNameW.
-		*/
-		if (relativePath == "" || relativePath == "./") {
-			return val.fsInfo->workdir;
-		}
-		try {
-			return std::filesystem::canonical(val.fsInfo->workdir / relativePath);//TODO: weakly cannonical may prove to be enough sometimes.
-		}
-		catch (...) {
-			if(log)
-				fprintf(stderr, "Cannot resolve path to %s as it fails to resolve correctly, hoping a concatenation will not cause further issues\n", relativePath.c_str());
-			return val.fsInfo->workdir / relativePath;
-		}
-	}
-
-	void MiddleEndState::openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, bool existed)
+	void MiddleEndState::openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, std::optional<statResults> statInfo)
 	{
 		auto& val = pidToObj(process);
 		auto access = access_info{
@@ -410,26 +412,26 @@ namespace middleend {
 		MiddleEndState::file_info* fileInfo = tryFindFile(filename);
 		if (fileInfo) {
 			fileInfo->registerAccess(std::move(access));
-			if (fileInfo->isCurrentlyOnTheDisk != existed) {
+			if (fileInfo->isCurrentlyOnTheDisk != statInfo.has_value()) {
 				fprintf(stderr, "When creating a file, a file was assumed to exist when it did not or vice versa.\n");
 				//TODO: don't fstat if we "know"
 			}
-			fileInfo->wasEverCreated = !existed;
+			fileInfo->wasEverCreated = !statInfo.has_value();
 		}
 		else {
-			auto ptr = std::unique_ptr<MiddleEndState::file_info>(
+			auto ptr = std::unique_ptr<MiddleEndState::file_info>{
 				new file_info{
 					.realpath = filename,
 					.accessibleAs = {std::move(access)},
-					.wasEverCreated = !existed,
+					.wasEverCreated = !statInfo.has_value(),
 					.wasEverDeleted = false,
 					.isCurrentlyOnTheDisk = true,
-					.wasInitiallyOnTheDisk = existed,
+					.wasInitiallyOnTheDisk = statInfo.has_value(),
 					.type = std::nullopt, //could be literally anything. - stat?
 					.requiresAllSubEntities = std::nullopt,
-				});
-			if (existed) {
-				ptr->type = std::nullopt;//todo: we need fstat info.
+				}};
+			if (statInfo.has_value()) {
+				ptr->type = statInfo->type;
 			}
 			fileInfo = ptr.get();
 			encounteredFilenames.emplace(filename, std::move(ptr));
@@ -625,20 +627,51 @@ namespace middleend {
 		auto file = createUnbackedFD("event_" + std::to_string(count), file_info::eventFD);
 		val.registerFD(eventFD, file);
 	}
-	bool MiddleEndState::checkFileExists(pid_t process, fileDescriptor at, const relFilePath& fileRelPath, int flags) const
+	std::optional<MiddleEndState::statResults> MiddleEndState::checkFileInfo(const absFilePath& abs) const
 	{
+		using FT =  file_info::FileType;
+		auto found = tryFindFile(abs);
+		if (found) {
+			if (!found->isCurrentlyOnTheDisk.value_or(true)) {
+				return std::nullopt;
+			}
+			if (found->type.has_value()) {
+				return statResults{ found->type.value() };
+			}
+		}
 		struct stat data;
 		int state;
 		int err = 0;
-		//TODO: how about other flags
-		//TODO: check if we already know about file
-		//TODO: alternatvelly, the file could be querried for using the at descriptor of the process itself. Requires getting a pidfd consistently.
-		auto abs = resolveToAbsolute(process, fileRelPath, at,false);
-		state = fstatat(AT_FDCWD, abs.c_str(),&data, (flags & O_NOFOLLOW) ? AT_SYMLINK_NOFOLLOW : 0);
+		//if we wanted to follow symbolic links, it should be done via the path itself.
+		state = fstatat(AT_FDCWD, abs.c_str(), &data, AT_SYMLINK_NOFOLLOW);  
 		err = errno;
 		(void)err;
 		assert(state == 0 || (state = -1 && err == ENOENT)); //todo: handle other errors
-		return state == 0;
+		if (state == 0) {
+			FT type;
+			switch (data.st_mode & S_IFMT) {
+			case S_IFBLK:  type = FT::blockDev;            break;
+			case S_IFCHR:  type = FT::charDev;        break;
+			case S_IFDIR:  type = FT::dir;               break;
+			case S_IFIFO:  type = FT::pipe;               break;
+			case S_IFLNK:  type = FT::link;                 break;
+			case S_IFREG:  type = FT::file;					   break;
+			case S_IFSOCK: type = FT::socket;                  break;
+			default:       type = FT::other;                break;
+			}
+
+			if (found) {
+				found->type = type;
+			}
+			return statResults{ type };
+		}
+		else {
+			if (err != ENOENT) {
+				fprintf(stderr, "Error stating file %s errno: %d", abs.c_str(), err);
+			}
+			return std::nullopt;
+		}
+
 	}
 	void MiddleEndState::syscallWarn(int nr, const char* message)
 	{

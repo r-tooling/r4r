@@ -15,6 +15,8 @@ HandlerClassDef(SYS_pread64) : public FileOperationLogger{};
 HandlerClassDef(SYS_write) : public FileOperationLogger{};
 HandlerClassDef(SYS_pwrite64) : public FileOperationLogger{};
 
+HandlerClassDef(SYS_writev) : public FileOperationLogger{};
+
 HandlerClassDef(SYS_close) : public Close{};
 
 HandlerClassDef(SYS_lseek) : public FileOperationLogger{};

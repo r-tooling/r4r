@@ -19,5 +19,6 @@ This header contains references to all the defined syscall handlers
 #include "timer.hpp"
 #include "epoll.hpp"
 #include "event.hpp"
+#include "rename.hpp"
 
 #include "ignored.hpp"

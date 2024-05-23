@@ -8,10 +8,12 @@ namespace frontend::SyscallHandlers {
 
 		void checkIfExists(const processState& process, const middleend::MiddleEndState& middleEnd);
 
+
+		absFilePath resolvedPath;
 		std::filesystem::path fileRelPath;
 		long flags;
 		fileDescriptor at;
-		bool existed;
+		std::optional<middleend::MiddleEndState::statResults> statResults;
 	};
 
 	struct Open : OpenBase {

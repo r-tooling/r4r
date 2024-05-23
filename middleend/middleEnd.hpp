@@ -9,6 +9,8 @@
 #include <optional>
 
 #include <cassert>
+#include <fcntl.h> //AT_FDCWD
+
 #include "../toBeClosedFd.hpp" //for fileDescriptor info
 
 /*
@@ -58,6 +60,7 @@ namespace middleend{
 		std::vector<std::string> env;
 		std::string initialDir;
 
+		
 		/*
 			A single file "cache" and our knowledge of it
 			Ii is also used internally to store information about file descriptors of non files.
@@ -79,6 +82,7 @@ namespace middleend{
 				clock, //timerfd_create
 				epoll,
 				eventFD,
+				other //official result from stat
 			}; //may not be set for a pure unlink() call.
 			std::optional<FileType> type = std::nullopt;
 			std::optional<bool> requiresAllSubEntities; //this is currently only used for directory listing
@@ -91,6 +95,13 @@ namespace middleend{
 
 			//TODO: consider supporting hard links via saving the inode number and matching that. 
 			//this would first require filesystems support
+		};
+		/*
+			Used for relevant parts of the stat call
+
+		*/
+		struct statResults {
+			file_info::FileType type;
 		};
 		/*
 			The file descriptor table of a process
@@ -168,7 +179,7 @@ namespace middleend{
 			Attempts to find info of a file given by path.
 
 		*/
-		MiddleEndState::file_info* tryFindFile(const absFilePath& filename);
+		MiddleEndState::file_info* tryFindFile(const absFilePath& filename) const;
 		running_thread_state& pidToObj(const pid_t process);
 		const running_thread_state& pidToObj(const pid_t process) const;
 
@@ -208,15 +219,20 @@ namespace middleend{
 
 		void changeDirectory(pid_t process, const std::filesystem::path& newWorkingDirectory);
 		void changeDirectory(pid_t process, fileDescriptor fileDescriptor);
+
+		using resolveFlagSet = size_t;
+		enum supportedResolveFlags{
+			nofollow_simlink = 1
+		};
 		/*
 			At explicit file descriptor
 		*/
-		absFilePath resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor, bool log = true) const;
+		absFilePath resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, fileDescriptor fileDescriptor, bool log = true, resolveFlagSet flags = 0) const;
 
 		/*
 			at FDCWD
 		*/
-		absFilePath resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, bool log = true) const;
+		absFilePath resolveToAbsolute(pid_t process, const std::filesystem::path& relativePath, bool log = true, resolveFlagSet flags = 0) const;
 		/*
 			for paths after calling unlink and such. - the resolution algorithm will not fail on inexiistent directories
 		*/
@@ -224,7 +240,7 @@ namespace middleend{
 
 	
 		//Open file
-		void openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, bool existed);
+		void openHandling(pid_t process, absFilePath filename, relFilePath relativePath, fileDescriptor fd, int flags, std::optional<statResults> statInfo = std::nullopt);
 		
 		/*
 		* @returns bool whether to expect a return from the syscall or not
@@ -252,9 +268,7 @@ namespace middleend{
 		* lifetime guaranteed only untill a directory change or the process terination.
 		*/
 		const std::filesystem::path& getCWD(pid_t process) const {
-			auto val = processToInfo.find(process);
-			assert(val != processToInfo.end());
-			return val->second.fsInfo->workdir;
+			return pidToObj(process).fsInfo->workdir;
 		}
 
 
@@ -262,10 +276,12 @@ namespace middleend{
 		// here because I am too lazy to define a logging and a non-logging variant 
 		template<bool log = true>
 		std::optional<std::string_view> getFilePath(pid_t process, fileDescriptor fd) const {
-			auto val = processToInfo.find(process);
-			assert(val != processToInfo.end());
-			if (auto file = val->second.fdTable->table.find(fd); file != val->second.fdTable->table.end()) {
-				return std::string_view{ file->second->realpath.c_str() };
+			auto& val = pidToObj(process);
+			if (fd == AT_FDCWD) {
+				return { val.fsInfo->workdir.c_str() };
+			}
+			if (auto file = val.fdTable->table.find(fd); file != val.fdTable->table.end()) {
+				return { file->second->realpath.c_str() };
 			}
 			if constexpr (log) {
 				fprintf(stderr, "Unable to resolve file descriptor %d\n", fd);
@@ -273,14 +289,13 @@ namespace middleend{
 			return std::nullopt;
 		}
 
-		/*
-			Check if a file exists for a given process witht he usual semantics of at<call>
-			
-		*/
-		bool checkFileExists(pid_t process, fileDescriptor at, const relFilePath& fileRelPath, int flags) const;
+
+		std::optional<statResults> checkFileInfo(const absFilePath& fileAbsPath) const;
 		/*
 			Add a warning about the usage of a syscall which may result in nondeterminism
 		*/
 		void syscallWarn(int nr, const char * message);
 	};
+
+
 }
