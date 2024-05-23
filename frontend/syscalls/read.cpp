@@ -2,7 +2,7 @@
 namespace frontend::SyscallHandlers {
 	void FileOperationLogger::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		fd = getSyscallParam<1>(process.pid);
+		fd = process.getSyscallParam<1>();
 	}
 
 	void FileOperationLogger::exit(processState& process, middleend::MiddleEndState& state, long syscallRetval)

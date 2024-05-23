@@ -4,8 +4,8 @@ namespace frontend::SyscallHandlers {
 
 	void Fcntl::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		oldFd = getSyscallParam<1>(process.pid);
-		auto command = getSyscallParam<2>(process.pid);
+		oldFd = process.getSyscallParam<1>();
+		auto command = process.getSyscallParam<2>();
 		syscallHandling = nullopt;
 
 		switch (command) {

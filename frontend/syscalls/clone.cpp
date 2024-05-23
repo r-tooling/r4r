@@ -29,7 +29,7 @@ namespace frontend::SyscallHandlers {
 
 	//TODO: clone may terminate later than the cild process did. What shall be done in such a case?
 	//TODO: this is very much platform specific
-		flags = getSyscallParam<1>(process.pid); //TODO: won't this fail for fork and such?
+		flags = process.getSyscallParam<1>(); //TODO: won't this fail for fork and such?
 		handleEntryState(process, state, syscallNr);
 	}
 
@@ -64,10 +64,10 @@ namespace frontend::SyscallHandlers {
 
 	void Clone3::entry(processState& process, const middleend::MiddleEndState& state, long syscallNr)
 	{
-		size_t size = getSyscallParam<2>(process.pid);
+		size_t size = process.getSyscallParam<2>();
 		(void)size;
 		assert(size == sizeof(clone_args));
-		auto data = userPtrToOwnPtr<clone_args>(process.pid, getSyscallParam<1>(process.pid));
+		auto data = userPtrToOwnPtr<clone_args>(process.pid, process.getSyscallParam<1>());
 		flags = data->flags & ~0xff;
 		fileDescriptorPtr = data->pidfd;
 		handleEntryState(process, state, syscallNr);

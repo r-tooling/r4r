@@ -3,8 +3,8 @@ namespace frontend::SyscallHandlers {
 
 	void Dup23::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		oldFd = getSyscallParam<1>(process.pid);
-		newFd = getSyscallParam<2>(process.pid);
+		oldFd = process.getSyscallParam<1>();
+		newFd = process.getSyscallParam<2>();
 		//todo: do we care about O_CLOEXEC?
 	}
 
@@ -25,7 +25,7 @@ namespace frontend::SyscallHandlers {
 
 	void Dup::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		oldFd = getSyscallParam<1>(process.pid);
+		oldFd = process.getSyscallParam<1>();
 	}
 
 	void Dup::exit(processState& process, middleend::MiddleEndState& state, long syscallRetval)

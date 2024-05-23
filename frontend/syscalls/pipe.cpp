@@ -2,7 +2,7 @@
 namespace frontend::SyscallHandlers {
 	void Pipe::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		pipesPtr = getSyscallParam<1>(process.pid);
+		pipesPtr = process.getSyscallParam<1>();
 		//todo: do we ever care about O_NONBLOCK and O_CLOEXEC
 	}
 

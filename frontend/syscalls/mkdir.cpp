@@ -4,13 +4,13 @@ namespace frontend::SyscallHandlers {
 	void Mkdir::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
+		fileRelPath = process.ptrToStr<relFilePath>( process.getSyscallParam<1>());
 	}
 
 	void MkdirAt::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		fileRelPath = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
+		at = process.getSyscallParam<1>();
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
 	}
 
 	void MkdirBase::exit(processState& process, middleend::MiddleEndState& state, long syscallRetval)

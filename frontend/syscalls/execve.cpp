@@ -3,7 +3,7 @@ namespace frontend::SyscallHandlers {
 
 	void Exec::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<1>(process.pid)) };
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
 	}
 
 	void Exec::exit(processState& process, middleend::MiddleEndState& state, long syscallRetval)

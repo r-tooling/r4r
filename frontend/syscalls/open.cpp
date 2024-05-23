@@ -62,33 +62,33 @@ namespace frontend::SyscallHandlers {
 
 	void Open::entry(processState& process, const middleend::MiddleEndState& state, long)
 	{
-		fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
-		flags = getSyscallParam<2>(process.pid);
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
+		flags = process.getSyscallParam<2>();
 		at = AT_FDCWD;
 		checkIfExists(process,state);
 	}
 
 	void OpenAT::entry(processState& process, const middleend::MiddleEndState& state, long)
 	{
-		fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };
-		at = getSyscallParam<1>(process.pid);
-		flags = getSyscallParam<3>(process.pid);
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		at = process.getSyscallParam<1>();
+		flags = process.getSyscallParam<3>();
 		checkIfExists(process, state);
 	}
 
 
 	void OpenAT2::entry(processState& process, const middleend::MiddleEndState& state, long)
 	{
-		auto structSize = getSyscallParam<4>(process.pid);
+		auto structSize = process.getSyscallParam<4>();
 		assert(structSize == sizeof(open_how));
-		auto ptr = getSyscallParam<3>(process.pid);
+		auto ptr = process.getSyscallParam<3>();
 		auto mine = userPtrToOwnPtr(process.pid, ptr, structSize);
 		auto how = reinterpret_cast<open_how*>(mine.get());
 
 		//todo: support all those magical flags of resolve
 
-		fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };
-		at = getSyscallParam<1>(process.pid);
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		at = process.getSyscallParam<1>();
 		flags = how->flags;
 		checkIfExists(process, state);
 	}
@@ -96,7 +96,7 @@ namespace frontend::SyscallHandlers {
 	void Creat::entry(processState& process, const middleend::MiddleEndState& state, long)
 	{
 		//I am the open syscall with a couple of flags. https://github.com/torvalds/linux/blob/484193fecd2b6349a6fd1554d306aec646ae1a6a/fs/open.c#L1493
-		fileRelPath = std::filesystem::path{ userPtrToString(process.pid, getSyscallParam<2>(process.pid)) };
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
 		at = AT_FDCWD;
 		flags = O_CREAT | O_WRONLY | O_TRUNC;
 		checkIfExists(process, state);

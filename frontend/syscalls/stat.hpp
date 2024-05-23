@@ -5,7 +5,7 @@ namespace frontend::SyscallHandlers {
 	struct StatHandler : public simpleSyscallHandler_base {
 
 		fileDescriptor at;
-		std::filesystem::path path;
+		relFilePath path;
 		int flags;
 		//todo: I should pass the result to the middle end
 		void exit(processState& process, middleend::MiddleEndState& state, long syscallRetval) override;

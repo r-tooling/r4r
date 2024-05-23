@@ -4,7 +4,7 @@ namespace frontend::SyscallHandlers {
 
 	void Futex::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		auto op = getSyscallParam<2>(process.pid);
+		auto op = process.getSyscallParam<2>();
 		if (op == FUTEX_FD)
 			fprintf(stderr, "Futex_FD is unhandled well \n");
 		//(from Linux 2.6.0 up to and including Linux 2.6.25) 

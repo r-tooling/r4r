@@ -35,13 +35,13 @@ namespace frontend::SyscallHandlers {
 	void Stat::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
 		flags = 0;
 	}
 
 	void FStat::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
+		at = process.getSyscallParam<1>();
 		path = "";
 		flags = AT_EMPTY_PATH;
 	}
@@ -49,23 +49,23 @@ namespace frontend::SyscallHandlers {
 	void LStat::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
 		flags = AT_SYMLINK_NOFOLLOW;
 	}
 
 	void NewFStatAt::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
-		flags = getSyscallParam<3>(process.pid);
+		at = process.getSyscallParam<1>();
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		flags = process.getSyscallParam<3>();
 	}
 
 
 	void StatX::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
-		flags = getSyscallParam<3>(process.pid);
+		at = process.getSyscallParam<1>();
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		flags = process.getSyscallParam<3>();
 	}
 
 
@@ -86,23 +86,23 @@ namespace frontend::SyscallHandlers {
 	void Access::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
 		flags = 0;
 		//todo: mode ignored?
 	}
 
 	void FAccessAt::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
+		at = process.getSyscallParam<1>();
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
 		flags = 0;
 	}
 
 	void FAccessAt2::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
-		flags = getSyscallParam<4>(process.pid);
+		at = process.getSyscallParam<1>();
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		flags = process.getSyscallParam<4>();
 	}
 
 	void ReadLinkHandler::exit(processState& process, middleend::MiddleEndState&, long syscallRetval)
@@ -146,16 +146,16 @@ namespace frontend::SyscallHandlers {
 	void ReadLink::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		path = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
-		userPtr = getSyscallParam<2>(process.pid);
-		maxBufferSize = getSyscallParam<3>(process.pid);
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
+		userPtr = process.getSyscallParam<2>();
+		maxBufferSize = process.getSyscallParam<3>();
 	}
 
 	void ReadLinkAt::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		path = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
-		userPtr = getSyscallParam<3>(process.pid);
-		maxBufferSize = getSyscallParam<4>(process.pid);
+		at = process.getSyscallParam<1>();
+		path = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		userPtr = process.getSyscallParam<3>();
+		maxBufferSize = process.getSyscallParam<4>();
 	}
 }

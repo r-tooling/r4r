@@ -19,20 +19,20 @@ namespace frontend::SyscallHandlers {
 	void Unlink::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
 	}
 
 	void Rmdir::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
 		at = AT_FDCWD;
-		fileRelPath = userPtrToString(process.pid, getSyscallParam<1>(process.pid));
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<1>());
 	}
 
 	void UnlinkAt::entry(processState& process, const middleend::MiddleEndState&, long)
 	{
-		at = getSyscallParam<1>(process.pid);
-		fileRelPath = userPtrToString(process.pid, getSyscallParam<2>(process.pid));
-		int flags = getSyscallParam<3>(process.pid);
+		at = process.getSyscallParam<1>();
+		fileRelPath = process.ptrToStr<relFilePath>(process.getSyscallParam<2>());
+		int flags = process.getSyscallParam<3>();
 		rmdirType = (flags & AT_REMOVEDIR) != 0;
 	}
 
