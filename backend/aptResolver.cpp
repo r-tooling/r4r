@@ -30,11 +30,10 @@ backend::AptLookupInfo backend::Apt::resolveNameToSourceRepo(const std::u8string
 
 	//this is a hack because c++ and utf8 sucks
 	std::string_view nameSV{ reinterpret_cast<const char*>(name.data()), name.size() };
-	ArgvWrapper argv{ "policy", nameSV };
 
-	auto dpkgProcess = spawnStdoutReadProcess("apt-cache", argv, []() noexcept {
+	 auto dpkgProcess = spawnStdoutReadProcess("apt-cache", ArgvWrapper{ "policy", nameSV } , []() noexcept {
 		setlocale(LC_ALL, "C.UTF-8");
-		});
+	});
 
 	enum {
 		preamble,
