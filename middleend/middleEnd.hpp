@@ -9,7 +9,7 @@
 #include <optional>
 
 #include <cassert>
-#include "../toBeClosedFD.hpp" //for fileDescriptor info
+#include "../toBeClosedFd.hpp" //for fileDescriptor info
 
 /*
 * semantically an argument of this type should be an absolute path.
