@@ -505,7 +505,7 @@ namespace middleend {
 					//todo: testme
 					path = resolveToAbsolute(process, path);//todo: if unresolvable return true immadietely.
 				}
-				//for recursion the kernel has a herd limit- has a hard limit see for example https://github.com/SerenityOS/serenity/blob/ee3dd7977d4c88c836bfb813adcf3e006da749a8/Kernel/Syscalls/execve.cpp#L881
+				//for recursion the kernel has a hard limit- has a hard limit see for example https://github.com/SerenityOS/serenity/blob/ee3dd7977d4c88c836bfb813adcf3e006da749a8/Kernel/Syscalls/execve.cpp#L881
 				//or the bin rewrite limit in linux.
 				failed = execFile(process, path, path, depth + 1, overrideFailed);
 				doRegisterAccess = doRegisterAccess || !failed;
