@@ -62,5 +62,5 @@ namespace frontend{
 	* Will wait untill all children have terminated
 	* Assumes all children are ptraced.
 	*/
-	void ptraceChildren(middleend::MiddleEndState& state);
+	void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls = false);
 }

@@ -127,7 +127,7 @@ namespace {
 
 namespace frontend{
 
-	void ptraceChildren(middleend::MiddleEndState& state)
+	void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls)
 	{
 		//TODO: how about exception handling? unregister in finally?
 		struct sigaction oldHandler;
@@ -196,7 +196,8 @@ namespace frontend{
 						long val = getSyscallRetval(process.pid);
 						if (process.syscallHandlerObj->operator bool()) {
 							process.syscallHandlerObj->exit(process, state, val);
-							//process.syscallHandlerObj->exitLog(process,state,val);
+							if(logSyscalls)
+								process.syscallHandlerObj->exitLog(process,state,val);
 							process.syscallHandlerObj->destroy();
 						}
 						process.syscallState = processState::outside;
@@ -208,7 +209,8 @@ namespace frontend{
 						long syscall_id = getSyscallNr(process.pid);
 						process.syscallHandlerObj->create(syscall_id);
 						process.syscallHandlerObj->entry(process, state, syscall_id);
-						//process.syscallHandlerObj->entryLog(process, state, syscall_id);
+						if(logSyscalls)
+							process.syscallHandlerObj->entryLog(process, state, syscall_id);
 						process.syscallState = processState::inside;
 					}
 					break;
