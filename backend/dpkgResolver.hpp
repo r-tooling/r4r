@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
 #include "aptResolver.hpp"
 
@@ -26,10 +27,14 @@ namespace backend {
 		static inline const auto executablePath = std::string("dpkg");
 
 
-		std::optional<const DpkgPackage *> resolvePathToPackage(std::filesystem::path);
+		std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage*>> resolvedPaths;
+
+		std::optional<const DpkgPackage *> resolvePathToPackage(const std::filesystem::path& path);
 		std::unordered_set<DpkgPackage, Hasher<&DpkgPackage::packageName>, Compare<&DpkgPackage::packageName>> packageNameToData;
 		
 		Apt aptResolver;
+
+		bool areDependenciesPresent();
 
 	private:
 		const DpkgPackage& nameToObject(const std::u8string& name);

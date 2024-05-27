@@ -6,10 +6,12 @@
 #include <cassert>
 #include <filesystem>
 #include <linux/close_range.h>
-#include <optional>
+#include <variant>
 
+#include "./backend/optionals.hpp"
 #include "./toBeClosedFd.hpp"
 #include "./cFileOptHelpers.hpp"
+#include <fcntl.h>
 #include <sys/wait.h>
 
 namespace detail {
@@ -262,10 +264,18 @@ inline pid_t spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD, const st
 
 };
 
+struct CodeReturn{
+	int code;
+};
+struct SignalReturn {
+	int signal;
+};
+
+using ReturnState = std::variant<CodeReturn, SignalReturn>;
 /*
 	Wait untill a child process specified by pid finishes execution. 
 */
-inline std::optional<int> waitForTermination(pid_t pid) {
+inline ReturnState waitForTermination(pid_t pid) {
 	int status;
 	do {
 		auto returnStatus = waitpid(pid, &status, 0);
@@ -294,16 +304,17 @@ inline std::optional<int> waitForTermination(pid_t pid) {
 
 
 	if (WIFSIGNALED(status)) {
-		return std::nullopt;
+		//fprintf(stderr, "Direct child process terminated by signal with status %d\n", WTERMSIG(status));
+		return SignalReturn{ WTERMSIG(status) };
 	}
 	else /*if (WIFEXITED(status))*/ {
-		return WEXITSTATUS(status);
+		return CodeReturn{ WEXITSTATUS(status) };
 	}
 }
 
 struct PidDeleter {
 	constexpr static pid_t invalidValue = -1;
-	std::optional<int> waitResult = std::nullopt;
+	std::optional<ReturnState> waitResult;
 
 	void operator()(pid_t& pid) {
 		if (pid >= 0) {
@@ -328,7 +339,7 @@ struct [[nodiscard]] SpawnedValues  {
 	ToBeClosedFd stderrFD;
 	ToBeClosedFd stdoutFD;
 
-	std::optional<int> close() {
+	std::optional<ReturnState> close() {
 		stdoutFD.reset();
 		stderrFD.reset();
 		pid.reset();
@@ -338,6 +349,14 @@ struct [[nodiscard]] SpawnedValues  {
 	SpawnedValues(pid_t pid, ToBeClosedFd err, ToBeClosedFd out) :pid(pid), stderrFD(std::move(err)), stdoutFD(std::move(out)) {}
 	SpawnedValues(pid_t pid, fileDescriptor err, fileDescriptor out) :pid(pid), stderrFD(std::move(err)), stdoutFD(std::move(out)) {}
 };
+struct ReturnStateWrapper {
+	std::optional<ReturnState> processRes;
+	bool terminatedCorrectly() {
+		return processRes.has_value() && std::holds_alternative<CodeReturn>(processRes.value()) && std::get<CodeReturn>(processRes.value()).code == 0;
+	}
+};
+
+
 /*
 All the relevant parts of a spawned process wrapped in a class with the bonus of using C-style FILE*
 It does not igev c++ streams as there is no method for creating a stream from a FILE* nor from a file descriptor.
@@ -347,11 +366,11 @@ struct [[nodiscard]] SpawnedValuesFilePtr {
 	ToBeClosedFileFD err;
 	ToBeClosedFileFD out;
 
-	std::optional<int> close() {
+	ReturnStateWrapper close() {
 		out.reset();
 		err.reset();
 		pid.reset();
-		return pid.waitResult;
+		return { pid.waitResult };
 	}
 
 	SpawnedValuesFilePtr(pid_t pid, fileDescriptor err, fileDescriptor out) :pid(pid), err(ToBeClosedFd{ err }, "r"), out(ToBeClosedFd{ out }, "r") {}
@@ -389,17 +408,24 @@ inline SpawnedValues spawnReadOnlyProcess(const std::filesystem::path& programPa
 */
 template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
 inline SpawnedValuesFilePtr spawnStdoutReadProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
-	int errfd[2];
-	auto pipe_res = pipe(errfd);
-	assert(pipe_res != -1);
+	int errfd = open("/dev/null", O_WRONLY); 
+	assert(errfd != -1);
 	int outfd[2];
-	pipe_res = pipe(outfd);
+	auto pipe_res = pipe(outfd);
 	(void)pipe_res;
 	assert(pipe_res != -1);
 	auto pipe = readClosedPipe();
-	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd[1], programPath, argv.get(), argv.argc, callback);
+	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], /*errfd */errfd, programPath, argv.get(), argv.argc, callback);
 	close(outfd[1]);
-	close(errfd[1]);
-	close(errfd[0]);
+	close(errfd);
 	return { pid,-1,outfd[0] };
+}
+
+template<class... Ts>
+struct overloaded : Ts... { using Ts::operator()...; };
+template<ArgvWrapperLike argv_t>
+inline bool checkExecutableExists(const std::filesystem::path& programPath, argv_t&& argv) {
+	static auto codeRet = [](CodeReturn c) {return c.code; };
+	static auto signalRet = [](SignalReturn c) {return c.signal == SIGPIPE ? 0 : -1; }; //sigpipe is bound to hapen as I just close the output immadietely. Could be improved to redirect to /dev/null.
+	return optTransform(spawnStdoutReadProcess(programPath, argv).close().processRes, [](auto var) { return std::visit(overloaded{ codeRet,signalRet }, var); }).value_or(-1) == 0;
 }

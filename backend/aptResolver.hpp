@@ -33,6 +33,8 @@ namespace backend {
 			return repoInstalLookup;
 		}
 
+		bool areDependenciesPresent();
+
 	private:
 		std::vector<std::u8string> allRepoInstalls;
 		AptInfoMap repoInstalLookup;

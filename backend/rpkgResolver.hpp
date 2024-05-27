@@ -43,7 +43,7 @@ namespace backend {
 
 	struct TopSortIterator {
 
-		const RpkgSet& items;
+		const RpkgSet items;
 
 		auto begin() {
 			return iterator{ items };
@@ -126,11 +126,7 @@ namespace backend {
 	struct Rpkg {
 	public:
 
-		bool exectuablePresent;
-		Rpkg();
-
 		static inline const auto executablePath = std::string("Rscript");
-		RpkgSet packageNameToData;
 		//This needs to be a member variable due to lifetime. 
 		//As a temporary it would have to be a part of TopSortIterator as created tempoeraries get their lifetime extended in c++23 on only.
 		//But TopSortIterator should not have access to the internals of rpkg-based lookups.
@@ -138,13 +134,19 @@ namespace backend {
 
 		std::optional<const RpkgPackage*> resolvePathToPackage(const std::filesystem::path&);
 		
-		bool isKnownRpkg(const std::filesystem::path&);
-
 		std::unordered_set < std::filesystem::path > getLibraryPaths();
 
+		bool areDependenciesPresent();
+
 		//this is assumed to be only called after we have resolved all other files.
+		//includes packages which are only discovered to be analysed this way.
 		TopSortIterator topSortedPackages() noexcept;
+
+		RpkgSet packageNameToData;
+
 	private:
+
+
 		RpkgPackage resolvePackageToName_noinsert(const std::u8string& packageName);
 	};
 

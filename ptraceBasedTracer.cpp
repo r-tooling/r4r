@@ -106,8 +106,16 @@ int main(int argc, char* argv[])
 	(void)childPid;
 	frontend::ptraceChildren(state);
 	printf("Child process terminated! Analysing data.\n");
-	backend::csvBased(state, "accessedFiles.csv");
-
+	backend::CachingResolver backendResolver{ state };
+	printf("Analysing R packages\n");
+	backendResolver.resolveRPackages();
+	printf("Analysing Debian packages\n");
+	backendResolver.resolveDebianPackages();
+	printf("Creating reports\n");
+	backendResolver.csv("accessedFiles.csv");
+	backendResolver.report("report.txt");
+	backendResolver.dockerImage(".");
+	printf("Done\n");
 	wait(nullptr);
 	return 0;
 }

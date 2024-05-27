@@ -161,9 +161,8 @@ package ‘tcltk’ is a base package, and should not be updated
 			}
 		}
 
-		auto waitResult = rpkg.close();
 
-		if (waitResult != 0) {
+		if (!rpkg.close().terminatedCorrectly()) {
 			return std::nullopt;
 		}
 
@@ -180,11 +179,6 @@ package ‘tcltk’ is a base package, and should not be updated
 		else {
 			return std::nullopt;
 		}
-	}
-	//Rscript --help. I could just check that the file exists somewhere in path but that would involve path variable resolution.
-	std::optional<int> checkExist() {
-		auto rpkg = spawnStdoutReadProcess(backend::Rpkg::executablePath, ArgvWrapper{"--help"});
-		return rpkg.close();
 	}
 
 	std::optional<backend::RpkgPackage> exactPathToPackage(std::filesystem::__cxx11::path& parent)
@@ -209,10 +203,6 @@ package ‘tcltk’ is a base package, and should not be updated
 		return std::nullopt;
 	}
 }
-
-backend::Rpkg::Rpkg():exectuablePresent(checkExist() == 0){}
-
-
 
 std::optional<const backend::RpkgPackage*> backend::Rpkg::resolvePathToPackage(const std::filesystem::path& fullpath)
 {
@@ -245,17 +235,6 @@ std::optional<const backend::RpkgPackage*> backend::Rpkg::resolvePathToPackage(c
 	return found;
 }
 
-bool backend::Rpkg::isKnownRpkg(const std::filesystem::path& fullpath)
-{
-	auto parent = fullpath.parent_path();
-	for (std::filesystem::path lastPath = fullpath; parent != lastPath; lastPath = parent, parent = parent.parent_path()) {
-		if (auto found = resolvedPaths.find(parent); found != resolvedPaths.end()) {
-			return found->second.has_value();
-		}
-	}
-	return false;
-}
-
 std::unordered_set<std::filesystem::path> backend::Rpkg::getLibraryPaths()
 {
 	std::unordered_set<std::filesystem::path> paths;
@@ -265,13 +244,19 @@ std::unordered_set<std::filesystem::path> backend::Rpkg::getLibraryPaths()
 	return paths;
 }
 
+bool backend::Rpkg::areDependenciesPresent()
+{
+	//Rscript --help. I could just check that the file exists somewhere in path but that would involve path variable resolution and this lets the stdlib handle things.
+	return checkExecutableExists(backend::Rpkg::executablePath, ArgvWrapper{ "--help" });
+}
+
 
 //this is assumed to be only called after we have resolved all other files.
 
 backend::TopSortIterator backend::Rpkg::topSortedPackages() noexcept {
 	//emplace may cause rehas and this iterator invalidation, so the entire thing is done in batches.
+	RpkgSet AllPackages = packageNameToData;
 	{//TODO: multiple R versions break this. Hard. Only the first instance of a package is considered...
-		RpkgSet AllPackages = packageNameToData;
 		RpkgSet toAdd;
 		bool toAddEmpty = false;
 		do {
@@ -285,10 +270,9 @@ backend::TopSortIterator backend::Rpkg::topSortedPackages() noexcept {
 			toAddEmpty = toAdd.empty();
 			AllPackages.merge(std::move(toAdd));
 		} while (!toAddEmpty);
-		packageNameToData = AllPackages;
 	}//end lifetime guard
 
-	return TopSortIterator{ packageNameToData };
+	return TopSortIterator{ AllPackages };
 }
 
 backend::RpkgPackage backend::Rpkg::resolvePackageToName_noinsert(const std::u8string& packageName)

@@ -4,6 +4,7 @@
 #include "../toBeClosedFd.hpp"
 #include "../stringHelpers.hpp"
 #include "filesystemGraph.hpp"
+#include "optionals.hpp"
 #include <cstdlib>
 #include <fcntl.h> //O_* flags
 #include <sys/stat.h> //mkdirat
@@ -12,6 +13,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <variant>
+
 
 namespace {
 
@@ -227,6 +229,25 @@ namespace {
 		writeScriptLaunch(file, state);//todo: error?
 		return resPath;
 	}
+	std::string escapeForCSV(std::u8string unescaped) {
+		using std::string_literals::operator""s;
+	//	if (unescaped.contains(strType{ "," })) { c++23
+		if (unescaped.find(u8",") != unescaped.npos) {
+			auto s = u8"\""s + replaceAll(std::move(unescaped), u8"\""s, u8"\"\"\""s) + u8"\""s ;
+			return std::string{ reinterpret_cast<const char*>(s.data()),s.length() };
+		}
+		else {
+			return std::string{ reinterpret_cast<const char*>(unescaped.data()),unescaped.length() };
+		}
+	}
+
+	template<class Key, class Result>
+	std::optional<Result> optionalResolve(const std::unordered_map<Key,Result>& container, const Key& key) {
+		if (auto ptr = container.find(key); ptr != container.end())
+			return ptr->second;
+		else
+			return std::nullopt;
+	}
 
 }
 namespace backend {
@@ -265,20 +286,9 @@ namespace backend {
 		printf("test from %s", dirName);
 	}
 
-	/*
-	* FORMAT
-	* FILENAME, FLAGS
-	*/
-	void csvBased(const middleend::MiddleEndState& state, absFilePath output)
+	void CachingResolver::csv(absFilePath output)
 	{
 		using std::string_literals::operator""s;
-
-		auto rpkgResolver = backend::Rpkg{}; //TODO: only use me if the R executable or its variants are detected.
-		auto dpkgResolver = backend::Dpkg{};
-
-		std::vector<middleend::MiddleEndState::file_info*> unmatchedFiles;
-		std::vector<middleend::MiddleEndState::file_info*> executed;
-
 		auto openedFile = std::ofstream{ output,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
 		openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << ", needsSubfolders" << ", source dpkg package" << ", source R package" << std::endl;
 		for (auto& [path, info] : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
@@ -305,30 +315,36 @@ namespace backend {
 				<< "," << (info->wasInitiallyOnTheDisk.value_or(false) ? "F" : "T")
 				<< "," << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T")
 				<< "," << (info->requiresAllSubEntities.value_or(false) ? "T" : "F");
-
-			auto dpkg = dpkgResolver.resolvePathToPackage(info->realpath);
-			{
-
-				auto resolved = replaceAll(dpkg ? std::u8string(**dpkg) : u8""s, u8"\""s, u8"\"\"\""s);
-				std::string compat{ reinterpret_cast<const char*>(resolved.data()),resolved.length() };
-				openedFile << ", \"" << compat << "\"";
-			}
-
-			auto rpkg = rpkgResolver.resolvePathToPackage(info->realpath);//always resolve all dependencies, the time overlap is marginal and I need to know the version even in dpkg packages.
-			{
-				auto resolved = replaceAll(rpkg ? std::u8string(**rpkg) : u8""s, u8"\""s, u8"\"\"\""s);
-				std::string compat{ reinterpret_cast<const char*>(resolved.data()),resolved.length() };
-				openedFile << ", \"" << compat << "\"";
-			}
-			if (!rpkg && !dpkg) {
-				unmatchedFiles.emplace_back(info.get());
-			}
-
-			if (flags & fileAccessFlags::execute) {
-				executed.emplace_back(info.get());
-			}
+			auto dpkg = optTransform(optionalResolve(dpkgResolver.resolvedPaths, path).value_or(std::nullopt), [](const auto* package) {return static_cast<std::u8string>(*package); });
+			openedFile << "," << escapeForCSV(dpkg.value_or(u8""s));
+			auto rpkg = optTransform(optionalResolve(rpkgResolver.resolvedPaths, path).value_or(std::nullopt), [](const auto* package) {return static_cast<std::u8string>(*package);});
+			openedFile << "," << escapeForCSV(rpkg.value_or(u8""s));
 			openedFile << std::endl;
 		}
+		
+	}
+
+	void CachingResolver::report(absFilePath output)
+	{
+		auto report = std::ofstream{ output,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out };
+		auto exec = getExecutedFiles();
+		report << "Discovered " << state.encounteredFilenames.size() << " different file dependencies" << std::endl;
+		report << "Of those " << getUnmatchedFiles().size() << " were not installed using any form of package manager" << std::endl;
+		report << "Dpkg provides " << dpkgResolver.packageNameToData.size() << " different packages the program depends on. " << " This does not include dependencies of the packages which were not directly used during the program runtime " << std::endl;
+		report << "R provides " << rpkgResolver.packageNameToData.size() << " packages used directly and " << rpkgResolver.topSortedPackages().items.size() << " packages the program directly or indirectly depends on." << std::endl;
+		report << "The program incuding itself executed " << exec.size() << " files. Namely:" << std::endl;
+
+		for (decltype(auto) it : exec) {
+			report << it->realpath << std::endl;
+		}
+
+	}
+	void CachingResolver::dockerImage(absFilePath output)
+	{
+		using std::string_literals::operator""s;
+		std::vector<middleend::MiddleEndState::file_info*> unmatchedFiles = getUnmatchedFiles();
+
+
 
 		auto dockerImage = std::ofstream{ output.parent_path() / "dockerImage" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
 		auto dockerBuildScript = std::ofstream{ output.parent_path() / "buildDocker.sh" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
@@ -372,7 +388,7 @@ namespace backend {
 							folders.emplace(file->realpath);
 							//TODO: handle symlinks
 						}
-						else if (file->type == std::remove_reference_t<decltype(file->type.value())>::file 
+						else if (file->type == std::remove_reference_t<decltype(file->type.value())>::file
 							|| (!file->type.has_value() && std::filesystem::is_regular_file(file->realpath))) {
 							dockerPathTranslator.emplace(file->realpath, std::to_string(dockerPathTranslator.size()));
 							folders.emplace(file->realpath.parent_path());
@@ -392,9 +408,7 @@ namespace backend {
 				dockerImage << std::endl;
 			}
 		}
-		
 
-		auto RpkgDirect = rpkgResolver.packageNameToData.size();
 		//todo: check R version
 		if (!rpkgResolver.packageNameToData.empty()) {
 			//this will break if ran directly due to too large a string argument. I do not know the specifics but passing it into a file and executing the file works.
@@ -416,7 +430,7 @@ namespace backend {
 				// this works due to a combination of things explained here https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
 				// and here https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
 				dockerImage << "install_version(\"" << toNormal(package.packageName) << "\",\"" << toNormal(package.packageVersion) << "\"" <<
-					",upgrade = \"never\", dependencies=F,lib=c("<<package.whereLocated.parent_path()<<"), Ncpus=cores" << "); ";//topsorted
+					",upgrade = \"never\", dependencies=F,lib=c(" << package.whereLocated.parent_path() << "), Ncpus=cores" << "); ";//topsorted
 				//unfortunatelly upgrade=never is not sufficient
 				// the package may depend on other packages which are not installed and such packages would then get installed at possibly higher versions than intended
 				//TODO: add parsing of the source param to get the potential github and such install rather than this api.
@@ -432,13 +446,13 @@ namespace backend {
 		//instead a folder with all the relevant data is serialised to and then added to the image where it is unserialised.
 
 
-		auto file = createLaunchScript(".",state);
+		auto file = createLaunchScript(".", state);
 		auto absPath = std::filesystem::absolute(file).lexically_normal();
 		dockerPathTranslator.emplace(absPath, std::to_string(dockerPathTranslator.size()));
 		if (!dockerPathTranslator.empty()) {
 			dockerImage << "ADD DockerData /tmp/DockerData" << std::endl;
 
-			dockerImage << "RUN " ;//unpack
+			dockerImage << "RUN ";//unpack
 			for (auto& [path, key] : dockerPathTranslator) {
 				dockerImage << "mv /tmp/DockerData/" << key << " " << path << " && ";
 			}
@@ -460,19 +474,62 @@ namespace backend {
 		dockerBuildScript << "docker build -t 'diplomka:test' -f dockerImage .; " << std::endl;
 		dockerBuildScript << "rm -rf 'DockerData'; rm '.dockerignore';" << std::endl;
 		dockerBuildScript << "docker run  -it --entrypoint bash  diplomka:test" << std::endl;
+	}
 
-		auto report = std::ofstream{ output.parent_path() / "report.txt",std::ios::openmode::_S_trunc | std::ios::openmode::_S_out };
-
-		report << "Discovered " << state.encounteredFilenames.size() << " different file dependencies" << std::endl;
-		report << "Of those " << unmatchedFiles.size() << " were not installed using any form of package manager" << std::endl;
-		report << "Dpkg provides " << dpkgResolver.packageNameToData.size() << " different packages the program depends on. " << " This does not include dependencies of the packages which were not directly used during the program runtime " << std::endl;
-		report << "R provides " << RpkgDirect << " packages used directly and " << rpkgResolver.packageNameToData.size() << " packages the program directly or indirectly depends on." << std::endl;
-		
-		
-		report << "The program incuding itself executed " << executed.size() << " files. Namely:" << std::endl;
-		for (decltype(auto) it : executed) {
-			report << it->realpath << std::endl;
+	std::vector<middleend::MiddleEndState::file_info*> CachingResolver::getUnmatchedFiles()
+	{
+		std::vector<middleend::MiddleEndState::file_info*> res{};
+		for (auto& [path, info] : state.encounteredFilenames) {
+			auto dpkg = optionalResolve(dpkgResolver.resolvedPaths, path).value_or(std::nullopt);
+			auto rpkg = optionalResolve(rpkgResolver.resolvedPaths, path).value_or(std::nullopt);
+			if (!dpkg && !rpkg) {
+				res.emplace_back(info.get());
+			}
 		}
+		return res;
+	}
+
+	std::vector<middleend::MiddleEndState::file_info*> CachingResolver::getExecutedFiles()
+	{
+		std::vector<middleend::MiddleEndState::file_info*> res{};
+		for (auto& [path, info] : state.encounteredFilenames) {
+			for (auto& val : info.get()->accessibleAs) {
+				if (val.executable) {
+					res.emplace_back(info.get());
+					break;//inner loop only
+				}
+			}
+		}
+		return res;
+	}
+
+
+
+	void CachingResolver::resolveRPackages()
+	{
+		if (!rpkgResolver.areDependenciesPresent()) {
+			fprintf(stderr, "Unable to resolve R packages as the required dependencies are not present\n");
+			return;
+		}
+
+		//TODO: only use me for files if the R executable or its variants are detected in accesses.
+		for (auto& [path, info] : state.encounteredFilenames) {
+			rpkgResolver.resolvePathToPackage(info->realpath);//always resolve all dependencies, the time overlap is marginal and I need to know the version even in dpkg packages.
+		}
+
+	}
+	void CachingResolver::resolveDebianPackages()
+	{
+		if (!dpkgResolver.areDependenciesPresent()) {
+			fprintf(stderr, "Unable to resolve DPKG/APT packages as the required dependencies are not present\n");
+			return;
+		}
+
+		//TODO: only use me for files if the R executable or its variants are detected in accesses.
+		for (auto& [path, info] : state.encounteredFilenames) {
+			dpkgResolver.resolvePathToPackage(info->realpath);
+		}
+
 	}
 
 }

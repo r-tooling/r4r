@@ -2,6 +2,7 @@
 #include "../processSpawnHelper.hpp"
 #include "../stringHelpers.hpp"
 #include "../cFileOptHelpers.hpp"
+#include "optionals.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <vector>
@@ -136,7 +137,7 @@ namespace {
 		
 		auto processRes = dpkgProcess.close();
 		if constexpr (sizeof...(param) == 1) {
-			return processRes == 0 ? results : std::vector<resolvedData>{};
+			return processRes.terminatedCorrectly() ? results : std::vector<resolvedData>{};
 		}
 		else {
 			return results;
@@ -153,26 +154,6 @@ namespace {
 			exists = result == 0;//TODO: error for access rights.
 		}
 
-	};
-
-	template<class T, class Callback>
-	std::optional<T> optOR(std::optional<T>&& value, Callback&& callback) {
-		if (value.has_value()) {
-			return value;
-		}
-		else {
-			return callback();
-		}
-	};
-
-	template<class T, class Callback, class ResultType = std::invoke_result_t<Callback, T> >
-	std::optional<ResultType> optTransform(std::optional<T>&& value, Callback&& callback) {
-		if (value.has_value()) {
-			return callback(value.value());
-		}
-		else {
-			return std::nullopt;
-		}
 	};
 
 	std::optional<std::u8string> tryResolveVector(std::vector<resolvedData>&& potentialValues, context& context) {
@@ -234,6 +215,12 @@ namespace {
 }
 
 
+bool backend::Dpkg::areDependenciesPresent()
+{
+	//Rscript --help. I could just check that the file exists somewhere in path but that would involve path variable resolution and this lets the stdlib handle things.
+	return checkExecutableExists(backend::Dpkg::executablePath, ArgvWrapper{ "--help" });
+}
+
 const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& name) {
 	if (auto find = packageNameToData.find(name); find != packageNameToData.end()) {
 		return *find;
@@ -257,10 +244,14 @@ const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& nam
 }
 
 //todo: only pass references but that has issues with optionals...
-std::optional<const backend::DpkgPackage*> backend::Dpkg::resolvePathToPackage(std::filesystem::path path)
+std::optional<const backend::DpkgPackage*> backend::Dpkg::resolvePathToPackage(const std::filesystem::path& path)
 {
+	if (auto ptr = resolvedPaths.find(path); ptr != resolvedPaths.end()) {
+		return ptr->second;
+	}
+
 	context con{ path };
-	return
+	auto retval =
 		optTransform(
 			optOR(
 				tryResolveVector(resolveString(path.generic_string()), con), //try the package full path
@@ -273,6 +264,8 @@ std::optional<const backend::DpkgPackage*> backend::Dpkg::resolvePathToPackage(s
 					);
 				}
 	), [&](std::u8string name) {return &nameToObject(name); });
+	resolvedPaths.try_emplace(path, retval);
+	return retval;
 	/*
 	return
 		optTransform(

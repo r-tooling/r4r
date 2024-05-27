@@ -1,6 +1,7 @@
 #include "aptResolver.hpp"
 #include "../processSpawnHelper.hpp"
 #include "../stringHelpers.hpp"
+#include "./optionals.hpp"
 #include <vector>
 namespace {
 	std::vector<std::u8string> listAllRepos() {
@@ -212,4 +213,10 @@ const backend::AptInfo& backend::Apt::translatePackageToIdentify(const std::u8st
 	}
 
 	return *repoInstalLookup.emplace(packageRepo, u8"deb" + translatedPackage).first;
+}
+
+bool backend::Apt::areDependenciesPresent()
+{
+	return checkExecutableExists("grep", ArgvWrapper{ "--help" }) 
+		&& checkExecutableExists("apt-cache", ArgvWrapper{ "--help" });
 }
