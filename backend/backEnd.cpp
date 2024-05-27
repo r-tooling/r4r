@@ -525,9 +525,16 @@ namespace backend {
 			return;
 		}
 
+		const size_t notifyInterval = std::max(20ul, state.encounteredFilenames.size()/100);
+		size_t counter = 0;
 		//TODO: only use me for files if the R executable or its variants are detected in accesses.
 		for (auto& [path, info] : state.encounteredFilenames) {
 			dpkgResolver.resolvePathToPackage(info->realpath);
+			counter++;
+			if (counter % notifyInterval == 0) {
+				printf("Analysed %lu of %lu packages\n", counter, state.encounteredFilenames.size());
+			}
+
 		}
 
 	}
