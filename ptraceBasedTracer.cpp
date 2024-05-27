@@ -114,7 +114,7 @@ int main(int argc, char* argv[])
 	printf("Creating reports\n");
 	backendResolver.csv("accessedFiles.csv");
 	backendResolver.report("report.txt");
-	backendResolver.dockerImage(".");
+	backendResolver.dockerImage(".","R4R:test");
 	printf("Done\n");
 	wait(nullptr);
 	return 0;

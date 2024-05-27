@@ -339,7 +339,7 @@ namespace backend {
 		}
 
 	}
-	void CachingResolver::dockerImage(absFilePath output)
+	void CachingResolver::dockerImage(absFilePath output,const std::string_view tag)
 	{
 		using std::string_literals::operator""s;
 		std::vector<middleend::MiddleEndState::file_info*> unmatchedFiles = getUnmatchedFiles();
@@ -471,9 +471,12 @@ namespace backend {
 			dockerBuildScript << "cp " << source << " " << dest << std::endl; //todo: escaping, ln if the file is on the same filesystem. Or amybe create a condition if ln fails, fall back to cp.
 		}
 		dockerBuildScript << "cd ..; echo '*' > '.dockerignore'; echo '!DockerData' >> '.dockerignore';";
-		dockerBuildScript << "docker build -t 'diplomka:test' -f dockerImage .; " << std::endl;
+		dockerBuildScript << "docker build -t '"<< tag << "' -f dockerImage .;" << std::endl;
 		dockerBuildScript << "rm -rf 'DockerData'; rm '.dockerignore';" << std::endl;
-		dockerBuildScript << "docker run  -it --entrypoint bash  diplomka:test" << std::endl;
+		dockerBuildScript << "runDocker.sh;" << std::endl;
+
+		std::ofstream runDockerScript{ output.parent_path() / "runDocker.sh" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //TODO:
+		runDockerScript << "docker run  -it --entrypoint bash " << tag << std::endl;
 	}
 
 	std::vector<middleend::MiddleEndState::file_info*> CachingResolver::getUnmatchedFiles()

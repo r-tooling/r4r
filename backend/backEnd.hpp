@@ -23,7 +23,7 @@ namespace backend {
 		*/
 		void csv(absFilePath output);
 		void report(absFilePath output);
-		void dockerImage(absFilePath output);
+		void dockerImage(absFilePath output, const std::string_view tag);
 	};
 
 	/*
