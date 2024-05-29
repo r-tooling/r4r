@@ -17,6 +17,45 @@
 
 namespace {
 
+	struct SubdirIterator {
+		std::filesystem::path pathToWalk;
+
+		struct dummy {
+
+		};
+
+		struct IterImpl {
+			const std::filesystem::path& origPath;
+			std::filesystem::path::iterator currentPos;
+			std::filesystem::path soFar;
+
+			IterImpl(const std::filesystem::path& origPath) :origPath{ origPath }, currentPos(origPath.begin()), soFar{ currentPos != origPath.end() ? *currentPos : "" } {};
+
+			const auto& operator*() {
+				return soFar;
+			}
+
+			auto operator++() {
+				++currentPos;
+				if (currentPos != origPath.end())
+					soFar /= *currentPos;
+				return this;
+			}
+
+			auto operator!=(const dummy&) {
+				return currentPos != origPath.end();
+			}
+		};
+
+		auto begin() {
+			return IterImpl(pathToWalk);
+		}
+		auto end() {
+			return dummy{};
+		}
+
+	};
+
 	enum fileAccessFlags {
 		read = 1,
 		write = 2,
@@ -139,7 +178,7 @@ namespace {
 	}
 
 
-	bool isSpecialCased(middleend::MiddleEndState::file_info* info) {
+	bool isSpecialCased(const std::filesystem::path& path) {
 		auto none = Graph::operationType::none;
 		auto dir = Graph::operationType::directory;
 		auto exa = Graph::operationType::exact;
@@ -156,15 +195,12 @@ namespace {
 		static const auto root = 
 		n("/", 
 			l("proc", dir),
-			//l("etc", dir),
+			n("etc", l("ld.so.cache",exa)),
 			l("sys", dir),
 			l("dev", dir),
 			n("usr", n("lib", n("locale", l("locale-archive", exa))))
 			);///usr/lib/locale/locale-archive
 
-
-
-		const auto& path = info->realpath;
 		int counter = 0;
 		const Graph* current = root.get();
 		auto iter = path.begin(), end = path.end();
@@ -264,6 +300,45 @@ namespace {
 		}
 		return;
 	}
+	void unpackFiles(std::unordered_map<absFilePath, std::string>& dockerPathTranslator, std::ofstream& dockerImage)
+	{
+		if (!dockerPathTranslator.empty()) {
+			dockerImage << "ADD DockerData /tmp/DockerData" << std::endl;
+
+			dockerImage << "RUN ";//unpack
+			for (auto& [path, key] : dockerPathTranslator) {
+				dockerImage << "mv /tmp/DockerData/" << key << " " << path << " && ";
+			}
+			dockerImage << "true" << std::endl;
+		}
+	}
+
+	static void createBuildScript(std::ofstream& dockerBuildScript,
+		std::unordered_map<absFilePath, std::string>& dockerPathTranslator,
+		const std::string_view& tag,
+		std::ofstream& runDockerScript,
+		std::unordered_set<std::filesystem::path> unignoredFiles)
+	{
+		std::ofstream dockerignore{ ".dockerignore" };
+		dockerignore << "*" << std::endl;
+		dockerignore << "!DockerData" << std::endl;
+		for (auto& item : unignoredFiles) {
+			dockerignore << "!" << item.filename().string() << std::endl;
+		}
+
+		dockerBuildScript << "#!/bin/sh" << std::endl << "mkdir 'DockerData'; cd 'DockerData'; ";
+		for (const auto& [source, dest] : dockerPathTranslator) {
+			dockerBuildScript << "cp " << source << " " << dest << std::endl; //todo: escaping, ln if the file is on the same filesystem. Or amybe create a condition if ln fails, fall back to cp.
+		}
+		
+		dockerBuildScript << "cd ..;";
+		dockerBuildScript << "docker build -t '" << tag << "' -f dockerImage .; success=$?;" << std::endl;
+		dockerBuildScript << "rm -rf 'DockerData';" << std::endl;
+		dockerBuildScript << "if [ $success -eq 0 ]; then ./runDocker.sh; fi;" << std::endl;
+
+		runDockerScript << "docker run  -it --entrypoint bash " << tag << std::endl;
+	}
+
 
 }
 namespace backend {
@@ -358,7 +433,6 @@ namespace backend {
 	void CachingResolver::dockerImage(absFilePath output,const std::string_view tag)
 	{
 		using std::string_literals::operator""s;
-		std::vector<middleend::MiddleEndState::file_info*> unmatchedFiles = getUnmatchedFiles();
 
 
 
@@ -368,116 +442,49 @@ namespace backend {
 
 		dockerImage << "FROM ubuntu:22.04" << std::endl;
 		
+
 		
 		dpkgResolver.persist(dockerImage);
-
 		//this is done before the R packages to ensure all  library paths are accessible
+		std::filesystem::path directoryCreator{ output.parent_path() / "recreateDirectories.sh"};
+		persistDirectoriesAndSymbolicLinks(dockerImage, directoryCreator);
 
-		//TODO:
-		///usr/lib/R/etc/Renviron.site coudl get modified. So coudl probably any other file in dpkg packages...
-		//this can be done before the program is ever run
-		//todo: what if it is deleted now?
-		std::unordered_map<absFilePath, std::string> dockerPathTranslator;
-
-		{
-			//TODO: handle symlinks
-			std::unordered_set<std::filesystem::path> folders = rpkgResolver.getLibraryPaths();
-			for (auto file : unmatchedFiles) {
-				if (file->wasInitiallyOnTheDisk.value_or(false) && file->isCurrentlyOnTheDisk.value_or(true)) {
-					if (!isSpecialCased(file)) {
-						if (file->type == std::remove_reference_t<decltype(file->type.value())>::dir
-							|| (!file->type.has_value() && std::filesystem::is_directory(file->realpath))) {
-							folders.emplace(file->realpath);
-							//TODO: handle symlinks
-						}
-						else if (file->type == std::remove_reference_t<decltype(file->type.value())>::file
-							|| (!file->type.has_value() && std::filesystem::is_regular_file(file->realpath))) {
-							dockerPathTranslator.emplace(file->realpath, std::to_string(dockerPathTranslator.size()));
-							folders.emplace(file->realpath.parent_path());
-						}
-						else {
-							folders.emplace(file->realpath.parent_path());
-						}
-					}
-				}
-			}
-
-			if (!folders.empty()) {
-				dockerImage << "RUN mkdir -p ";
-				for (auto& folder : folders) {
-					dockerImage << folder << " ";//autoquoted
-				}
-				dockerImage << std::endl;
-			}
-		}
-
-		//todo: check R version
-		if (!rpkgResolver.packageNameToData.empty()) {
-			//this will break if ran directly due to too large a string argument. I do not know the specifics but passing it into a file and executing the file works.
-
-
-			dockerImage << "RUN echo '"
-				"cores = min(parallel::detectCores(),4);"//parallel is a part of the core on ubuntu...
-				"tmpDir <- tempdir();"
-				"install.packages(\"remotes\",lib=c(tmpDir));"
-				"require(\"remotes\",lib.loc = c(tmpDir)); "; //this way the require should not conflict with the installed version.
-			//TODO: if we wanted to be fancy, instead get a vector of all the R packages currently topsorted. Install these in parallel.
-			for (auto& package : rpkgResolver.topSortedPackages()) {
-				if (package.isBaseRpackage) {
-					//TODO: add a check into the launch.sh perhaps?
-					continue;//these canot be installed
-				}
-				//todo: how about default-bundled packages? do we need to check their version as well?
-				//see for example /usr/lib/R/library/stats/Meta/nsInfo.rds
-				// this works due to a combination of things explained here https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
-				// and here https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
-				dockerImage << "install_version(\"" << toNormal(package.packageName) << "\",\"" << toNormal(package.packageVersion) << "\"" <<
-					",upgrade = \"never\", dependencies=F,lib=c(" << package.whereLocated.parent_path() << "), Ncpus=cores" << "); ";//topsorted
-				//unfortunatelly upgrade=never is not sufficient
-				// the package may depend on other packages which are not installed and such packages would then get installed at possibly higher versions than intended
-				//TODO: add parsing of the source param to get the potential github and such install rather than this api.
-				//TODO: add check that the version is detected here first
-
-			}
-			dockerImage << "' > R_Install && Rscript R_Install" << std::endl;
-		}
-
+		std::filesystem::path rpkgCreator{ output.parent_path() / "installRPackages.sh" };
+		rpkgResolver.persist(dockerImage, rpkgCreator);
 
 
 		//COPY src dest does not work as it quickly exhaust the maximum layer depth
 		//instead a folder with all the relevant data is serialised to and then added to the image where it is unserialised.
 
+		// PERSIST FILES
+
+		std::unordered_map<absFilePath, std::string> dockerPathTranslator;
 
 		auto file = createLaunchScript(".", state);
-		auto absPath = std::filesystem::absolute(file).lexically_normal();
-		dockerPathTranslator.emplace(absPath, std::to_string(dockerPathTranslator.size()));
-		if (!dockerPathTranslator.empty()) {
-			dockerImage << "ADD DockerData /tmp/DockerData" << std::endl;
-
-			dockerImage << "RUN ";//unpack
-			for (auto& [path, key] : dockerPathTranslator) {
-				dockerImage << "mv /tmp/DockerData/" << key << " " << path << " && ";
+		dockerPathTranslator.emplace(std::filesystem::canonical(file), std::to_string(dockerPathTranslator.size()));
+		for (auto info : getUnmatchedFiles()) {
+			if (isSpecialCased(info->realpath)) {
+				continue;
 			}
-			dockerImage << "true" << std::endl;
+			if (std::filesystem::is_regular_file(info->realpath)) {
+				dockerPathTranslator.emplace(info->realpath, std::to_string(dockerPathTranslator.size()));
+			}
+			//TODO: error on non symlink/dir/file
 		}
 
+
+
+		unpackFiles(dockerPathTranslator, dockerImage);
+
+		//PERSIST ENV
 
 		for (auto& env : state.env) {
 			dockerImage << "ENV " << replaceFirst(std::string(env), "="s, "=\""s) << "\"" << std::endl;
 		}
 		dockerImage << "WORKDIR " << state.initialDir << std::endl;
-		//TODO: state.users;
 
-		dockerBuildScript << "#!/bin/sh" << std::endl << "mkdir 'DockerData'; cd 'DockerData'; ";
-		for (const auto& [source, dest] : dockerPathTranslator) {
-			dockerBuildScript << "cp " << source << " " << dest << std::endl; //todo: escaping, ln if the file is on the same filesystem. Or amybe create a condition if ln fails, fall back to cp.
-		}
-		dockerBuildScript << "cd ..; echo '*' > '.dockerignore'; echo '!DockerData' >> '.dockerignore';";
-		dockerBuildScript << "docker build -t '"<< tag << "' -f dockerImage .;" << std::endl;
-		dockerBuildScript << "rm -rf 'DockerData'; rm '.dockerignore';" << std::endl;
-		dockerBuildScript << "./runDocker.sh;" << std::endl;
 
-		runDockerScript << "docker run  -it --entrypoint bash " << tag << std::endl;
+		createBuildScript(dockerBuildScript, dockerPathTranslator, tag, runDockerScript, {directoryCreator, rpkgCreator });
 	}
 
 	std::vector<middleend::MiddleEndState::file_info*> CachingResolver::getUnmatchedFiles()
@@ -543,6 +550,50 @@ namespace backend {
 			}
 		}
 		return currentList;
+	}
+	
+
+	void CachingResolver::persistDirectoriesAndSymbolicLinks(std::ostream& dockerImage, const std::filesystem::path& scriptLocation)
+	{
+		std::unordered_set<std::filesystem::path> resolvedPaths;
+
+		std::ofstream result{ scriptLocation, std::ios::openmode::_S_trunc | std::ios::openmode::_S_out };
+
+		//TODO: add a method for detecting that a sublink here belongs to a package and mark it as resolved.
+		//but this requires resolving all the symlinks which are to be created to their real paths as we go along. 
+		auto all = symlinkList();
+		for (const auto& [path, _] : state.encounteredFilenames) {
+			all.emplace(path);
+		}
+		//These should not actually be required but better safe than sorry in this case. Any found library should have been detected before.
+		all.merge(rpkgResolver.getLibraryPaths()); 
+		all.emplace(state.initialDir);
+		for (decltype(auto) path : all) {
+			//do not persist links which will be persisted by dpkg.
+			bool ignoreFinal = false;
+			if (auto found = dpkgResolver.resolvedPaths.find(path); found != dpkgResolver.resolvedPaths.end()) {
+				ignoreFinal = found->second.has_value();
+			}
+
+			for (const auto& segment : SubdirIterator(path)) {
+				if (isSpecialCased(segment) || (ignoreFinal && segment == path)) {
+					continue;
+				}
+				if (!resolvedPaths.contains(segment)) {
+					if (std::filesystem::is_directory(segment)) {
+						result << "mkdir -p " << segment << std::endl; //-p is there just to be absolutely sure everything works. could be ommited
+					}
+					else if (std::filesystem::is_symlink(segment)) {
+						result << "ln -s " << std::filesystem::read_symlink(segment) << " " << segment << std::endl;
+					}
+					resolvedPaths.emplace(segment);
+				}
+			}
+		}
+		if (!resolvedPaths.empty()) {
+			dockerImage << "COPY [" << scriptLocation << "," << scriptLocation << "]" << std::endl;
+			dockerImage << "RUN bash " << scriptLocation << " || true" << std::endl; //we always want this to complete even if the directories did not get created
+		}
 	}
 
 

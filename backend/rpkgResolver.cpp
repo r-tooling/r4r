@@ -4,6 +4,7 @@
 #include "../cFileOptHelpers.hpp"
 #include <fcntl.h>
 #include <cassert>
+#include <fstream>
 
 namespace {
 	static const std::unordered_set<std::u8string_view> basePackages = { 
@@ -273,6 +274,52 @@ backend::TopSortIterator backend::Rpkg::topSortedPackages() noexcept {
 	}//end lifetime guard
 
 	return TopSortIterator{ AllPackages };
+}
+
+void backend::Rpkg::persist(std::ostream& dockerImage, const std::filesystem::path& scriptLocation)
+{
+
+
+	//TODO:
+	///usr/lib/R/etc/Renviron.site could get modified. So could probably any other file in dpkg packages...
+	//this can be done before the program is ever run
+	// a good solution should check file hashes.
+
+	//todo: check R version for individual libraries for consistency's sake.
+	if (!packageNameToData.empty()) {
+		std::ofstream result{ scriptLocation, std::ios::openmode::_S_trunc | std::ios::openmode::_S_out };
+
+
+		dockerImage << "COPY [" << scriptLocation << "," << scriptLocation << "]" << std::endl;
+		dockerImage << "RUN Rscript " << scriptLocation;
+		//this will break if ran directly due to too large a string argument. I do not know the specifics but passing it into a file and executing the file works.
+		
+		//this way the require should not conflict with the installed version.
+		result <<
+			"cores = min(parallel::detectCores(),4);" <<std::endl//parallel is a part of the core
+			<< "tmpDir <- tempdir();" << std::endl
+			<< "install.packages(\"remotes\",lib=c(tmpDir));" << std::endl
+			<< "require(\"remotes\",lib.loc = c(tmpDir)); " << std::endl;
+
+		 
+		//TODO: if we wanted to be fancy, instead get a vector of all the R packages currently topsorted. Install these in parallel.
+		//TODO: add parsing of the source param to get the potential github and such install rather than this api.
+		//TODO: add check that the version is detected here first
+
+		for (auto& package : topSortedPackages()) {
+			if (package.isBaseRpackage) {
+				continue;//these cannot be installed
+			}
+			// this works due to a combination of things explained here https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
+			// and here https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
+			result << "install_version(\"" << toNormal(package.packageName) << "\",\"" << toNormal(package.packageVersion) << "\"" <<
+				",upgrade = \"never\", dependencies=F,lib=c(" << package.whereLocated.parent_path() << "), Ncpus=cores" << "); " << std::endl ;
+			//unfortunatelly upgrade=never is not sufficient
+			// the package may depend on other packages which are not installed and such packages would then get installed at possibly higher versions than intended that is why the topsorting happens
+		}
+	}
+
+
 }
 
 backend::RpkgPackage backend::Rpkg::resolvePackageToName_noinsert(const std::u8string& packageName)

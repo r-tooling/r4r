@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
+#include <ostream>
 #include "../memberTypeHashCompare.hpp"
 
 namespace backend {
@@ -143,6 +144,8 @@ namespace backend {
 		TopSortIterator topSortedPackages() noexcept;
 
 		RpkgSet packageNameToData;
+
+		void persist(std::ostream& dockerImage, const std::filesystem::path& scriptPath);
 
 	private:
 

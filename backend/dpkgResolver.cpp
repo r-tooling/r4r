@@ -328,6 +328,8 @@ namespace backend {
 
 	void Dpkg::persist(std::ostream& dockerImage)
 	{
+		//TODO: ensure packages with the source "/var/lib/dpkg/status" are instead transferred on a file by file basis.
+
 		//TODO: if wget is present, do nothing. 
 		dockerImage << "RUN apt-get update && apt-get install -y wget;" << std::endl; 
 		//TODO: this is a nasty special-case hack! needs to be resolved for all https remotes. Temporarily we only laod the R remote.
@@ -335,12 +337,14 @@ namespace backend {
 		//temp solution: --allow-unauthenticated
 		dockerImage << "RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc";
 		for (auto& repo : aptResolver.encounteredRepositories()) {
-			if (repo.mangledPackageRepoName == u8"deb/var/lib/dpkg/status ") {
+			if (repo.mangledPackageRepoName == u8"/var/lib/dpkg/status") {
 				fprintf(stderr, "One or more packages have no remote repository.\n");
 			}
-			//try to avoid duplicates. Could use apt-add-repository? - this drastically increases the image size asit installs python and others.
-			dockerImage << "\\\n &&  grep '" << toNormal(repo.source) << "' /etc/apt/sources.list" /*in the future the folder /etc/apt/sources.list.d/ may need to be added */
-				" || echo '" << toNormal(repo.source) << "' >> /etc/apt/sources.list"; 
+			else {
+				//try to avoid duplicates. Could use apt-add-repository? - this drastically increases the image size asit installs python and others.
+				dockerImage << "\\\n &&  grep '" << toNormal(repo.source) << "' /etc/apt/sources.list" /*in the future the folder /etc/apt/sources.list.d/ may need to be added */
+					" || echo '" << toNormal(repo.source) << "' >> /etc/apt/sources.list";
+			}
 		}
 		//ensure all remotes are up to date;
 		dockerImage << "\\\n && apt-get update;" << std::endl;
@@ -349,7 +353,7 @@ namespace backend {
 		if (!packageNameToData.empty()) {
 			dockerImage << "RUN export DEBIAN_FRONTEND=noninteractive && apt-get install -y ";
 			for (auto& package : packageNameToData) {
-				if (package.packageRepo.mangledPackageRepoName == u8"deb/var/lib/dpkg/status ") {
+				if (package.packageRepo.mangledPackageRepoName == u8"/var/lib/dpkg/status") {
 					fprintf(stderr, "Skiping package %s as it has no known remote .\n", static_cast<std::string>(package).c_str());
 				}
 				else {

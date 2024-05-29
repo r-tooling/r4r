@@ -4,6 +4,7 @@
 #include "./dpkgResolver.hpp"
 #include <unordered_map>
 #include <unordered_set>
+#include <ostream>
 
 namespace backend {
 
@@ -16,6 +17,7 @@ namespace backend {
 		std::vector<middleend::MiddleEndState::file_info*> getUnmatchedFiles();
 		std::vector<middleend::MiddleEndState::file_info*> getExecutedFiles();
 		std::unordered_set<absFilePath> symlinkList();
+		void persistDirectoriesAndSymbolicLinks(std::ostream& dockerImage, const std::filesystem::path& scriptLocation);
 	public:
 		CachingResolver(const middleend::MiddleEndState& state) :state(state) {}
 		void resolveRPackages();
@@ -34,5 +36,4 @@ namespace backend {
 		Is not currently up to date.
 	*/
 	void chrootBased(const middleend::MiddleEndState&);
-
 }
