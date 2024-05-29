@@ -353,7 +353,7 @@ namespace backend {
 		if (!packageNameToData.empty()) {
 			dockerImage << "RUN export DEBIAN_FRONTEND=noninteractive && apt-get install -y ";
 			for (auto& package : packageNameToData) {
-				if (package.packageRepo.mangledPackageRepoName == u8"/var/lib/dpkg/status") {
+				if (package.packageRepo.mangledPackageRepoName == u8"/var/lib/dpkg/status" || package.packageRepo.mangledPackageRepoName.empty()) {
 					fprintf(stderr, "Skiping package %s as it has no known remote .\n", static_cast<std::string>(package).c_str());
 				}
 				else {
