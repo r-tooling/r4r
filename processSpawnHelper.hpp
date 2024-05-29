@@ -22,8 +22,8 @@ namespace detail {
 	/**
 		Creates a new array of char * from an array of unique_ptrs to char *
 	*/
-	inline std::unique_ptr<char*> unpackArray(size_t nrItems, std::unique_ptr<char[]>* param) {
-		std::unique_ptr<char*> result{ new char* [nrItems + 1] };
+	inline std::unique_ptr<char*[]> unpackArray(size_t nrItems, std::unique_ptr<char[]>* param) {
+		std::unique_ptr<char*[]> result{new char* [nrItems + 1]};
 		for (size_t iter = 0; iter < nrItems; iter++) {
 			result.get()[iter] = param[iter].get();
 		}
@@ -101,8 +101,8 @@ struct ArgvWrapper {
 
 	const size_t argc;
 	const std::unique_ptr<std::unique_ptr<char[]>[]> uniquePtrArr;
-	const std::unique_ptr<char*> uniqueToSimple;
-	auto get() noexcept{
+	const std::unique_ptr<char*[]> uniqueToSimple;
+	char** get() noexcept{
 		return uniqueToSimple.get();
 	}
 
@@ -419,6 +419,20 @@ inline SpawnedValuesFilePtr spawnStdoutReadProcess(const std::filesystem::path& 
 	close(outfd[1]);
 	close(errfd);
 	return { pid,-1,outfd[0] };
+}
+/*
+* A high level function for spawning a process which is only meant to write to stdout.
+*/
+template<class Callback = decltype(detail::NULLOPTFUNCTION)*, ArgvWrapperLike argv_t>
+inline SpawnedValuesFilePtr spawnStdoutStderrMergedProcess(const std::filesystem::path& programPath, argv_t&& argv, Callback&& callback = detail::NULLOPTFUNCTION) {
+	int outfd[2];
+	auto pipe_res = pipe(outfd);
+	(void)pipe_res;
+	assert(pipe_res != -1);
+	auto pipe = readClosedPipe();
+	auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1], outfd[1], programPath, argv.get(), argv.argc, callback);
+	close(outfd[1]);
+	return { pid,-1,outfd[0]};
 }
 
 template<class... Ts>

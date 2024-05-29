@@ -29,7 +29,8 @@ namespace backend {
 
 		std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage*>> resolvedPaths;
 
-		std::optional<const DpkgPackage *> resolvePathToPackage(const std::filesystem::path& path);
+		
+		std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage *>> batchResolvePathToPackage(std::unordered_set<std::filesystem::path> packages, bool trivialOnly = false);
 		std::unordered_set<DpkgPackage, Hasher<&DpkgPackage::packageName>, Compare<&DpkgPackage::packageName>> packageNameToData;
 		
 		Apt aptResolver;
@@ -38,5 +39,6 @@ namespace backend {
 
 	private:
 		const DpkgPackage& nameToObject(const std::u8string& name);
+		std::optional<const backend::DpkgPackage*> resolvePathToPackage(const std::filesystem::path& path);
 	};
 }

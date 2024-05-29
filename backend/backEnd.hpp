@@ -3,6 +3,7 @@
 #include "./rpkgResolver.hpp"
 #include "./dpkgResolver.hpp"
 #include <unordered_map>
+#include <unordered_set>
 
 namespace backend {
 
@@ -14,6 +15,7 @@ namespace backend {
 
 		std::vector<middleend::MiddleEndState::file_info*> getUnmatchedFiles();
 		std::vector<middleend::MiddleEndState::file_info*> getExecutedFiles();
+		std::unordered_set<absFilePath> symlinkList();
 	public:
 		CachingResolver(const middleend::MiddleEndState& state) :state(state) {}
 		void resolveRPackages();

@@ -249,6 +249,22 @@ namespace {
 			return std::nullopt;
 	}
 
+	void appendSymlinkResult(std::unordered_set<absFilePath>& resultStore, std::filesystem::path symlink, std::unordered_set<absFilePath> ignoreEqual) {
+		auto target = std::filesystem::read_symlink(symlink);
+		if (!target.is_absolute()) {
+			target = symlink.parent_path() / target;
+		}
+		target = target.lexically_normal();
+		if (!ignoreEqual.contains(target)) {
+			resultStore.emplace(target);
+			ignoreEqual.emplace(target);
+			if (std::filesystem::is_symlink(target)) {
+				return appendSymlinkResult(resultStore, target, ignoreEqual);
+			}
+		}
+		return;
+	}
+
 }
 namespace backend {
 
@@ -354,6 +370,9 @@ namespace backend {
 		//this is a nasty pecial-case hack! needs to be resolved for all https things
 		dockerImage << "RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc";
 		for (auto& repo : dpkgResolver.aptResolver.encounteredRepositories()) {
+			if (repo.mangledPackageRepoName == u8"/var/lib/dpkg/status") {
+				fprintf(stderr, "One or more packages have no remote repository.\n");
+			}
 			dockerImage << "\\\n &&  grep '" << toNormal(repo.source) << "' /etc/apt/sources.list /etc/apt/sources.list.d/*"
 				" || echo '" << toNormal(repo.source) << "' >> /etc/apt/sources.list"; //try to avoid duplicates. Maybe just ef it and use apt-add-repository? - this drastically increases the image size though
 			//TODO: keys https://stackoverflow.com/questions/68992799/warning-apt-key-is-deprecated-manage-keyring-files-in-trusted-gpg-d-instead/71384057#71384057
@@ -473,7 +492,7 @@ namespace backend {
 		dockerBuildScript << "cd ..; echo '*' > '.dockerignore'; echo '!DockerData' >> '.dockerignore';";
 		dockerBuildScript << "docker build -t '"<< tag << "' -f dockerImage .;" << std::endl;
 		dockerBuildScript << "rm -rf 'DockerData'; rm '.dockerignore';" << std::endl;
-		dockerBuildScript << "runDocker.sh;" << std::endl;
+		dockerBuildScript << "./runDocker.sh;" << std::endl;
 
 		std::ofstream runDockerScript{ output.parent_path() / "runDocker.sh" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //TODO:
 		runDockerScript << "docker run  -it --entrypoint bash " << tag << std::endl;
@@ -505,6 +524,44 @@ namespace backend {
 		}
 		return res;
 	}
+	/*
+	Package repositories may "own" files under both the fullpath and a symlinked path
+	/usr/lib/a ->
+	/lib/a ->
+	we may only ever see one of these accessed. As such, the current "dumb" way of matching files has to stay.
+
+	but it can be done in batches.
+	
+	*/
+
+	std::unordered_set<absFilePath> CachingResolver::symlinkList()
+	{
+		
+
+		std::unordered_set<absFilePath> currentList;
+		//Resolving symlinks
+		//take all the non-realpath ways to access this item
+		for (auto& [_, info] : state.encounteredFilenames) {
+			for (auto& access : info->accessibleAs) {
+
+				//if the file path is an absolute path
+				auto path = std::filesystem::path{};
+				if (access.relPath.is_absolute()) {
+					path = access.relPath.lexically_normal();
+				}
+				else {
+					path = (access.workdir / access.relPath).lexically_normal();
+				}
+				if (path != info->realpath) {
+					if (std::filesystem::is_symlink(path)) {
+						appendSymlinkResult(currentList, path, { info->realpath });
+					}
+					currentList.emplace(std::move(path));
+				}
+			}
+		}
+		return currentList;
+	}
 
 
 
@@ -520,6 +577,12 @@ namespace backend {
 			rpkgResolver.resolvePathToPackage(info->realpath);//always resolve all dependencies, the time overlap is marginal and I need to know the version even in dpkg packages.
 		}
 
+		//Resolving symlinks
+		//take all the non-realpath ways to access this item
+		for (auto& info : symlinkList()) {
+			rpkgResolver.resolvePathToPackage(info);
+		}
+
 	}
 	void CachingResolver::resolveDebianPackages()
 	{
@@ -527,18 +590,21 @@ namespace backend {
 			fprintf(stderr, "Unable to resolve DPKG/APT packages as the required dependencies are not present\n");
 			return;
 		}
+		std::unordered_set<std::filesystem::path> what;
 
-		const size_t notifyInterval = std::max(20ul, state.encounteredFilenames.size()/100);
-		size_t counter = 0;
-		//TODO: only use me for files if the R executable or its variants are detected in accesses.
 		for (auto& [path, info] : state.encounteredFilenames) {
-			dpkgResolver.resolvePathToPackage(info->realpath);
-			counter++;
-			if (counter % notifyInterval == 0) {
-				printf("Analysed %lu of %lu packages\n", counter, state.encounteredFilenames.size());
-			}
-
+			what.emplace(info->realpath);
 		}
+		dpkgResolver.batchResolvePathToPackage(what);
+		what = symlinkList();
+
+		printf("Resolving path \n");
+		for (auto& path : what) {
+			printf("%s ", path.c_str());
+		}
+		printf("Resolving path \n");
+
+		dpkgResolver.batchResolvePathToPackage(std::move(what),true);
 
 	}
 

@@ -15,6 +15,8 @@
 namespace {
 
 	struct resolvedData {
+		bool isError = false;
+
 		//the name of the package as resolved by dpkg
 		std::vector<std::u8string> packageName;
 		/*
@@ -80,8 +82,8 @@ namespace {
 		//format("{} -S '{}'")
 
 		//I want these to get cleaned up automatically and yet need raw pointers. Honestly a vector of strings is how this should be done.
-
-		auto dpkgProcess = spawnStdoutReadProcess(backend::Dpkg::executablePath, ArgvWrapper{ "-S", param... }, []() noexcept {
+		auto arg = ArgvWrapper{ "-S", param... };
+		auto dpkgProcess = spawnStdoutStderrMergedProcess(backend::Dpkg::executablePath, arg, []() noexcept {
 			setlocale(LC_ALL, "C.UTF-8");
 		});
 
@@ -104,6 +106,14 @@ namespace {
 			* packagename may include a :!!!
 			* packagename [,packagename]: filePath
 			*/
+			//I have merged stderr and stdout. Here's hoping this does not cause race conditions.
+			constexpr auto err = u8"dpkg-query: no path found matching pattern "sv;
+			if (data.starts_with(err)) {
+				data.remove_prefix(err.size());
+				results.emplace_back(true, std::vector<std::u8string>{},trim(data));
+				continue;
+			}
+
 			while (end != data.size() && end != data.npos) {
 				end = data.find(u8", "sv, begin);
 				auto split = data.substr(begin, end);
@@ -125,7 +135,7 @@ namespace {
 					}
 
 					packages.emplace_back(trim(split));
-					results.emplace_back(std::move(packages), potentialSv);
+					results.emplace_back(false, std::move(packages), potentialSv);
 					break;
 				}
 				else {
@@ -136,7 +146,7 @@ namespace {
 		};
 		
 		auto processRes = dpkgProcess.close();
-		if constexpr (sizeof...(param) == 1) {
+		if (arg.argc == 2) {
 			return processRes.terminatedCorrectly() ? results : std::vector<resolvedData>{};
 		}
 		else {
@@ -159,6 +169,9 @@ namespace {
 	std::optional<std::u8string> tryResolveVector(std::vector<resolvedData>&& potentialValues, context& context) {
 
 		for (auto& fileInfo : potentialValues) {
+			if (fileInfo.isError) {
+				continue;
+			}
 			if (fileInfo.actualFile == context.searchedFileName) {
 				//we have found the exact filename with path we are looking for. It shall to be the one. 
 				return fileInfo.packageName[0];//TODO: what if we get multiple packages? TODO: can that happen for non-directories?
@@ -214,61 +227,140 @@ namespace {
 	
 }
 
+namespace backend {
 
-bool backend::Dpkg::areDependenciesPresent()
-{
-	//Rscript --help. I could just check that the file exists somewhere in path but that would involve path variable resolution and this lets the stdlib handle things.
-	return checkExecutableExists(backend::Dpkg::executablePath, ArgvWrapper{ "--help" });
-}
+	struct IterOver {
+		std::filesystem::path path;
+		std::string pattern;
+	};
 
-const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& name) {
-	if (auto find = packageNameToData.find(name); find != packageNameToData.end()) {
-		return *find;
-	}
-	else {
-		auto [actualName, version] = resolveNameToVersion(name);
-		auto [apt_version, packageRepoMangledName] = aptResolver.resolveNameToSourceRepo(actualName);
-		if (apt_version != version) {
-			if (apt_version == u8"(none)" || packageRepoMangledName == u8"") {
-				fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) Apt version not found. Scripts will be broken.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
-				auto emplaced = packageNameToData.emplace(actualName, version, u8"");
-				return *emplaced.first;
+	std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage*>> backend::Dpkg::batchResolvePathToPackage(std::unordered_set<std::filesystem::path> filesToList, bool trivialOnly)
+	{
+		std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage*>> resolved;
+		std::optional<decltype(filesToList)::iterator> toErase;
+		for (auto iter = filesToList.begin(), end = filesToList.end(); iter != end;++iter) {
+			if (toErase) {
+				filesToList.erase(toErase.value());//legal, does not rehash. Cannot be done inline as it invalidates itself and cannot be ++ed
 			}
-			fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) using APT version for script.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
-		} 
-		auto& translatedPackage = aptResolver.translatePackageToIdentify(packageRepoMangledName);
+			if(auto ptr = resolvedPaths.find(*iter); ptr != resolvedPaths.end()) {
+				resolved.try_emplace(*iter, ptr->second);
+				toErase = iter;
+			}
+		}
+		if (toErase) {
+			filesToList.erase(toErase.value());
+		}
 
-		auto emplaced = packageNameToData.emplace(actualName, apt_version, translatedPackage);//TODO: the usage of "actual name" breaks lookup in case of errors
-		return *emplaced.first;
-	}
-}
+		{
+			std::vector<IterOver> toResolve{}; //order matters here
+			std::vector<std::string> ordered{}; //order matters here
+			toResolve.reserve(filesToList.size());
+			for (auto& item : filesToList) {
+				ordered.emplace_back(item.string());
+				toResolve.emplace_back(item,item.string());
+			}
 
-//todo: only pass references but that has issues with optionals...
-std::optional<const backend::DpkgPackage*> backend::Dpkg::resolvePathToPackage(const std::filesystem::path& path)
-{
-	if (auto ptr = resolvedPaths.find(path); ptr != resolvedPaths.end()) {
-		return ptr->second;
-	}
+			auto resolution = resolveString(ordered);
+			auto unresolvedItem = toResolve.begin();
+			/*
+				Essentially we are walking the two lists in parallel.
 
-	context con{ path };
-	auto retval =
-		optTransform(
-			optOR(
-				tryResolveVector(resolveString(path.generic_string()), con), //try the package full path
-				[&]() {
-					return optOR(
-						tryResolveVector(resolveString("*/" + path.filename().native()), con), //try just the package name 
-						[&]() {
-							return tryResolveVector(resolveString("*/" + path.filename().native() + ".*"), con);//try just the package name	
-						}
-					);
+				We iterate on the pattern we are resolving
+
+				If we get an error, the reror specifies a pattern we skip past until that one is found.
+				Should only ever be skiping past one item, though
+
+				If we get somethig found, we have found what we needed.
+			
+			*/
+			for (auto& [missmatch, packages, path] : resolution) {
+				if (unresolvedItem == toResolve.end()) {
+					break;
 				}
-	), [&](std::u8string name) {return &nameToObject(name); });
-	resolvedPaths.try_emplace(path, retval);
-	return retval;
-	/*
-	return
-		optTransform(
-		tryResolveVector(resolveString(path.generic_string(), "* /" + path.filename().native(), "* /" + path.filename().native() + ".*"), con)
-	, [&](std::u8string name) {return this->nameToObject(name); });*/ //results in false negatives donno why
+				//printf("matching %s to %s\n", unresolvedItem->path.c_str(), path.c_str());
+				if (missmatch) { //this file has found no result
+					while (unresolvedItem->pattern != path && unresolvedItem != toResolve.end()) {
+						unresolvedItem++;
+					}
+					if (unresolvedItem != toResolve.end())
+						unresolvedItem++;
+				}
+				else {
+					if (path == unresolvedItem->path) {
+						resolved.try_emplace(unresolvedItem->path, &nameToObject(packages[0]));
+						filesToList.erase(unresolvedItem->path);
+					}
+					unresolvedItem++;
+				}
+				
+			}
+			//But what about the wildcard case? One line may correspond to multiple output lines. How do I know if that is what happened?
+		}
+		/*
+			On average the wildcard resolution is NOT faster AT ALL.
+		
+		*/
+
+
+		size_t counter = 0, inter = 20;
+		//the direct list did not work. What now? Try the old method
+		for (auto iter = filesToList.begin(); iter != filesToList.end(); iter++) {
+			if (!trivialOnly) {
+				resolved.try_emplace(*iter, resolvePathToPackage(*iter));
+				if (++counter % inter == 0) {
+					printf("Analysed %lu of %lu files\n", counter, filesToList.size());
+				}
+			}
+			else {
+				resolved.try_emplace(*iter, std::nullopt);
+			}
+		}
+		for(auto& res : resolved)
+			resolvedPaths.try_emplace(res.first,res.second);
+		return resolved;
+	}
+
+	bool backend::Dpkg::areDependenciesPresent()
+	{
+		//Rscript --help. I could just check that the file exists somewhere in path but that would involve path variable resolution and this lets the stdlib handle things.
+		return checkExecutableExists(backend::Dpkg::executablePath, ArgvWrapper{ "--help" });
+	}
+
+	const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& name) {
+		if (auto find = packageNameToData.find(name); find != packageNameToData.end()) {
+			return *find;
+		}
+		else {
+			auto [actualName, version] = resolveNameToVersion(name);
+			auto [apt_version, packageRepoMangledName] = aptResolver.resolveNameToSourceRepo(actualName);
+			if (apt_version != version) {
+				if (apt_version == u8"(none)" || packageRepoMangledName == u8"") {
+					fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) Apt version not found. Scripts will be broken.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
+					auto emplaced = packageNameToData.emplace(actualName, version, u8"");
+					return *emplaced.first;
+				}
+				fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) using APT version for script.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
+			}
+			auto& translatedPackage = aptResolver.translatePackageToIdentify(packageRepoMangledName);
+
+			auto emplaced = packageNameToData.emplace(actualName, apt_version, translatedPackage);//TODO: the usage of "actual name" breaks lookup in case of errors
+			return *emplaced.first;
+		}
+	}
+
+	//todo: only pass references but that has issues with optionals...
+	std::optional<const backend::DpkgPackage*> backend::Dpkg::resolvePathToPackage(const std::filesystem::path& path)
+	{
+		if (auto ptr = resolvedPaths.find(path); ptr != resolvedPaths.end()) {
+			return ptr->second;
+		}
+
+		context con{ path };
+		auto retval =
+			optTransform(
+					tryResolveVector(resolveString("*/" + path.filename().native(), "*/" + path.filename().native() + ".*"), con) //try just the package name 
+				, [&](std::u8string name) {return &nameToObject(name); });
+		resolvedPaths.try_emplace(path, retval);
+		return retval;
+	}
 }

@@ -497,17 +497,15 @@ namespace middleend {
 				}
 
 				absFilePath path{ str.value() };
-				if (!path.is_absolute()) {
-					//https://github.com/torvalds/linux/blob/2c71fdf02a95b3dd425b42f28fd47fb2b1d22702/fs/exec.c#L1903
-					//https://github.com/torvalds/linux/blob/2c71fdf02a95b3dd425b42f28fd47fb2b1d22702/fs/exec.c#L1803
-					//the kernel treats this as just about any other binary rewrite. 
-					//these are asuumed to be executed from the current wokr dir but I ahve not managed to find much info on that aside from random stack overflow threads.
-					//todo: testme
-					path = resolveToAbsolute(process, path);//todo: if unresolvable return true immadietely.
-				}
+				//https://github.com/torvalds/linux/blob/2c71fdf02a95b3dd425b42f28fd47fb2b1d22702/fs/exec.c#L1903
+				//https://github.com/torvalds/linux/blob/2c71fdf02a95b3dd425b42f28fd47fb2b1d22702/fs/exec.c#L1803
+				//the kernel treats this as just about any other binary rewrite. 
+				//these are asuumed to be executed from the current wokr dir but I ahve not managed to find much info on that aside from random stack overflow threads.
+				
+				//todo: testme for symlink detection
 				//for recursion the kernel has a hard limit- has a hard limit see for example https://github.com/SerenityOS/serenity/blob/ee3dd7977d4c88c836bfb813adcf3e006da749a8/Kernel/Syscalls/execve.cpp#L881
 				//or the bin rewrite limit in linux.
-				failed = execFile(process, path, path, depth + 1, overrideFailed);
+				failed = execFile(process, resolveToAbsolute(process,path), path, depth + 1, overrideFailed);
 				doRegisterAccess = doRegisterAccess || !failed;
 			}
 			if (doRegisterAccess)
