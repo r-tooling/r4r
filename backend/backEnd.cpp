@@ -364,29 +364,12 @@ namespace backend {
 
 		auto dockerImage = std::ofstream{ output.parent_path() / "dockerImage" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
 		auto dockerBuildScript = std::ofstream{ output.parent_path() / "buildDocker.sh" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
-		//we assume R is included.
+		auto runDockerScript = std::ofstream{ output.parent_path() / "runDocker.sh" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //TODO:
+
 		dockerImage << "FROM ubuntu:22.04" << std::endl;
-		dockerImage << "RUN apt-get update && apt-get install -y wget;" << std::endl; //ensure packages can be loaded, no upgrade?
-		//this is a nasty pecial-case hack! needs to be resolved for all https things
-		dockerImage << "RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc";
-		for (auto& repo : dpkgResolver.aptResolver.encounteredRepositories()) {
-			if (repo.mangledPackageRepoName == u8"/var/lib/dpkg/status") {
-				fprintf(stderr, "One or more packages have no remote repository.\n");
-			}
-			dockerImage << "\\\n &&  grep '" << toNormal(repo.source) << "' /etc/apt/sources.list /etc/apt/sources.list.d/*"
-				" || echo '" << toNormal(repo.source) << "' >> /etc/apt/sources.list"; //try to avoid duplicates. Maybe just ef it and use apt-add-repository? - this drastically increases the image size though
-			//TODO: keys https://stackoverflow.com/questions/68992799/warning-apt-key-is-deprecated-manage-keyring-files-in-trusted-gpg-d-instead/71384057#71384057
-		}
-		dockerImage << "\\\n && apt-get update;" << std::endl; //ensure packages can be loaded, no upgrade?
-		//temp solution: --allow-unauthenticated
-		//todo: escaping
-		if (!dpkgResolver.packageNameToData.empty()) {
-			dockerImage << "RUN export DEBIAN_FRONTEND=noninteractive && apt-get install -y ";
-			for (auto& package : dpkgResolver.packageNameToData) {
-				dockerImage << std::string(package) << " "; //TODO; why are versions sometimes not resolving even though we have added everything?
-			}
-			dockerImage << std::endl;
-		}
+		
+		
+		dpkgResolver.persist(dockerImage);
 
 		//this is done before the R packages to ensure all  library paths are accessible
 
@@ -494,7 +477,6 @@ namespace backend {
 		dockerBuildScript << "rm -rf 'DockerData'; rm '.dockerignore';" << std::endl;
 		dockerBuildScript << "./runDocker.sh;" << std::endl;
 
-		std::ofstream runDockerScript{ output.parent_path() / "runDocker.sh" ,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //TODO:
 		runDockerScript << "docker run  -it --entrypoint bash " << tag << std::endl;
 	}
 
@@ -597,12 +579,6 @@ namespace backend {
 		}
 		dpkgResolver.batchResolvePathToPackage(what);
 		what = symlinkList();
-
-		printf("Resolving path \n");
-		for (auto& path : what) {
-			printf("%s ", path.c_str());
-		}
-		printf("Resolving path \n");
 
 		dpkgResolver.batchResolvePathToPackage(std::move(what),true);
 

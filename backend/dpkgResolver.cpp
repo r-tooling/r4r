@@ -326,24 +326,60 @@ namespace backend {
 		return checkExecutableExists(backend::Dpkg::executablePath, ArgvWrapper{ "--help" });
 	}
 
+	void Dpkg::persist(std::ostream& dockerImage)
+	{
+		//TODO: if wget is present, do nothing. 
+		dockerImage << "RUN apt-get update && apt-get install -y wget;" << std::endl; 
+		//TODO: this is a nasty special-case hack! needs to be resolved for all https remotes. Temporarily we only laod the R remote.
+		//TODO: keys https://stackoverflow.com/questions/68992799/warning-apt-key-is-deprecated-manage-keyring-files-in-trusted-gpg-d-instead/71384057#71384057
+		//temp solution: --allow-unauthenticated
+		dockerImage << "RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc";
+		for (auto& repo : aptResolver.encounteredRepositories()) {
+			if (repo.mangledPackageRepoName == u8"deb/var/lib/dpkg/status ") {
+				fprintf(stderr, "One or more packages have no remote repository.\n");
+			}
+			//try to avoid duplicates. Could use apt-add-repository? - this drastically increases the image size asit installs python and others.
+			dockerImage << "\\\n &&  grep '" << toNormal(repo.source) << "' /etc/apt/sources.list" /*in the future the folder /etc/apt/sources.list.d/ may need to be added */
+				" || echo '" << toNormal(repo.source) << "' >> /etc/apt/sources.list"; 
+		}
+		//ensure all remotes are up to date;
+		dockerImage << "\\\n && apt-get update;" << std::endl;
+		
+		//todo: escaping
+		if (!packageNameToData.empty()) {
+			dockerImage << "RUN export DEBIAN_FRONTEND=noninteractive && apt-get install -y ";
+			for (auto& package : packageNameToData) {
+				if (package.packageRepo.mangledPackageRepoName == u8"deb/var/lib/dpkg/status ") {
+					fprintf(stderr, "Skiping package %s as it has no known remote .\n", static_cast<std::string>(package).c_str());
+				}
+				else {
+					dockerImage << static_cast<std::string>(package) << " "; 
+				}
+			}
+			dockerImage << std::endl;
+		}
+
+
+	}
+
 	const backend::DpkgPackage& backend::Dpkg::nameToObject(const std::u8string& name) {
 		if (auto find = packageNameToData.find(name); find != packageNameToData.end()) {
 			return *find;
+		}
+		if (auto find = alternateLookup.find(name); find != alternateLookup.end()) {
+			return *find->second;
 		}
 		else {
 			auto [actualName, version] = resolveNameToVersion(name);
 			auto [apt_version, packageRepoMangledName] = aptResolver.resolveNameToSourceRepo(actualName);
 			if (apt_version != version) {
-				if (apt_version == u8"(none)" || packageRepoMangledName == u8"") {
-					fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) Apt version not found. Scripts will be broken.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
-					auto emplaced = packageNameToData.emplace(actualName, version, u8"");
-					return *emplaced.first;
-				}
 				fprintf(stderr, "mismatch of dpkg (%s)and apt package version(%s) using APT version for script.\n", reinterpret_cast<const char*>(version.c_str()), reinterpret_cast<const char*>(apt_version.c_str()));
 			}
 			auto& translatedPackage = aptResolver.translatePackageToIdentify(packageRepoMangledName);
-
-			auto emplaced = packageNameToData.emplace(actualName, apt_version, translatedPackage);//TODO: the usage of "actual name" breaks lookup in case of errors
+			auto emplaced = packageNameToData.emplace(actualName, version, apt_version, translatedPackage);
+			if (actualName != name) {
+				alternateLookup.try_emplace(name, &*emplaced.first);
+			}
 			return *emplaced.first;
 		}
 	}
