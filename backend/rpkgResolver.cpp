@@ -291,7 +291,7 @@ void backend::Rpkg::persist(std::ostream& dockerImage, const std::filesystem::pa
 
 
 		dockerImage << "COPY [" << scriptLocation << "," << scriptLocation << "]" << std::endl;
-		dockerImage << "RUN Rscript " << scriptLocation;
+		dockerImage << "RUN Rscript " << scriptLocation << std::endl;
 		//this will break if ran directly due to too large a string argument. I do not know the specifics but passing it into a file and executing the file works.
 		
 		//this way the require should not conflict with the installed version.
