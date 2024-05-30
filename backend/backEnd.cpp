@@ -5,6 +5,8 @@
 #include "../stringHelpers.hpp"
 #include "filesystemGraph.hpp"
 #include "optionals.hpp"
+#include "../csv/serialisedFileInfo.hpp"
+
 #include <cstdlib>
 #include <fcntl.h> //O_* flags
 #include <sys/stat.h> //mkdirat
@@ -61,30 +63,7 @@ namespace {
 		write = 2,
 		execute = 4
 	};
-	//src: https://stackoverflow.com/questions/2896600/how-to-replace-all-occurrences-of-a-character-in-string
-	template<class T>
-	T&& replaceAll(T&& source, const T&& from, const T&& to)
-	{
-		using noref = std::remove_reference_t<T>;
-		noref newString{};
-		newString.reserve(source.length());  // avoids a few memory allocations
-
-		typename noref::size_type lastPos = 0;
-		typename noref::size_type findPos;
-
-		while (noref::npos != (findPos = source.find(from, lastPos)))
-		{
-			newString.append(source, lastPos, findPos - lastPos);
-			newString += to;
-			lastPos = findPos + from.length();
-		}
-
-		// Care for the rest after last occurrence
-		newString += source.substr(lastPos);
-
-		source.swap(newString);
-		return std::forward<T>(source);
-	}
+	
 
 	template<class T>
 	T&& replaceFirst(T&& source, const T&& from, const T&& to)
@@ -122,59 +101,6 @@ namespace {
 			res += "X";
 		}
 		return res;
-	}
-
-	void transferFile(fileDescriptor chrootDirectory, absFilePath oldPath) {
-		//also see openat2 RESOLVE_IN_ROOT flag for relative paths
-
-		//hardlink based-solution
-		//open old file
-		ToBeClosedFd oldFile { open(oldPath.c_str(), O_RDONLY) };
-		ToBeClosedFd currentDir { dup(chrootDirectory) };
-		for (auto begin = oldPath.begin(),
-			next = ++begin, //the last file shall not be considered here.
-			end = oldPath.end();
-			begin != end && next != end;
-			++begin, ++next
-			) {
-			const auto& relPath = *next;
-			if (relPath.is_absolute()) { //ignore the absolute prefix
-				continue;
-			}
-			//open has a bug, though:
-			/*
-			When both O_CREAT and O_DIRECTORY are specified in flags and the
-		   file specified by pathname does not exist, open() will create a
-		   regular file (i.e., O_DIRECTORY is ignored).
-			*/
-			ToBeClosedFd potentialDir{ openat((fileDescriptor)currentDir, relPath.c_str(), O_DIRECTORY) };
-			if (!potentialDir) {
-				potentialDir.reset(mkdirat((fileDescriptor)currentDir, relPath.c_str(), 0777));
-				if (!potentialDir) {
-					printf("cannot make directory %s from %s\n", relPath.c_str(), oldPath.c_str());
-					return;
-				}
-			}
-			currentDir.swap(potentialDir);
-		}
-		/*
-
-		 AT_EMPTY_PATH (since Linux 2.6.39)
-				  If oldpath is an empty string, create a link to the file
-				  referenced by olddirfd (which may have been obtained using
-				  the open(2) O_PATH flag).  In this case, olddirfd can
-				  refer to any type of file except a directory.  This will
-				  generally not work if the file has a link count of zero
-				  (files created with O_TMPFILE and without O_EXCL are an
-				  exception).  The caller must have the CAP_DAC_READ_SEARCH
-				  capability in order to use this flag.  This flag is Linux-
-				  specific; define _GNU_SOURCE to obtain its definition.
-		*/
-		//todo: ahndle folders
-		/*assert(linkat(oldFile, "",
-			currentDir, oldPath.filename().c_str(), AT_EMPTY_PATH) == 0);*/
-		printf("transferred %s\n", oldPath.c_str());
-
 	}
 
 
@@ -238,9 +164,9 @@ namespace {
 	}
 	
 	
-	void writeScriptLaunch(std::ostream& str, const middleend::MiddleEndState& state) {
+	void writeScriptLaunch(std::ostream& str, const backend::CachingResolver& state) {
 		str << "#!/bin/sh" << std::endl;
-		str << "cd '" << state.initialDir << "'" <<std::endl; //todo:escaping
+		str << "cd '" << state.programWorkdir << "'" <<std::endl; //todo:escaping
 		//todo switch to user
 
 		for (auto& env : state.env) {
@@ -259,7 +185,7 @@ namespace {
 		str << std::endl;
 	}
 
-	std::filesystem::path createLaunchScript(const std::filesystem::path& where, const middleend::MiddleEndState& state) {
+	std::filesystem::path createLaunchScript(const std::filesystem::path& where,const backend::CachingResolver& state) {
 		std::filesystem::path resPath = where / "launch.sh";
 		std::ofstream file{ resPath, std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //todo: file collision?
 		writeScriptLaunch(file, state);//todo: error?
@@ -269,7 +195,7 @@ namespace {
 		using std::string_literals::operator""s;
 	//	if (unescaped.contains(strType{ "," })) { c++23
 		if (unescaped.find(u8",") != unescaped.npos) {
-			auto s = u8"\""s + replaceAll(std::move(unescaped), u8"\""s, u8"\"\"\""s) + u8"\""s ;
+			auto s = u8"\""s + CSV::replaceAll(std::move(unescaped), u8"\""s, u8"\"\"\""s) + u8"\""s ;
 			return std::string{ reinterpret_cast<const char*>(s.data()),s.length() };
 		}
 		else {
@@ -343,46 +269,12 @@ namespace {
 }
 namespace backend {
 
-	void chrootBased(const middleend::MiddleEndState& state)
-	{
-		char dirName[]{ "chrootTestXXXXXX\0" }; //NOT STATIC very intentionally, gets modified. Null byte because of paranoia if this ever gets changed it will need to be thought of.
-		auto res =  mkdtemp(dirName);
-		if (res == nullptr) {
-			fprintf(stderr, "Unable to create temp directory \n");
-			return;
-		}
-		ToBeClosedFd dir{ open(dirName, O_DIRECTORY) };
-		//auto err = errno;
-		if (!dir) {
-			fprintf(stderr, "Unable to open temp directory for the choroot env. \n");
-			return;
-			//return err;
-		}
-
-		for (const auto& file : state.encounteredFilenames) {
-			const auto& fileInfo = *file.second;
-			transferFile(dir.get(), fileInfo.realpath);
-			for (const auto& rel : fileInfo.accessibleAs) {
-				if (rel.relPath.is_absolute()) {
-					transferFile(dir.get(), rel.relPath);//TODO: duplicates
-				}
-				else {
-					//TODO: we pray this works now.
-				}
-			}
-
-			//create a link for the file. Ensure access rights are OK.
-		}
-
-		printf("test from %s", dirName);
-	}
-
 	void CachingResolver::csv(absFilePath output)
 	{
 		using std::string_literals::operator""s;
 		auto openedFile = std::ofstream{ output,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out }; //c++ 23noreplace 
 		openedFile << "filename" << "," << "flags" << "," << "created" << "," << "deleted" << ", needsSubfolders" << ", source dpkg package" << ", source R package" << std::endl;
-		for (auto& [path, info] : state.encounteredFilenames) {//TODO: trace absolute paths as well as relative paths.
+		for (auto& [path, info] : files) {//TODO: trace absolute paths as well as relative paths.
 			auto flags = 0;
 			for (auto& relative : info->accessibleAs) {
 				if (relative.executable) {
@@ -401,7 +293,7 @@ namespace backend {
 				}
 
 			}
-			openedFile << "\"" << replaceAll(std::move(info->realpath.string()), "\""s, "\"\"\""s)
+			openedFile << "\"" << CSV::replaceAll(std::move(info->realpath.string()), "\""s, "\"\"\""s)
 				<< "\"" << "," << flags_to_str(flags)
 				<< "," << (info->wasInitiallyOnTheDisk.value_or(false) ? "F" : "T")
 				<< "," << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T")
@@ -419,7 +311,7 @@ namespace backend {
 	{
 		auto report = std::ofstream{ output,std::ios::openmode::_S_trunc | std::ios::openmode::_S_out };
 		auto exec = getExecutedFiles();
-		report << "Discovered " << state.encounteredFilenames.size() << " different file dependencies" << std::endl;
+		report << "Discovered " << files.size() << " different file dependencies" << std::endl;
 		report << "Of those " << getUnmatchedFiles().size() << " were not installed using any form of package manager" << std::endl;
 		report << "Dpkg provides " << dpkgResolver.packageNameToData.size() << " different packages the program depends on. " << " This does not include dependencies of the packages which were not directly used during the program runtime " << std::endl;
 		report << "R provides " << rpkgResolver.packageNameToData.size() << " packages used directly and " << rpkgResolver.topSortedPackages().items.size() << " packages the program directly or indirectly depends on." << std::endl;
@@ -460,7 +352,7 @@ namespace backend {
 
 		std::unordered_map<absFilePath, std::string> dockerPathTranslator;
 
-		auto file = createLaunchScript(".", state);
+		auto file = createLaunchScript(".", *this);
 		dockerPathTranslator.emplace(std::filesystem::canonical(file), std::to_string(dockerPathTranslator.size()));
 		for (auto info : getUnmatchedFiles()) {
 			if (isSpecialCased(info->realpath)) {
@@ -478,10 +370,10 @@ namespace backend {
 
 		//PERSIST ENV
 
-		for (auto& env : state.env) {
+		for (auto& env : env) {
 			dockerImage << "ENV " << replaceFirst(std::string(env), "="s, "=\""s) << "\"" << std::endl;
 		}
-		dockerImage << "WORKDIR " << state.initialDir << std::endl;
+		dockerImage << "WORKDIR " << programWorkdir << std::endl;
 
 
 		createBuildScript(dockerBuildScript, dockerPathTranslator, tag, runDockerScript, {directoryCreator, rpkgCreator });
@@ -490,7 +382,7 @@ namespace backend {
 	std::vector<middleend::MiddleEndState::file_info*> CachingResolver::getUnmatchedFiles()
 	{
 		std::vector<middleend::MiddleEndState::file_info*> res{};
-		for (auto& [path, info] : state.encounteredFilenames) {
+		for (auto& [path, info] : files) {
 			auto dpkg = optionalResolve(dpkgResolver.resolvedPaths, path).value_or(std::nullopt);
 			auto rpkg = optionalResolve(rpkgResolver.resolvedPaths, path).value_or(std::nullopt);
 			if (!dpkg && !rpkg) {
@@ -503,7 +395,7 @@ namespace backend {
 	std::vector<middleend::MiddleEndState::file_info*> CachingResolver::getExecutedFiles()
 	{
 		std::vector<middleend::MiddleEndState::file_info*> res{};
-		for (auto& [path, info] : state.encounteredFilenames) {
+		for (auto& [path, info] : files) {
 			for (auto& val : info.get()->accessibleAs) {
 				if (val.executable) {
 					res.emplace_back(info.get());
@@ -530,7 +422,7 @@ namespace backend {
 		std::unordered_set<absFilePath> currentList;
 		//Resolving symlinks
 		//take all the non-realpath ways to access this item
-		for (auto& [_, info] : state.encounteredFilenames) {
+		for (auto& [_, info] : files) {
 			for (auto& access : info->accessibleAs) {
 
 				//if the file path is an absolute path
@@ -562,12 +454,12 @@ namespace backend {
 		//TODO: add a method for detecting that a sublink here belongs to a package and mark it as resolved.
 		//but this requires resolving all the symlinks which are to be created to their real paths as we go along. 
 		auto all = symlinkList();
-		for (const auto& [path, _] : state.encounteredFilenames) {
+		for (const auto& [path, _] : files) {
 			all.emplace(path);
 		}
 		//These should not actually be required but better safe than sorry in this case. Any found library should have been detected before.
 		all.merge(rpkgResolver.getLibraryPaths()); 
-		all.emplace(state.initialDir);
+		all.emplace(programWorkdir);
 		for (decltype(auto) path : all) {
 			//do not persist links which will be persisted by dpkg.
 			bool ignoreFinal = false;
@@ -606,7 +498,7 @@ namespace backend {
 		}
 
 		//TODO: only use me for files if the R executable or its variants are detected in accesses.
-		for (auto& [path, info] : state.encounteredFilenames) {
+		for (auto& [path, info] : files) {
 			rpkgResolver.resolvePathToPackage(info->realpath);//always resolve all dependencies, the time overlap is marginal and I need to know the version even in dpkg packages.
 		}
 
@@ -625,7 +517,7 @@ namespace backend {
 		}
 		std::unordered_set<std::filesystem::path> what;
 
-		for (auto& [path, info] : state.encounteredFilenames) {
+		for (auto& [path, info] : files) {
 			what.emplace(info->realpath);
 		}
 		dpkgResolver.batchResolvePathToPackage(what);

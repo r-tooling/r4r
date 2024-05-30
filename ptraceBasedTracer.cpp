@@ -4,6 +4,7 @@
 #include "toBeClosedFd.hpp"
 #include "./cFileOptHelpers.hpp"
 #include "backend/backEnd.hpp"
+#include "csv/serialisedFileInfo.hpp"
 
 #include <cassert>
 
@@ -44,8 +45,24 @@ namespace {
 
 	void printUsage(const char* argv0) {
 		printf("This tracer is used for analysing the dependencies of other computer programs. Usage:\n"
-			"%s [programName] <argsToProgram>", argv0);
+			"%s [programName] <argsToProgram>\n", argv0);
 	}
+}
+
+void doAnalysis(std::unordered_map<absFilePath, std::unique_ptr<middleend::MiddleEndState::file_info>>& fileInfos, std::vector<std::string>& origEnv, std::vector<std::string>& origArgs, std::filesystem::__cxx11::path& origWrkdir)
+{
+
+	backend::CachingResolver backendResolver{ fileInfos, origEnv, origArgs, origWrkdir };
+
+	printf("Analysing R packages\n");
+	backendResolver.resolveRPackages();
+	printf("Analysing Debian packages\n");
+	backendResolver.resolveDebianPackages();
+	printf("Creating reports\n");
+	backendResolver.csv("accessedFiles.csv");
+	backendResolver.report("report.txt");
+	backendResolver.dockerImage(".", "r4r:test");
+	printf("Done\n");
 }
 
 int main(int argc, char* argv[])
@@ -55,7 +72,7 @@ int main(int argc, char* argv[])
 		printUsage(argc == 1 ? argv[0] : "ptraceBasedTracer");
 		return -2;
 	}
-
+	///  TRACING
 	{
 		int in = fileno(stdin);
 		int out = fileno(stdout);
@@ -105,17 +122,21 @@ int main(int argc, char* argv[])
 	// so not waiting for this PID is intentional.
 	(void)childPid;
 	frontend::ptraceChildren(state);
-	printf("Child process terminated! Analysing data.\n");
-	backend::CachingResolver backendResolver{ state };
-	printf("Analysing R packages\n");
-	backendResolver.resolveRPackages();
-	printf("Analysing Debian packages\n");
-	backendResolver.resolveDebianPackages();
-	printf("Creating reports\n");
-	backendResolver.csv("accessedFiles.csv");
-	backendResolver.report("report.txt");
-	backendResolver.dockerImage(".","r4r:test");
-	printf("Done\n");
 	wait(nullptr);
+	printf("Child process terminated! Analysing data.\n");
+
+	//ANALYSIS
+
+	CSV::serializeFiles(state.encounteredFilenames, "rawFiles.csv");
+	CSV::serializeEnv(state.env, "env.csv");
+	CSV::serializeEnv(state.args, "args.csv");
+	CSV::serializeWorkdir(state.initialDir, "workdir.txt");
+		
+	auto fileInfos = CSV::deSerializeFiles("rawFiles.csv");
+	auto origEnv = CSV::deSerializeEnv("env.csv");
+	auto origArgs = CSV::deSerializeEnv("args.csv");
+	auto origWrkdir = CSV::deSerializeWorkdir("workdir.txt");
+	doAnalysis(fileInfos, origEnv, origArgs, origWrkdir);
 	return 0;
 }
+

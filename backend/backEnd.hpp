@@ -4,12 +4,13 @@
 #include "./dpkgResolver.hpp"
 #include <unordered_map>
 #include <unordered_set>
+#include <string>
 #include <ostream>
 
 namespace backend {
 
 	class CachingResolver {
-		const middleend::MiddleEndState& state;
+
 
 		Rpkg rpkgResolver {};
 		Dpkg dpkgResolver{};
@@ -19,7 +20,13 @@ namespace backend {
 		std::unordered_set<absFilePath> symlinkList();
 		void persistDirectoriesAndSymbolicLinks(std::ostream& dockerImage, const std::filesystem::path& scriptLocation);
 	public:
-		CachingResolver(const middleend::MiddleEndState& state) :state(state) {}
+		const decltype(middleend::MiddleEndState::encounteredFilenames)& files;
+		const std::vector<std::string> args;
+		const std::vector<std::string> env;
+		const std::filesystem::path programWorkdir;
+
+
+		CachingResolver(const decltype(files)& files, std::vector<std::string> env, std::vector<std::string> args, std::filesystem::path dir) :files(files), args(args), env(env), programWorkdir(dir) {}
 		void resolveRPackages();
 		void resolveDebianPackages();
 		/*
@@ -29,11 +36,4 @@ namespace backend {
 		void report(absFilePath output);
 		void dockerImage(absFilePath output, const std::string_view tag);
 	};
-
-	/*
-		This endpoint merely attempts to create a directory structure which can be chrooted to and will result in the program being re-runable
-
-		Is not currently up to date.
-	*/
-	void chrootBased(const middleend::MiddleEndState&);
 }
