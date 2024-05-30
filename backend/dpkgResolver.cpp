@@ -279,18 +279,18 @@ namespace backend {
 				}
 				//printf("matching %s to %s\n", unresolvedItem->path.c_str(), path.c_str());
 				if (missmatch) { //this file has found no result
-					while (unresolvedItem->pattern != path && unresolvedItem != toResolve.end()) {
-						unresolvedItem++;
+					while (unresolvedItem != toResolve.end() && unresolvedItem->pattern != path) {
+						++unresolvedItem;
 					}
 					if (unresolvedItem != toResolve.end())
-						unresolvedItem++;
+						++unresolvedItem;
 				}
 				else {
 					if (path == unresolvedItem->path) {
 						resolved.try_emplace(unresolvedItem->path, &nameToObject(packages[0]));
 						filesToList.erase(unresolvedItem->path);
 					}
-					unresolvedItem++;
+					++unresolvedItem;
 				}
 				
 			}
