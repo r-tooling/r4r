@@ -114,6 +114,11 @@ struct ArgvWrapper {
 	{}
 
 };
+
+template<typename T>
+concept ArgvWrapperLike = requires{
+	std::same_as<std::decay_t<ArgvWrapper>, T>;
+};
 //TODO: gracefully ahndle the asserts in this file.
 
 /*
@@ -263,6 +268,13 @@ inline pid_t spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD, const st
 	return ret;
 
 };
+/*
+* Spawns a process with argc error handling and pre-pending the filename to the argv array
+*/
+template<class Callback, ArgvWrapperLike argv_t>
+inline pid_t spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD, const std::filesystem::path& programPath, argv_t args, Callback callback) {
+	return spawnProcessWithSimpleArgs(inFd, outFD, errFD, programPath, args.get(),args.argc, callback);
+};
 
 struct CodeReturn{
 	int code;
@@ -374,11 +386,6 @@ struct [[nodiscard]] SpawnedValuesFilePtr {
 	}
 
 	SpawnedValuesFilePtr(pid_t pid, fileDescriptor err, fileDescriptor out) :pid(pid), err(ToBeClosedFd{ err }, "r"), out(ToBeClosedFd{ out }, "r") {}
-};
-
-template<typename T>
-concept ArgvWrapperLike = requires{
-	std::same_as<std::decay_t<ArgvWrapper>, T>;
 };
 
 /*
