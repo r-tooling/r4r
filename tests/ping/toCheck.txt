@@ -1,0 +1,1 @@
+check that the ctrl-C from console is passed through properly.

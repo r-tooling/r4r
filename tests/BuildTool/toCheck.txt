@@ -1,0 +1,1 @@
+The docker image builds just fine and the tool executable is generated.

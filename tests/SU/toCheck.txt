@@ -1,0 +1,3 @@
+check that the relevant files are meant to transferred to the docker - /etc/shadow /etc/profile
+will probably eed extra privileges to run.
+check output consistence in docker and on local system.

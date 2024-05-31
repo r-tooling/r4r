@@ -1,0 +1,1 @@
+cat '/usr/share/doc/libicu66/copyright' 
