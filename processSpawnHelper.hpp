@@ -114,10 +114,10 @@ struct ArgvWrapper {
 	{}
 
 };
-
+//unused in the end
 template<typename T>
 concept ArgvWrapperLike = requires{
-	std::same_as<std::decay_t<ArgvWrapper>, T>;
+	requires true;
 };
 //TODO: gracefully ahndle the asserts in this file.
 
