@@ -78,17 +78,21 @@ int main(int argc, char* argv[])
 
 	std::vector<std::string> args;
 
+
 	auto& group = program.add_mutually_exclusive_group(true);
 	group.add_argument("--analyse").help("only run the final data analysis").nargs(0,0);
-	group.add_argument("--run").help("only run the initial program without analysis run analysis").remaining().nargs(argparse::nargs_pattern::at_least_one).store_into(args);
-	group.add_argument("--").help("used to signify end of arguments").remaining().nargs(argparse::nargs_pattern::at_least_one).store_into(args);
+	group.add_argument("--run").help("only run the initial program without analysis run analysis. Signifies and end of arguments").metavar(" ").remaining().nargs(argparse::nargs_pattern::at_least_one).store_into(args);
+	group.add_argument("--").help("used to signify end of arguments").metavar(" ").remaining().nargs(argparse::nargs_pattern::at_least_one).store_into(args);
 	group.add_argument("arguments").help("Subprogram name and arguments").metavar("<subprogram arguments>").remaining().nargs(argparse::nargs_pattern::any).store_into(args);
+	
+	program.set_usage_break_on_mutex();
 
 	try {
 		program.parse_args(argc, argv);
 	}
 	catch (const std::exception& err) {
 		std::cerr << err.what() << std::endl;
+		std::cerr << std::endl;
 		std::cerr << program;
 		return 1;
 	}
@@ -107,7 +111,11 @@ int main(int argc, char* argv[])
 
 		args.erase(args.begin());
 
-		std::cout << "Running " << programName << " with " << args.size() << " arguments " << std::endl;
+		std::cout << "Running " << programName << " with " << args.size() << " arguments " ;
+		for (auto& item : args){
+			std::cout << item << " ";
+		}
+		std::cout << std::endl;
 
 
 		///  TRACING
