@@ -1,6 +1,8 @@
 #pragma once 
 #include <string>
 #include <string_view>
+#include <algorithm>
+#include <vector>
 
 
 template<class T, class Trim = std::u8string_view>
