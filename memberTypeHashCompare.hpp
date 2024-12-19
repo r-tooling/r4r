@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
+
 template <auto memberPtr>
 struct Hasher;
 template <auto memberPtr>
