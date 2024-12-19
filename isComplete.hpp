@@ -1,17 +1,18 @@
 #pragma once
 /*
-	Also known as "Does this template specialisation exist?" or "Was this defined"
+        Also known as "Does this template specialisation exist?" or "Was this
+   defined"
 */
-template<typename T, int>
+template <typename T, int>
 constexpr auto is_complete(int) -> decltype(sizeof(T), bool{}) {
-	return true;
+    return true;
 }
 /*
-* Also known as "this was only forward declasred"
-*/
-template<typename T, int>
+ * Also known as "this was only forward declasred"
+ */
+template <typename T, int>
 constexpr auto is_complete(...) -> bool {
-	return false;
+    return false;
 }
 
-#define IS_COMPLETE(T) is_complete<T,__COUNTER__>(0)
+#define IS_COMPLETE(T) is_complete<T, __COUNTER__>(0)

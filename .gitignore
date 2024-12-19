@@ -3,3 +3,4 @@ build/*
 CMakePresets.json
 out/*
 ref/*
+.cache/clangd/index
