@@ -6,52 +6,76 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
-namespace backend {
-struct DpkgPackage {
-    std::u8string packageName;
-    std::u8string packageVersion;
-    std::u8string aptVersion;
+// FIXME: move to standalone file
+namespace util {
 
-    const AptInfo& packageRepo;
+template <typename T>
+class FilesystemTrie {
+  private:
+    struct Node {
+        std::unordered_map<std::string, std::shared_ptr<Node>> children;
+        T package_name;
+    };
 
-    explicit operator std::u8string() const noexcept {
-        return packageName + u8"=" + aptVersion;
+  public:
+    FilesystemTrie() : root(std::make_shared<Node>()) {}
+
+    void insert(std::string const& path, T const& package_name) {
+        auto node = root;
+        std::istringstream iss(path);
+        std::string part;
+
+        while (std::getline(iss, part, '/')) {
+            if (part.empty()) {
+                continue;
+            }
+            if (!node->children.count(part)) {
+                node->children[part] = std::make_shared<Node>();
+            }
+            node = node->children[part];
+        }
+
+        // FIXME: Handle the case when this is already set
+        // ideally there should be some closure which
+        // would handle it? checking if it is a directory or
+        // a file? reporting an error if it is a file?
+        node->package_name = package_name;
     }
-    explicit operator std::string() const noexcept {
-        std::u8string str = operator std::u8string();
-        std::string compat{reinterpret_cast<const char*>(str.data()),
-                           str.length()};
-        return compat;
+
+    std::optional<std::string> find(const std::string& path) const {
+        auto node = root;
+        std::istringstream iss(path);
+        std::string part;
+        while (std::getline(iss, part, '/')) {
+            if (part.empty()) {
+                continue;
+            }
+            if (!node->children.count(part)) {
+                return {};
+            }
+            node = node->children[part];
+        }
+        return node->package_name;
     }
-};
-
-struct Dpkg {
-    static inline const auto executablePath = std::string("dpkg");
-
-    std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage*>>
-        resolvedPaths;
-
-    std::unordered_map<std::filesystem::path, std::optional<const DpkgPackage*>>
-    batchResolvePathToPackage(
-        std::unordered_set<std::filesystem::path> packages,
-        bool trivialOnly = false);
-    std::unordered_set<DpkgPackage, Hasher<&DpkgPackage::packageName>,
-                       Compare<&DpkgPackage::packageName>>
-        packageNameToData;
-
-    Apt aptResolver;
-
-    bool areDependenciesPresent();
-
-    void persist(std::ostream& output);
 
   private:
-    const DpkgPackage& nameToObject(const std::u8string& name);
-    std::optional<const backend::DpkgPackage*>
-    resolvePathToPackage(const std::filesystem::path& path);
-
-    std::unordered_map<std::u8string, const DpkgPackage*> alternateLookup;
+    std::shared_ptr<Node> root;
 };
+
+} // namespace util
+
+namespace backend {
+
+struct DpkgPackage {
+    std::string packageName;
+    std::string packageVersion;
+    std::string aptVersion;
+};
+
+class DpkgDatabase {
+
+  private:
+};
+
 } // namespace backend
