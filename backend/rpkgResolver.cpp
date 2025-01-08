@@ -144,7 +144,7 @@ resolvePackageFromDescription(const std::filesystem::path& filePath) {
             }
             for (auto item : explodeMul(data, u8" ")) {
                 trim(item, u8"\xE2\x80\x98\xe2\x80\x99 \n\t\"\'\'");
-                if (!item.empty())
+                if (!item.empty() && !basePackages.contains(item))
                     dependsList.emplace(item);
             }
             break;
@@ -300,9 +300,10 @@ void backend::Rpkg::persist(std::ostream& dockerImage,
         std::ofstream result{scriptLocation, std::ios::openmode::_S_trunc |
                                                  std::ios::openmode::_S_out};
 
-        dockerImage << "COPY [" << scriptLocation << "," << scriptLocation
+        dockerImage << "COPY [" << scriptLocation << ", " << scriptLocation
                     << "]" << std::endl;
         dockerImage << "RUN Rscript " << scriptLocation << std::endl;
+        dockerImage << "\n";
         // this will break if ran directly due to too large a string argument. I
         // do not know the specifics but passing it into a file and executing
         // the file works.

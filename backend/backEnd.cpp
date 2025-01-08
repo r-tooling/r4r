@@ -1,14 +1,14 @@
 #include "backEnd.hpp"
+#include "../common.hpp"
 #include "../csv/serialisedFileInfo.hpp"
+#include "../util.hpp"
 #include "dpkgResolver.hpp"
-#include "filesystemGraph.hpp"
-#include "optionals.hpp"
 #include "rpkgResolver.hpp"
 
 #include <fcntl.h> //O_* flags
 #include <filesystem>
 #include <fstream>
-#include <regex>
+#include <iostream>
 #include <sys/stat.h> //mkdirat
 #include <unistd.h>
 #include <unordered_map>
@@ -83,63 +83,6 @@ T&& replaceFirst(T&& source, const T&& from, const T&& to) {
 //         res += "X";
 //     }
 //     return res;
-// }
-
-// bool isSpecialCased(const std::filesystem::path& path) {
-//     auto none = Graph::operationType::none;
-//     auto dir = Graph::operationType::directory;
-//     auto exa = Graph::operationType::exact;
-//     // node constructor
-//     auto n = [none]<ptr... T>(std::string s, T... i) {
-//         static_assert(sizeof...(i) > 0);
-//         return std::make_unique<Graph>(s, none, std::move(i)...);
-//     };
-//     // leaf constructor
-//     auto l = [](std::string s, Graph::operationType d) {
-//         return std::make_unique<Graph>(s, d);
-//     };
-//
-//     static const auto root =
-//         n("/", l("proc", dir), n("etc", l("ld.so.cache", exa)), l("sys",
-//         dir),
-//           l("dev", dir),
-//           n("usr",
-//             n("lib", n("locale", l("locale-archive",
-//                                    exa))))); ///
-//                                    usr/lib/locale/locale-archive
-//
-//     int counter = 0;
-//     const Graph* current = root.get();
-//     auto iter = path.begin(), end = path.end();
-//     if (iter != end &&
-//         *iter == "/") { // do not try to match the root directory. Consider
-//                         // erroring out otherwise
-//         ++iter;
-//     }
-//     for (; iter != end; iter++, counter++) {
-//         if (auto item = current->files.find(iter->string());
-//             item != current->files.end()) {
-//             current = item->get();
-//         } else {
-//             auto& doOpt = current->operation;
-//             if (doOpt == dir) {
-//                 return true;
-//             } else if (doOpt == exa) {
-//                 return false;
-//             } else if (doOpt == none) {
-//                 return false;
-//             }
-//         }
-//     }
-//     auto& doOpt = current->operation;
-//     if (doOpt == dir) {
-//         return true;
-//     } else if (doOpt == exa) {
-//         return iter == end;
-//     } else if (doOpt == none) {
-//         return false;
-//     }
-//     return false;
 // }
 
 // void writeScriptLaunch(std::ostream& str,
@@ -394,7 +337,45 @@ void DockerfileTraceInterpreter::create_dockerfile() {
     // install R packages
     rpkg_resolver.persist(df, "install-r-packages.R");
 
-    // copy unmatched files
+    // copy unmatched files: first create an archive, second copy the archive
+    // and unarchive it there in /
+    fs::path archive = "archive.tar";
+    std::vector<fs::path> unmatched_files{trace_.files.size()};
+    for (auto const& f : trace_.files) {
+        auto const& path = f.realpath;
+
+        if (!fs::exists(path)) {
+            std::cerr << "File no longer exist: " << path << std::endl;
+            continue;
+        }
+
+        if (!fs::is_regular_file(path)) {
+            std::cerr << "File is not a regular file: " << path << std::endl;
+            continue;
+        }
+
+        std::ifstream i{path, std::ios::in};
+        if (!i) {
+            std::cerr << "Unable to open file: " << path << std::endl;
+            continue;
+        }
+
+        unmatched_files.push_back(path);
+    }
+
+    if (!unmatched_files.empty()) {
+        util::create_tar_archive(archive, unmatched_files);
+        df << "COPY [" << archive << ", " << archive << "]\n";
+        df << "RUN tar xfv --absolute-names " << archive << " && rm -f "
+           << archive << "\n";
+        df << "\n\n";
+    }
+
+    // environments
+
+    // work directory
+
+    // exec
 
     df.close();
 }
@@ -406,37 +387,45 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 //     auto dockerImage =
 //         std::ofstream{output.parent_path() / "dockerImage",
 //                       std::ios::openmode::_S_trunc |
-//                           std::ios::openmode::_S_out}; // c++ 23noreplace
+//                           std::ios::openmode::_S_out}; // c++
+//                           23noreplace
 //     auto dockerBuildScript =
 //         std::ofstream{output.parent_path() / "buildDocker.sh",
 //                       std::ios::openmode::_S_trunc |
-//                           std::ios::openmode::_S_out}; // c++ 23noreplace
+//                           std::ios::openmode::_S_out}; // c++
+//                           23noreplace
 //     auto runDockerScript = std::ofstream{
 //         output.parent_path() / "runDocker.sh",
-//         std::ios::openmode::_S_trunc | std::ios::openmode::_S_out}; // TODO:
+//         std::ios::openmode::_S_trunc | std::ios::openmode::_S_out};
+//         //
+//         TODO:
 //
 //     dockerImage << "FROM ubuntu:22.04" << std::endl;
 //
 //     // FIXME:
 //     // dpkgResolver.persist(dockerImage);
-//     // this is done before the R packages to ensure all  library paths are
+//     // this is done before the R packages to ensure all  library
+//     paths are
 //     // accessible
 //     std::filesystem::path directoryCreator{output.parent_path() /
 //                                            "recreateDirectories.sh"};
-//     persistDirectoriesAndSymbolicLinks(dockerImage, directoryCreator);
+//     persistDirectoriesAndSymbolicLinks(dockerImage,
+//     directoryCreator);
 //
 //     std::filesystem::path rpkgCreator{output.parent_path() /
 //                                       "installRPackages.sh"};
 //     rpkgResolver.persist(dockerImage, rpkgCreator);
 //
-//     // COPY src dest does not work as it quickly exhaust the maximum layer
-//     depth
-//     // instead a folder with all the relevant data is serialised to and then
+//     // COPY src dest does not work as it quickly exhaust the maximum
+//     layer depth
+//     // instead a folder with all the relevant data is serialised to
+//     and then
 //     // added to the image where it is unserialised.
 //
 //     // PERSIST FILES
 //
-//     std::unordered_map<absFilePath, std::string> dockerPathTranslator;
+//     std::unordered_map<absFilePath, std::string>
+//     dockerPathTranslator;
 //
 //     auto file = createLaunchScript(".", *this);
 //     dockerPathTranslator.emplace(std::filesystem::canonical(file),
@@ -447,7 +436,8 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 //         }
 //         if (std::filesystem::is_regular_file(info->realpath)) {
 //             dockerPathTranslator.emplace(
-//                 info->realpath, std::to_string(dockerPathTranslator.size()));
+//                 info->realpath,
+//                 std::to_string(dockerPathTranslator.size()));
 //         }
 //         // TODO: error on non symlink/dir/file
 //     }
@@ -457,14 +447,17 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 //     // PERSIST ENV
 //
 //     for (auto& e : env) {
-//         dockerImage << "ENV " << replaceFirst(std::string(e), "="s, "=\""s)
+//         dockerImage << "ENV " << replaceFirst(std::string(e), "="s,
+//         "=\""s)
 //                     << "\"" << std::endl;
 //     }
 //     dockerImage << "WORKDIR " << programWorkdir << std::endl;
 //
 //     createBuildScript(dockerBuildScript, dockerPathTranslator, tag,
-//                       runDockerScript, {directoryCreator, rpkgCreator});
+//                       runDockerScript, {directoryCreator,
+//                       rpkgCreator});
 // }
+
 //
 // std::vector<middleend::MiddleEndState::file_info*>
 // DockerfileTraceInterpreter::getUnmatchedFiles() {
@@ -472,7 +465,8 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 //     for (auto& [path, info] : files) {
 //
 //         // FIXME: dpkg
-//         // auto dpkg = optionalResolve(dpkgResolver.resolvedPaths, path)
+//         // auto dpkg = optionalResolve(dpkgResolver.resolvedPaths,
+//         path)
 //         //                 .value_or(std::nullopt);
 //         auto rpkg = optionalResolve(rpkgResolver.resolvedPaths, path)
 //                         .value_or(std::nullopt);
@@ -499,9 +493,9 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 // }
 
 /*
-Package repositories may "own" files under both the fullpath and a symlinked
-path /usr/lib/a -> /lib/a -> we may only ever see one of these accessed. As
-such, the current "dumb" way of matching files has to stay.
+Package repositories may "own" files under both the fullpath and a
+symlinked path /usr/lib/a -> /lib/a -> we may only ever see one of these
+accessed. As such, the current "dumb" way of matching files has to stay.
 
 but it can be done in batches.
 
@@ -534,22 +528,25 @@ std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 }
 
 // void DockerfileTraceInterpreter::persistDirectoriesAndSymbolicLinks(
-//     std::ostream& dockerImage, const std::filesystem::path& scriptLocation) {
-//     std::unordered_set<std::filesystem::path> resolvedPaths;
+//     std::ostream& dockerImage, const std::filesystem::path&
+//     scriptLocation) { std::unordered_set<std::filesystem::path>
+//     resolvedPaths;
 //
-//     std::ofstream result{scriptLocation, std::ios::openmode::_S_trunc |
+//     std::ofstream result{scriptLocation, std::ios::openmode::_S_trunc
+//     |
 //                                              std::ios::openmode::_S_out};
 //
-//     // TODO: add a method for detecting that a sublink here belongs to a
-//     package
-//     // and mark it as resolved. but this requires resolving all the symlinks
+//     // TODO: add a method for detecting that a sublink here belongs
+//     to a package
+//     // and mark it as resolved. but this requires resolving all the
+//     symlinks
 //     // which are to be created to their real paths as we go along.
 //     auto all = symlinkList();
 //     for (const auto& [path, _] : files) {
 //         all.emplace(path);
 //     }
-//     // These should not actually be required but better safe than sorry in
-//     this
+//     // These should not actually be required but better safe than
+//     sorry in this
 //     // case. Any found library should have been detected before.
 //     all.merge(rpkgResolver.getLibraryPaths());
 //     all.emplace(programWorkdir);
@@ -563,7 +560,8 @@ std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 //         // }
 //
 //         for (const auto& segment : SubdirIterator(path)) {
-//             if (isSpecialCased(segment) || (ignoreFinal && segment == path))
+//             if (isSpecialCased(segment) || (ignoreFinal && segment ==
+//             path))
 //             {
 //                 continue;
 //             }
@@ -571,9 +569,10 @@ std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 //                 if (std::filesystem::is_directory(segment)) {
 //                     result
 //                         << "mkdir -p " << segment
-//                         << std::endl; //-p is there just to be absolutely
-//                         sure
-//                                       // everything works. could be ommited
+//                         << std::endl; //-p is there just to be
+//                         absolutely sure
+//                                       // everything works. could be
+//                                       ommited
 //                 } else if (std::filesystem::is_symlink(segment)) {
 //                     result << "ln -s " <<
 //                     std::filesystem::read_symlink(segment)
@@ -584,11 +583,12 @@ std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 //         }
 //     }
 //     if (!resolvedPaths.empty()) {
-//         dockerImage << "COPY [" << scriptLocation << "," << scriptLocation
+//         dockerImage << "COPY [" << scriptLocation << "," <<
+//         scriptLocation
 //                     << "]" << std::endl;
 //         dockerImage << "RUN bash " << scriptLocation << " || true"
-//                     << std::endl; // we always want this to complete even if
-//                     the
+//                     << std::endl; // we always want this to complete
+//                     even if the
 //                                   // directories did not get created
 //     }
 // }
@@ -619,23 +619,22 @@ void DockerfileTraceInterpreter::resolve_r_packages() {
 }
 
 void DockerfileTraceInterpreter::resolve_ignored_files() {
-    static const std::vector<std::regex> ignored_files = {
-        std::regex(R"(^/dev/.*)"),
-        std::regex(R"(^/etc/ld\.so\.cache$)"),
-        std::regex(R"(^/sys/.*)"),
-        std::regex(R"(^/proc/.*)"),
-        // produced by locale-gen, should be installed on each ubuntu box
-        std::regex(R"(^/usr/lib/locale/locale-archive$)"),
-    };
+    static util::FilesystemTrie<bool> ignored{false};
+    if (ignored.is_empty()) {
+        ignored.insert("/dev", true);
+        ignored.insert("/etc/ld.so.cache", true);
+        ignored.insert("/etc/passwd", true);
+        ignored.insert("/etc/nsswitch.conf", true);
+        ignored.insert("/sys", true);
+        ignored.insert("/proc", true);
+        ignored.insert("/usr/lib/locale/locale-archive", true);
+    }
 
     std::erase_if(trace_.files, [&](middleend::file_info const& f) {
         auto const& path = f.realpath.string();
-        for (auto const& pattern : ignored_files) {
-            if (std::regex_match(path, pattern)) {
-                std::cout << "resolving: " << path << " to: ignored"
-                          << std::endl;
-                return true;
-            }
+        if (ignored.find_last_matching(path)) {
+            std::cout << "resolving: " << path << " to: ignored" << std::endl;
+            return true;
         }
         return false;
     });
@@ -657,12 +656,6 @@ void populate_root_symlinks(std::unordered_map<fs::path, fs::path>& symlinks) {
     }
 }
 
-bool is_subpath(const fs::path& path, const fs::path& base) {
-    const auto mismatch_pair =
-        std::mismatch(path.begin(), path.end(), base.begin(), base.end());
-    return mismatch_pair.second == base.end();
-}
-
 std::vector<fs::path> get_root_symlink(const fs::path& path) {
     static std::unordered_map<fs::path, fs::path> symlinks;
     if (symlinks.empty()) {
@@ -672,7 +665,7 @@ std::vector<fs::path> get_root_symlink(const fs::path& path) {
     std::vector<fs::path> result = {path};
 
     for (const auto& [symlink, target] : symlinks) {
-        if (is_subpath(path, target)) {
+        if (util::is_sub_path(path, target)) {
             fs::path candidate = symlink / path.lexically_relative(target);
 
             std::error_code ec;

@@ -12,7 +12,7 @@ namespace backend {
 std::unordered_map<std::string, DebPackage> load_installed_packages() {
     std::unordered_map<std::string, DebPackage> package_map;
 
-    auto dpkg_output = ::util::executeCommand("dpkg -l");
+    auto dpkg_output = ::util::execute_command("dpkg -l");
     std::istringstream stream(dpkg_output);
     std::string line;
 
@@ -51,7 +51,7 @@ void process_list_file(util::FilesystemTrie<std::string>& trie,
 }
 
 DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
-    util::FilesystemTrie<std::string> trie;
+    util::FilesystemTrie<std::string> trie{""};
 
     auto packages = load_installed_packages();
     for (auto& [pkg_name, _] : packages) {
