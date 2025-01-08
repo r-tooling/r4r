@@ -58,6 +58,50 @@ struct std::hash<middleend::access_info> {
 };
 
 namespace middleend {
+
+/*
+        A single file "cache" and our knowledge of it
+        Ii is also used internally to store information about file
+   descriptors of non files.
+*/
+
+struct file_info {
+    absFilePath realpath; // real path
+    std::unordered_set<access_info>
+        accessibleAs; // but we would need to know where it is relative from
+                      // right now... Assuming programs do not move their
+                      // current directory.
+
+    std::optional<bool> wasEverCreated;
+    std::optional<bool> wasEverDeleted;
+    std::optional<bool> isCurrentlyOnTheDisk;
+    std::optional<bool> wasInitiallyOnTheDisk;
+
+    enum FileType {
+        file,
+        pipe,
+        socket,
+        process,
+        dir,
+        blockDev, // TODO: use me
+        charDev,  // TODO: use me
+        link,     // TODO: use me
+        clock,    // timerfd_create
+        epoll,
+        eventFD,
+        other // official result from stat
+    };        // may not be set for a pure unlink() call.
+    std::optional<FileType> type = std::nullopt;
+    std::optional<bool> requiresAllSubEntities; // this is currently only used
+                                                // for directory listing
+    // different required access rights?
+
+    void registerAccess(access_info&& access) { accessibleAs.emplace(access); }
+
+    // TODO: consider supporting hard links via saving the inode number and
+    // matching that. this would first require filesystems support
+};
+
 /*
         The actual kernel emulator and logger.
 */
@@ -67,50 +111,6 @@ class MiddleEndState {
     std::vector<std::string> env;
     std::string initialDir;
 
-    /*
-            A single file "cache" and our knowledge of it
-            Ii is also used internally to store information about file
-       descriptors of non files.
-    */
-    struct file_info {
-        absFilePath realpath; // real path
-        std::unordered_set<access_info>
-            accessibleAs; // but we would need to know where it is relative from
-                          // right now... Assuming programs do not move their
-                          // current directory.
-
-        std::optional<bool> wasEverCreated;
-        std::optional<bool> wasEverDeleted;
-        std::optional<bool> isCurrentlyOnTheDisk;
-        const std::optional<bool> wasInitiallyOnTheDisk;
-
-        enum FileType {
-            file,
-            pipe,
-            socket,
-            process,
-            dir,
-            blockDev, // TODO: use me
-            charDev,  // TODO: use me
-            link,     // TODO: use me
-            clock,    // timerfd_create
-            epoll,
-            eventFD,
-            other // official result from stat
-        };        // may not be set for a pure unlink() call.
-        std::optional<FileType> type = std::nullopt;
-        std::optional<bool>
-            requiresAllSubEntities; // this is currently only used for directory
-                                    // listing
-        // different required access rights?
-
-        void registerAccess(access_info&& access) {
-            accessibleAs.emplace(access);
-        }
-
-        // TODO: consider supporting hard links via saving the inode number and
-        // matching that. this would first require filesystems support
-    };
     /*
             Used for relevant parts of the stat call
 
@@ -190,20 +190,19 @@ class MiddleEndState {
     /*
             Create a FD not on the filesystem
     */
-    MiddleEndState::file_info*
-    createUnbackedFD(absFilePath&& filename,
-                     MiddleEndState::file_info::FileType type);
+    file_info* createUnbackedFD(absFilePath&& filename,
+                                file_info::FileType type);
     /*
             errorus FD we know nothign of.
     */
-    MiddleEndState::file_info*
+    file_info*
     createErrorFD(const char* errorMessage =
                       "operating on an unresolved file descriptor\n");
     /*
             Attempts to find info of a file given by path.
 
     */
-    MiddleEndState::file_info* tryFindFile(const absFilePath& filename) const;
+    file_info* tryFindFile(const absFilePath& filename) const;
     running_thread_state& pidToObj(const pid_t process);
     const running_thread_state& pidToObj(const pid_t process) const;
 

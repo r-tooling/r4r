@@ -7,36 +7,39 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace fs = std::filesystem;
+
 namespace backend {
 
-class CachingResolver {
+struct Trace {
+    std::vector<middleend::file_info> files;
+    std::vector<std::string> env;
+    std::vector<std::string> args;
+    fs::path work_dir;
+};
 
-    Rpkg rpkgResolver{};
-    Dpkg dpkgResolver{};
+class DockerfileTraceInterpreter {
 
-    std::vector<middleend::MiddleEndState::file_info*> getUnmatchedFiles();
-    std::vector<middleend::MiddleEndState::file_info*> getExecutedFiles();
+    Rpkg rpkg_resolver{};
+
+    std::vector<middleend::file_info*> getUnmatchedFiles();
+    std::vector<middleend::file_info*> getExecutedFiles();
     std::unordered_set<absFilePath> symlinkList();
     void persistDirectoriesAndSymbolicLinks(
         std::ostream& dockerImage, const std::filesystem::path& scriptLocation);
 
-  public:
-    const decltype(middleend::MiddleEndState::encounteredFilenames)& files;
-    const std::vector<std::string> args;
-    const std::vector<std::string> env;
-    const std::filesystem::path programWorkdir;
+    Trace trace_;
+    std::vector<DebPackage> debian_packages;
 
-    CachingResolver(const decltype(files)& files, std::vector<std::string> env,
-                    std::vector<std::string> args, std::filesystem::path dir)
-        : files(files), args(args), env(env), programWorkdir(dir) {}
-    void resolveRPackages();
-    void resolveDebianPackages();
-    /*
-            This endpoint generates a csv list of accessed files and a script
-       for creating a docker container
-    */
-    void csv(absFilePath output);
-    void report(absFilePath output);
-    void dockerImage(absFilePath output, const std::string_view tag);
+    void resolve_r_packages();
+    void resolve_debian_packages();
+    void resolve_ignored_files();
+
+    void create_dockerfile();
+
+  public:
+    DockerfileTraceInterpreter(Trace const& trace) : trace_(trace) {}
+
+    void finalize();
 };
 } // namespace backend

@@ -52,24 +52,19 @@ void fileOpenFail(int err) noexcept {
 } // namespace
 
 void doAnalysis(
-    std::unordered_map<absFilePath,
-                       std::unique_ptr<middleend::MiddleEndState::file_info>>&
-        fileInfos,
+    std::unordered_map<absFilePath, middleend::file_info>& fileInfos,
     std::vector<std::string>& origEnv, std::vector<std::string>& origArgs,
     std::filesystem::__cxx11::path& origWrkdir) {
 
-    backend::CachingResolver backendResolver{fileInfos, origEnv, origArgs,
-                                             origWrkdir};
+    std::vector<middleend::file_info> files;
+    for (const auto& [_, file] : fileInfos) {
+        files.push_back(file);
+    }
 
-    printf("Analysing R packages\n");
-    backendResolver.resolveRPackages();
-    printf("Analysing Debian packages\n");
-    backendResolver.resolveDebianPackages();
-    printf("Creating reports\n");
-    backendResolver.csv("accessedFiles.csv");
-    backendResolver.report("report.txt");
-    backendResolver.dockerImage(".", "r4r:test");
-    printf("Done\n");
+    backend::Trace trace{files, origEnv, origArgs, origWrkdir};
+    backend::DockerfileTraceInterpreter interpreter{trace};
+
+    interpreter.finalize();
 }
 
 void LoadAndAnalyse() {

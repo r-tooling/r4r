@@ -75,13 +75,11 @@ inline void write(std::ostream& out, const std::optional<Contained>& str,
 }
 void serializeFiles(
     const std::unordered_map<
-        absFilePath, std::unique_ptr<middleend::MiddleEndState::file_info>>&
+        absFilePath, std::unique_ptr<middleend::file_info>>&
         files,
     std::filesystem::path csvPath);
 
-std::unordered_map<absFilePath,
-                   std::unique_ptr<middleend::MiddleEndState::file_info>>
-deSerializeFiles(std::filesystem::path csvPath);
+std::unordered_map<absFilePath, middleend::file_info> deSerializeFiles(std::filesystem::path csvPath);
 
 std::vector<std::string> deSerializeEnv(std::filesystem::path csvPath);
 void serializeEnv(const std::vector<std::string>& env,

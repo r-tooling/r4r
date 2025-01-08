@@ -112,7 +112,7 @@ MiddleEndState::pidToObj(const pid_t process) const {
 MiddleEndState::MiddleEndState(absFilePath initialWorkdir, char* initialEnv[],
                                std::vector<std::string> args)
     : args{std::move(args)}, initialDir(initialWorkdir.native()) {
-    auto ptr = std::unique_ptr<MiddleEndState::file_info>(
+    auto ptr = std::unique_ptr<file_info>(
         new file_info{.realpath = initialWorkdir,
                       .accessibleAs = {},
                       .wasEverCreated = false,
@@ -128,10 +128,10 @@ MiddleEndState::MiddleEndState(absFilePath initialWorkdir, char* initialEnv[],
     }
 }
 
-MiddleEndState::file_info*
+file_info*
 MiddleEndState::createUnbackedFD(absFilePath&& filename,
-                                 MiddleEndState::file_info::FileType type) {
-    auto file = std::unique_ptr<MiddleEndState::file_info>(
+                                 file_info::FileType type) {
+    auto file = std::unique_ptr<file_info>(
         new file_info{.realpath = filename,
                       .accessibleAs = {},
                       .wasEverCreated = false,
@@ -145,11 +145,11 @@ MiddleEndState::createUnbackedFD(absFilePath&& filename,
     return raw;
 }
 
-MiddleEndState::file_info*
+file_info*
 MiddleEndState::createErrorFD(const char* errorMessage) {
     fprintf(stderr, "%s", errorMessage);
     auto filepath = "unknownFD ERROR" + std::to_string(++errorCount);
-    auto ptr = std::unique_ptr<MiddleEndState::file_info>(new file_info{
+    auto ptr = std::unique_ptr<file_info>(new file_info{
         .realpath = filepath,
         .accessibleAs = {},
         .wasEverCreated = std::nullopt,
@@ -164,7 +164,7 @@ MiddleEndState::createErrorFD(const char* errorMessage) {
     return raw;
 }
 
-MiddleEndState::file_info*
+file_info*
 MiddleEndState::tryFindFile(const absFilePath& filename) const {
     if (auto it = encounteredFilenames.find(filename);
         it != encounteredFilenames.end()) {
@@ -247,7 +247,7 @@ void MiddleEndState::createDirectory(pid_t process, const absFilePath& filename,
                               .executable = false,
                               .workdir = val.fsInfo->workdir};
 
-    MiddleEndState::file_info* fileInfo = tryFindFile(filename);
+    file_info* fileInfo = tryFindFile(filename);
     if (fileInfo) {
         if (fileInfo->isCurrentlyOnTheDisk) {
             fprintf(stderr, "Error in caching the filesystem image, new "
@@ -259,7 +259,7 @@ void MiddleEndState::createDirectory(pid_t process, const absFilePath& filename,
         fileInfo->wasEverCreated = true;
 
     } else {
-        auto ptr = std::unique_ptr<MiddleEndState::file_info>(
+        auto ptr = std::unique_ptr<file_info>(
             new file_info{.realpath = filename,
                           .accessibleAs = {std::move(access)},
                           .wasEverCreated = true,
@@ -300,9 +300,9 @@ void MiddleEndState::removeDirectory(pid_t process,
         info->wasEverDeleted = true;
         info->isCurrentlyOnTheDisk = false;
     } else {
-        auto ptr = std::unique_ptr<MiddleEndState::file_info>(new file_info{
+        auto ptr = std::unique_ptr<file_info>(new file_info{
             .realpath = filename,
-            .accessibleAs = {decltype(std::declval<MiddleEndState::file_info>()
+            .accessibleAs = {decltype(std::declval<file_info>()
                                           .accessibleAs)::value_type{
                 process, filename, 0, false, val.fsInfo->workdir}},
             .wasEverCreated = false,
@@ -343,7 +343,7 @@ void MiddleEndState::removeNonDirectory(pid_t process,
         info->isCurrentlyOnTheDisk = false;
         info->wasEverDeleted = true;
     } else {
-        auto ptr = std::unique_ptr<MiddleEndState::file_info>(
+        auto ptr = std::unique_ptr<file_info>(
             new file_info{.realpath = filename,
                           .accessibleAs = {std::move(access)},
                           .wasEverCreated = false,
@@ -433,7 +433,7 @@ void MiddleEndState::openHandling(pid_t process, absFilePath filename,
                               .executable = false,
                               .workdir = val.fsInfo->workdir};
 
-    MiddleEndState::file_info* fileInfo = tryFindFile(filename);
+    file_info* fileInfo = tryFindFile(filename);
     if (fileInfo) {
         fileInfo->registerAccess(std::move(access));
         if (fileInfo->isCurrentlyOnTheDisk != statInfo.has_value()) {
@@ -443,7 +443,7 @@ void MiddleEndState::openHandling(pid_t process, absFilePath filename,
         }
         fileInfo->wasEverCreated = !statInfo.has_value();
     } else {
-        auto ptr = std::unique_ptr<MiddleEndState::file_info>{new file_info{
+        auto ptr = std::unique_ptr<file_info>{new file_info{
             .realpath = filename,
             .accessibleAs = {std::move(access)},
             .wasEverCreated = !statInfo.has_value(),
@@ -482,7 +482,7 @@ bool MiddleEndState::execFile(pid_t process, absFilePath filename,
     if (auto info = tryFindFile(filename)) {
         info->registerAccess(std::move(access));
     } else {
-        auto ptr = std::unique_ptr<MiddleEndState::file_info>(new file_info{
+        auto ptr = std::unique_ptr<file_info>(new file_info{
             .realpath = filename,
             .accessibleAs = {std::move(access)},
             .wasEverCreated = false,

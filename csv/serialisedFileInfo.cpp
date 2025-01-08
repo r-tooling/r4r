@@ -4,7 +4,7 @@
 #include "../stringHelpers.hpp"
 void CSV::serializeFiles(
     const std::unordered_map<
-        absFilePath, std::unique_ptr<middleend::MiddleEndState::file_info>>&
+        absFilePath, std::unique_ptr<middleend::file_info>>&
         files,
     std::filesystem::path csvPath) {
 
@@ -16,7 +16,7 @@ void CSV::serializeFiles(
               << std::endl;
 
     for (auto& [_, ptr] : files) {
-        const middleend::MiddleEndState::file_info& obj = *ptr;
+        const middleend::file_info& obj = *ptr;
 
         write(outputCsv, obj.realpath.string());
         write(outputCsv, obj.wasEverCreated);
@@ -81,8 +81,7 @@ T do_parse(csv::CSVField str) {
     }
 }
 
-std::unordered_map<absFilePath,
-                   std::unique_ptr<middleend::MiddleEndState::file_info>>
+std::unordered_map<absFilePath, middleend::file_info>
 CSV::deSerializeFiles(std::filesystem::path csvPath) {
     using namespace csv;
     CSVFormat format{};
@@ -96,12 +95,10 @@ CSV::deSerializeFiles(std::filesystem::path csvPath) {
 
     CSVReader inputCSV(csvPath.string(), format);
 
-    using FI = middleend::MiddleEndState::file_info;
-
-    std::unordered_map<absFilePath, std::unique_ptr<FI>> results;
+    std::unordered_map<absFilePath, middleend::file_info> results;
 
     for (auto& row : inputCSV) {
-        auto realPath = do_parse<decltype(FI::realpath)>(row["RealPath"]);
+        auto realPath = do_parse<decltype(middleend::file_info::realpath)>(row["RealPath"]);
         auto accessCSV = row["AccessedAs"].get_sv();
         std::unordered_set<middleend::access_info> acesses;
 
@@ -109,36 +106,37 @@ CSV::deSerializeFiles(std::filesystem::path csvPath) {
             accessCSV = ltrim(accessCSV, "\n");
             // needs the wrapping in std string due to bugs.
             auto accessParse = parse(std::string{accessCSV}, accessformat);
-            for (auto& row : accessParse) {
+            for (auto& row2 : accessParse) {
                 acesses.emplace(
                     -1,
                     do_parse<decltype(middleend::access_info::relPath)>(
-                        row["path"]),
+                        row2["path"]),
                     do_parse<decltype(middleend::access_info::flags)>(
-                        row["flags"]),
+                        row2["flags"]),
                     do_parse<decltype(middleend::access_info::executable)>(
-                        row["exec"]),
+                        row2["exec"]),
                     do_parse<decltype(middleend::access_info::workdir)>(
-                        row["dir"]));
+                        row2["dir"]));
             }
         }
 
         results.try_emplace(
-            realPath,
-            std::make_unique<middleend::MiddleEndState::file_info>(
-                realPath, std::move(acesses),
-                do_parse<decltype(FI::wasEverCreated)>(row["WasEverCreated"]),
-                do_parse<decltype(FI::wasEverDeleted)>(row["WasEverDeleted"]),
-                do_parse<decltype(FI::isCurrentlyOnTheDisk)>(
-                    row["IsCurrentlyOnTheDisk"]),
-                do_parse<decltype(FI::wasInitiallyOnTheDisk)>(
-                    row["WasInitiallyOnTheDisk"]),
-                optTransform(
-                    do_parse<std::optional<size_t>>(row["FileType"]),
-                    [](size_t v) {
-                        return static_cast<decltype(FI::type)::value_type>(v);
-                    }),
-                false));
+            realPath, realPath, std::move(acesses),
+            do_parse<decltype(middleend::file_info::wasEverCreated)>(
+                row["WasEverCreated"]),
+            do_parse<decltype(middleend::file_info::wasEverDeleted)>(
+                row["WasEverDeleted"]),
+            do_parse<decltype(middleend::file_info::isCurrentlyOnTheDisk)>(
+                row["IsCurrentlyOnTheDisk"]),
+            do_parse<decltype(middleend::file_info::wasInitiallyOnTheDisk)>(
+                row["WasInitiallyOnTheDisk"]),
+            optTransform(
+                do_parse<std::optional<size_t>>(row["FileType"]),
+                [](size_t v) {
+                    return static_cast<
+                        decltype(middleend::file_info::type)::value_type>(v);
+                }),
+            false);
     }
 
     return results;

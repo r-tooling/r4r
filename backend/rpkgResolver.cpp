@@ -11,7 +11,7 @@ static const std::unordered_set<std::u8string_view> basePackages = {
     /*
     heuristics - description "License: Part of R 4.4.0", "Version: 4.4.0" where
 the number fits the version.install.packages("tcltk") -> Warning message:
-package ‘tcltk’ is a base package, and should not be updated
+package ï¿½tcltkï¿½ is a base package, and should not be updated
 
 the packages are also located in the default R install dir.*/
     u8"base",     u8"datasets", u8"utils",   u8"grDevices", u8"tools",
@@ -31,7 +31,7 @@ file$DESCRIPTION["Package"]
         Package
         "sass"
 file$Built$R
-[1] ‘4.3.3’
+[1] ï¿½4.3.3ï¿½
 */
 
 std::optional<backend::RpkgPackage>
@@ -113,8 +113,8 @@ resolvePackageFromDescription(const std::filesystem::path& filePath) {
             data = trim(
                 data,
                 u8"\xE2\x80\x98\xe2\x80\x99 \n\t\"\'\'"); // the magic
-                                                          // characters are ‘
-                                                          // and ’ cannot be
+                                                          // characters are ï¿½
+                                                          // and ï¿½ cannot be
                                                           // inline unless we
                                                           // force the compiler
                                                           // to read them as
@@ -328,11 +328,11 @@ void backend::Rpkg::persist(std::ostream& dockerImage,
             // https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
             // and here
             // https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
-            result << "install_version(\"" << toNormal(package.packageName)
-                   << "\",\"" << toNormal(package.packageVersion) << "\""
-                   << ",upgrade = \"never\", dependencies=F,lib=c("
-                   << package.whereLocated.parent_path() << "), Ncpus=cores"
-                   << "); " << std::endl;
+            result
+                << "install_version(\"" << toNormal(package.packageName)
+                << "\",\"" << toNormal(package.packageVersion) << "\""
+                << ",upgrade = \"never\", dependencies = FALSE, Ncpus = cores"
+                << "); " << std::endl;
             // unfortunatelly upgrade=never is not sufficient
             //  the package may depend on other packages which are not installed
             //  and such packages would then get installed at possibly higher

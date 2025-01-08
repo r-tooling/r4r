@@ -1,20 +1,19 @@
 #include "backEnd.hpp"
 #include "../csv/serialisedFileInfo.hpp"
-#include "../stringHelpers.hpp"
-#include "../toBeClosedFd.hpp"
 #include "dpkgResolver.hpp"
 #include "filesystemGraph.hpp"
 #include "optionals.hpp"
 #include "rpkgResolver.hpp"
 
-#include <cassert>
-#include <cstdlib>
 #include <fcntl.h> //O_* flags
+#include <filesystem>
 #include <fstream>
+#include <regex>
 #include <sys/stat.h> //mkdirat
 #include <unistd.h>
 #include <unordered_map>
-#include <variant>
+#include <unordered_set>
+#include <vector>
 
 namespace {
 
@@ -29,10 +28,8 @@ struct SubdirIterator {
         std::filesystem::path soFar;
 
         IterImpl(const std::filesystem::path& origPath)
-            : origPath{origPath},
-              currentPos(origPath.begin()), soFar{currentPos != origPath.end()
-                                                      ? *currentPos
-                                                      : ""} {};
+            : origPath{origPath}, currentPos(origPath.begin()),
+              soFar{currentPos != origPath.end() ? *currentPos : ""} {};
 
         const auto& operator*() { return soFar; }
 
@@ -74,119 +71,124 @@ T&& replaceFirst(T&& source, const T&& from, const T&& to) {
     return std::forward<T>(source);
 }
 
-std::string flags_to_str(int flags) {
-    std::string res = "";
-    if (flags & fileAccessFlags::read) {
-        res += "R";
-    }
-    if (flags & fileAccessFlags::write) {
-        res += "W";
-    }
-    if (flags & fileAccessFlags::execute) {
-        res += "X";
-    }
-    return res;
-}
+// std::string flags_to_str(int flags) {
+//     std::string res = "";
+//     if (flags & fileAccessFlags::read) {
+//         res += "R";
+//     }
+//     if (flags & fileAccessFlags::write) {
+//         res += "W";
+//     }
+//     if (flags & fileAccessFlags::execute) {
+//         res += "X";
+//     }
+//     return res;
+// }
 
-bool isSpecialCased(const std::filesystem::path& path) {
-    auto none = Graph::operationType::none;
-    auto dir = Graph::operationType::directory;
-    auto exa = Graph::operationType::exact;
-    // node constructor
-    auto n = [none]<ptr... T>(std::string s, T... i) {
-        static_assert(sizeof...(i) > 0);
-        return std::make_unique<Graph>(s, none, std::move(i)...);
-    };
-    // leaf constructor
-    auto l = [](std::string s, Graph::operationType d) {
-        return std::make_unique<Graph>(s, d);
-    };
+// bool isSpecialCased(const std::filesystem::path& path) {
+//     auto none = Graph::operationType::none;
+//     auto dir = Graph::operationType::directory;
+//     auto exa = Graph::operationType::exact;
+//     // node constructor
+//     auto n = [none]<ptr... T>(std::string s, T... i) {
+//         static_assert(sizeof...(i) > 0);
+//         return std::make_unique<Graph>(s, none, std::move(i)...);
+//     };
+//     // leaf constructor
+//     auto l = [](std::string s, Graph::operationType d) {
+//         return std::make_unique<Graph>(s, d);
+//     };
+//
+//     static const auto root =
+//         n("/", l("proc", dir), n("etc", l("ld.so.cache", exa)), l("sys",
+//         dir),
+//           l("dev", dir),
+//           n("usr",
+//             n("lib", n("locale", l("locale-archive",
+//                                    exa))))); ///
+//                                    usr/lib/locale/locale-archive
+//
+//     int counter = 0;
+//     const Graph* current = root.get();
+//     auto iter = path.begin(), end = path.end();
+//     if (iter != end &&
+//         *iter == "/") { // do not try to match the root directory. Consider
+//                         // erroring out otherwise
+//         ++iter;
+//     }
+//     for (; iter != end; iter++, counter++) {
+//         if (auto item = current->files.find(iter->string());
+//             item != current->files.end()) {
+//             current = item->get();
+//         } else {
+//             auto& doOpt = current->operation;
+//             if (doOpt == dir) {
+//                 return true;
+//             } else if (doOpt == exa) {
+//                 return false;
+//             } else if (doOpt == none) {
+//                 return false;
+//             }
+//         }
+//     }
+//     auto& doOpt = current->operation;
+//     if (doOpt == dir) {
+//         return true;
+//     } else if (doOpt == exa) {
+//         return iter == end;
+//     } else if (doOpt == none) {
+//         return false;
+//     }
+//     return false;
+// }
 
-    static const auto root =
-        n("/", l("proc", dir), n("etc", l("ld.so.cache", exa)), l("sys", dir),
-          l("dev", dir),
-          n("usr",
-            n("lib", n("locale", l("locale-archive",
-                                   exa))))); /// usr/lib/locale/locale-archive
+// void writeScriptLaunch(std::ostream& str,
+//                        const backend::DockerfileTraceInterpreter& state) {
+//     str << "#!/bin/sh" << std::endl;
+//     str << "cd '" << state.programWorkdir << "'" << std::endl; //
+//     todo:escaping
+//     // todo switch to user
+//
+//     for (auto& env : state.env) {
+//         str << "export '" << env << "'" << std::endl;
+//     }
+//     bool first = true;
+//     for (auto& arg : state.args) {
+//         if (first) {
+//             first = false;
+//             str << arg << " ";
+//         } else {
+//             str << "'" << arg << "' ";
+//         }
+//     }
+//     str << std::endl;
+// }
 
-    int counter = 0;
-    const Graph* current = root.get();
-    auto iter = path.begin(), end = path.end();
-    if (iter != end &&
-        *iter == "/") { // do not try to match the root directory. Consider
-                        // erroring out otherwise
-        ++iter;
-    }
-    for (; iter != end; iter++, counter++) {
-        if (auto item = current->files.find(iter->string());
-            item != current->files.end()) {
-            current = item->get();
-        } else {
-            auto& doOpt = current->operation;
-            if (doOpt == dir) {
-                return true;
-            } else if (doOpt == exa) {
-                return false;
-            } else if (doOpt == none) {
-                return false;
-            }
-        }
-    }
-    auto& doOpt = current->operation;
-    if (doOpt == dir) {
-        return true;
-    } else if (doOpt == exa) {
-        return iter == end;
-    } else if (doOpt == none) {
-        return false;
-    }
-    return false;
-}
-
-void writeScriptLaunch(std::ostream& str,
-                       const backend::CachingResolver& state) {
-    str << "#!/bin/sh" << std::endl;
-    str << "cd '" << state.programWorkdir << "'" << std::endl; // todo:escaping
-    // todo switch to user
-
-    for (auto& env : state.env) {
-        str << "export '" << env << "'" << std::endl;
-    }
-    bool first = true;
-    for (auto& arg : state.args) {
-        if (first) {
-            first = false;
-            str << arg << " ";
-        } else {
-            str << "'" << arg << "' ";
-        }
-    }
-    str << std::endl;
-}
-
-std::filesystem::path
-createLaunchScript(const std::filesystem::path& where,
-                   const backend::CachingResolver& state) {
-    std::filesystem::path resPath = where / "launch.sh";
-    std::ofstream file{resPath,
-                       std::ios::openmode::_S_trunc |
-                           std::ios::openmode::_S_out}; // todo: file collision?
-    writeScriptLaunch(file, state);                     // todo: error?
-    return resPath;
-}
-std::string escapeForCSV(std::u8string unescaped) {
-    using std::string_literals::operator""s;
-    //	if (unescaped.contains(strType{ "," })) { c++23
-    if (unescaped.find(u8",") != unescaped.npos) {
-        auto s = u8"\""s +
-                 CSV::replaceAll(std::move(unescaped), u8"\""s, u8"\"\"\""s) +
-                 u8"\""s;
-        return std::string{reinterpret_cast<const char*>(s.data()), s.length()};
-    } else {
-        return std::string{reinterpret_cast<const char*>(unescaped.data()),
-                           unescaped.length()};
-    }
-}
+// std::filesystem::path
+// createLaunchScript(const std::filesystem::path& where,
+//                    const backend::DockerfileTraceInterpreter& state) {
+//     std::filesystem::path resPath = where / "launch.sh";
+//     std::ofstream file{resPath,
+//                        std::ios::openmode::_S_trunc |
+//                            std::ios::openmode::_S_out}; // todo: file
+//                            collision?
+//     writeScriptLaunch(file, state);                     // todo: error?
+//     return resPath;
+// }
+// std::string escapeForCSV(std::u8string unescaped) {
+//     using std::string_literals::operator""s;
+//     //	if (unescaped.contains(strType{ "," })) { c++23
+//     if (unescaped.find(u8",") != unescaped.npos) {
+//         auto s = u8"\""s +
+//                  CSV::replaceAll(std::move(unescaped), u8"\""s, u8"\"\"\""s)
+//                  + u8"\""s;
+//         return std::string{reinterpret_cast<const char*>(s.data()),
+//         s.length()};
+//     } else {
+//         return std::string{reinterpret_cast<const char*>(unescaped.data()),
+//                            unescaped.length()};
+//     }
+// }
 
 template <class Key, class Result>
 std::optional<Result>
@@ -215,236 +217,287 @@ void appendSymlinkResult(std::unordered_set<absFilePath>& resultStore,
     }
     return;
 }
-void unpackFiles(
-    std::unordered_map<absFilePath, std::string>& dockerPathTranslator,
-    std::ofstream& dockerImage) {
-    if (!dockerPathTranslator.empty()) {
-        dockerImage << "ADD DockerData /tmp/DockerData" << std::endl;
+// void unpackFiles(
+//     std::unordered_map<absFilePath, std::string>& dockerPathTranslator,
+//     std::ofstream& dockerImage) {
+//     if (!dockerPathTranslator.empty()) {
+//         dockerImage << "ADD DockerData /tmp/DockerData" << std::endl;
+//
+//         dockerImage << "RUN "; // unpack
+//         for (auto& [path, key] : dockerPathTranslator) {
+//             dockerImage << "mv /tmp/DockerData/" << key << " " << path
+//                         << " && ";
+//         }
+//         dockerImage << "true" << std::endl;
+//     }
+// }
 
-        dockerImage << "RUN "; // unpack
-        for (auto& [path, key] : dockerPathTranslator) {
-            dockerImage << "mv /tmp/DockerData/" << key << " " << path
-                        << " && ";
-        }
-        dockerImage << "true" << std::endl;
-    }
-}
-
-static void createBuildScript(
-    std::ofstream& dockerBuildScript,
-    std::unordered_map<absFilePath, std::string>& dockerPathTranslator,
-    const std::string_view& tag, std::ofstream& runDockerScript,
-    std::unordered_set<std::filesystem::path> unignoredFiles) {
-    std::ofstream dockerignore{".dockerignore"};
-    dockerignore << "*" << std::endl;
-    dockerignore << "!DockerData" << std::endl;
-    for (auto& item : unignoredFiles) {
-        dockerignore << "!" << item.filename().string() << std::endl;
-    }
-
-    dockerBuildScript << "#!/bin/sh" << std::endl
-                      << "mkdir 'DockerData'; cd 'DockerData'; ";
-    for (const auto& [source, dest] : dockerPathTranslator) {
-        dockerBuildScript
-            << "cp " << source << " " << dest
-            << std::endl; // todo: escaping, ln if the file is on the same
-                          // filesystem. Or amybe create a condition if ln
-                          // fails, fall back to cp.
-    }
-
-    dockerBuildScript << "cd ..;";
-    dockerBuildScript << "docker build -t '" << tag
-                      << "' -f dockerImage .; success=$?;" << std::endl;
-    dockerBuildScript << "rm -rf 'DockerData';" << std::endl;
-    dockerBuildScript << "if [ $success -eq 0 ]; then ./runDocker.sh; fi;"
-                      << std::endl;
-
-    runDockerScript << "docker run  -it --entrypoint bash " << tag << std::endl;
-}
+// static void createBuildScript(
+//     std::ofstream& dockerBuildScript,
+//     std::unordered_map<absFilePath, std::string>& dockerPathTranslator,
+//     const std::string_view& tag, std::ofstream& runDockerScript,
+//     std::unordered_set<std::filesystem::path> unignoredFiles) {
+//     std::ofstream dockerignore{".dockerignore"};
+//     dockerignore << "*" << std::endl;
+//     dockerignore << "!DockerData" << std::endl;
+//     for (auto& item : unignoredFiles) {
+//         dockerignore << "!" << item.filename().string() << std::endl;
+//     }
+//
+//     dockerBuildScript << "#!/bin/sh" << std::endl
+//                       << "mkdir 'DockerData'; cd 'DockerData'; ";
+//     for (const auto& [source, dest] : dockerPathTranslator) {
+//         dockerBuildScript
+//             << "cp " << source << " " << dest
+//             << std::endl; // todo: escaping, ln if the file is on the same
+//                           // filesystem. Or amybe create a condition if ln
+//                           // fails, fall back to cp.
+//     }
+//
+//     dockerBuildScript << "cd ..;";
+//     dockerBuildScript << "docker build -t '" << tag
+//                       << "' -f dockerImage .; success=$?;" << std::endl;
+//     dockerBuildScript << "rm -rf 'DockerData';" << std::endl;
+//     dockerBuildScript << "if [ $success -eq 0 ]; then ./runDocker.sh; fi;"
+//                       << std::endl;
+//
+//     runDockerScript << "docker run  -it --entrypoint bash " << tag <<
+//     std::endl;
+// }
 
 } // namespace
 namespace backend {
 
-void CachingResolver::csv(absFilePath output) {
-    using std::string_literals::operator""s;
-    auto openedFile = std::ofstream{
-        output, std::ios::openmode::_S_trunc |
-                    std::ios::openmode::_S_out}; // c++ 23noreplace
-    openedFile << "filename"
-               << ","
-               << "flags"
-               << ","
-               << "created"
-               << ","
-               << "deleted"
-               << ", needsSubfolders"
-               << ", source dpkg package"
-               << ", source R package" << std::endl;
-    for (auto& [path, info] :
-         files) { // TODO: trace absolute paths as well as relative paths.
-        auto flags = 0;
-        for (auto& relative : info->accessibleAs) {
-            if (relative.executable) {
-                flags |= fileAccessFlags::execute;
-            }
-            if (relative.flags) {
-                if ((*relative.flags & O_ACCMODE) == O_RDONLY) {
-                    flags |= fileAccessFlags::read;
-                } else if ((*relative.flags & O_ACCMODE) == O_WRONLY) {
-                    flags |= fileAccessFlags::write;
-                } else if ((*relative.flags & O_ACCMODE) == O_RDWR) {
-                    flags |= fileAccessFlags::read | fileAccessFlags::write;
-                }
-            }
-        }
-        openedFile << "\""
-                   << CSV::replaceAll(std::move(info->realpath.string()), "\""s,
-                                      "\"\"\""s)
-                   << "\""
-                   << "," << flags_to_str(flags) << ","
-                   << (info->wasInitiallyOnTheDisk.value_or(false) ? "F" : "T")
-                   << ","
-                   << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" : "T")
-                   << ","
-                   << (info->requiresAllSubEntities.value_or(false) ? "T"
-                                                                    : "F");
-        auto dpkg =
-            optTransform(optionalResolve(dpkgResolver.resolvedPaths, path)
-                             .value_or(std::nullopt),
-                         [](const auto* package) {
-                             return static_cast<std::u8string>(*package);
-                         });
-        openedFile << "," << escapeForCSV(dpkg.value_or(u8""s));
-        auto rpkg =
-            optTransform(optionalResolve(rpkgResolver.resolvedPaths, path)
-                             .value_or(std::nullopt),
-                         [](const auto* package) {
-                             return static_cast<std::u8string>(*package);
-                         });
-        openedFile << "," << escapeForCSV(rpkg.value_or(u8""s));
-        openedFile << std::endl;
-    }
-}
+// void DockerfileTraceInterpreter::csv(absFilePath output) {
+//     using std::string_literals::operator""s;
+//     auto openedFile = std::ofstream{
+//         output, std::ios::openmode::_S_trunc |
+//                     std::ios::openmode::_S_out}; // c++ 23noreplace
+//     openedFile << "filename"
+//                << ","
+//                << "flags"
+//                << ","
+//                << "created"
+//                << ","
+//                << "deleted"
+//                << ", needsSubfolders"
+//                << ", source dpkg package"
+//                << ", source R package" << std::endl;
+//     for (auto& [path, info] :
+//          files) { // TODO: trace absolute paths as well as relative paths.
+//         auto flags = 0;
+//         for (auto& relative : info->accessibleAs) {
+//             if (relative.executable) {
+//                 flags |= fileAccessFlags::execute;
+//             }
+//             if (relative.flags) {
+//                 if ((*relative.flags & O_ACCMODE) == O_RDONLY) {
+//                     flags |= fileAccessFlags::read;
+//                 } else if ((*relative.flags & O_ACCMODE) == O_WRONLY) {
+//                     flags |= fileAccessFlags::write;
+//                 } else if ((*relative.flags & O_ACCMODE) == O_RDWR) {
+//                     flags |= fileAccessFlags::read | fileAccessFlags::write;
+//                 }
+//             }
+//         }
+//         openedFile << "\""
+//                    << CSV::replaceAll(info->realpath.string(), "\""s,
+//                    "\"\"\""s)
+//                    << "\""
+//                    << "," << flags_to_str(flags) << ","
+//                    << (info->wasInitiallyOnTheDisk.value_or(false) ? "F" :
+//                    "T")
+//                    << ","
+//                    << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" :
+//                    "T")
+//                    << ","
+//                    << (info->requiresAllSubEntities.value_or(false) ? "T"
+//                                                                     : "F");
+//         // FIXME: dpkg
+//         // auto dpkg =
+//         //     optTransform(optionalResolve(dpkgResolver.resolvedPaths, path)
+//         //                      .value_or(std::nullopt),
+//         //                  [](const auto* package) {
+//         //                      return static_cast<std::u8string>(*package);
+//         //                  });
+//         // openedFile << "," << escapeForCSV(dpkg.value_or(u8""s));
+//
+//         auto rpkg =
+//             optTransform(optionalResolve(rpkgResolver.resolvedPaths, path)
+//                              .value_or(std::nullopt),
+//                          [](const auto* package) {
+//                              return static_cast<std::u8string>(*package);
+//                          });
+//         openedFile << "," << escapeForCSV(rpkg.value_or(u8""s));
+//         openedFile << std::endl;
+//     }
+// }
 
-void CachingResolver::report(absFilePath output) {
-    auto report = std::ofstream{output, std::ios::openmode::_S_trunc |
-                                            std::ios::openmode::_S_out};
-    auto exec = getExecutedFiles();
-    report << "Discovered " << files.size() << " different file dependencies"
-           << std::endl;
-    report << "Of those " << getUnmatchedFiles().size()
-           << " were not installed using any form of package manager"
-           << std::endl;
-    report << "Dpkg provides " << dpkgResolver.packageNameToData.size()
-           << " different packages the program depends on. "
-           << " This does not include dependencies of the packages which were "
-              "not directly used during the program runtime "
-           << std::endl;
-    report << "R provides " << rpkgResolver.packageNameToData.size()
-           << " packages used directly and "
-           << rpkgResolver.topSortedPackages().items.size()
-           << " packages the program directly or indirectly depends on."
-           << std::endl;
-    report << "The program incuding itself executed " << exec.size()
-           << " files. Namely:" << std::endl;
+// void DockerfileTraceInterpreter::report(absFilePath output) {
+//     auto report = std::ofstream{output, std::ios::openmode::_S_trunc |
+//                                             std::ios::openmode::_S_out};
+//     auto exec = getExecutedFiles();
+//     report << "Discovered " << files.size() << " different file dependencies"
+//            << std::endl;
+//     report << "Of those " << getUnmatchedFiles().size()
+//            << " were not installed using any form of package manager"
+//            << std::endl;
+//     // FIXME:
+//     // report << "DebPackage provides " <<
+//     dpkgResolver.packageNameToData.size()
+//     //        << " different packages the program depends on. "
+//     //        << " This does not include dependencies of the packages which
+//     were
+//     //        "
+//     //           "not directly used during the program runtime "
+//     //        << std::endl;
+//     report << "R provides " << rpkgResolver.packageNameToData.size()
+//            << " packages used directly and "
+//            << rpkgResolver.topSortedPackages().items.size()
+//            << " packages the program directly or indirectly depends on."
+//            << std::endl;
+//     report << "The program incuding itself executed " << exec.size()
+//            << " files. Namely:" << std::endl;
+//
+//     for (decltype(auto) it : exec) {
+//         report << it->realpath << std::endl;
+//     }
+// }
 
-    for (decltype(auto) it : exec) {
-        report << it->realpath << std::endl;
-    }
-}
-void CachingResolver::dockerImage(absFilePath output,
-                                  const std::string_view tag) {
-    using std::string_literals::operator""s;
+void DockerfileTraceInterpreter::create_dockerfile() {
+    auto df = std::ofstream{"Dockerfile", std::ios::trunc | std::ios::out};
 
-    auto dockerImage =
-        std::ofstream{output.parent_path() / "dockerImage",
-                      std::ios::openmode::_S_trunc |
-                          std::ios::openmode::_S_out}; // c++ 23noreplace
-    auto dockerBuildScript =
-        std::ofstream{output.parent_path() / "buildDocker.sh",
-                      std::ios::openmode::_S_trunc |
-                          std::ios::openmode::_S_out}; // c++ 23noreplace
-    auto runDockerScript = std::ofstream{
-        output.parent_path() / "runDocker.sh",
-        std::ios::openmode::_S_trunc | std::ios::openmode::_S_out}; // TODO:
+    // TODO: shall we upgrade? 24.04 the latest LTS?
+    df << "FROM ubuntu:22.04"
+       << "\n\n";
 
-    dockerImage << "FROM ubuntu:22.04" << std::endl;
+    // FIXME: the main problem with this implementation is that
+    // it ignores the fact a package can come from multiple repos
+    // and that these repos need to be installed.
 
-    dpkgResolver.persist(dockerImage);
-    // this is done before the R packages to ensure all  library paths are
-    // accessible
-    std::filesystem::path directoryCreator{output.parent_path() /
-                                           "recreateDirectories.sh"};
-    persistDirectoriesAndSymbolicLinks(dockerImage, directoryCreator);
+    // install debian packages
+    if (!debian_packages.empty()) {
+        df << "ENV DEBIAN_FRONTEND=noninteractive\n";
+        df << "RUN apt-get update -y && \\\n";
+        df << "    apt-get install -y \\\n";
 
-    std::filesystem::path rpkgCreator{output.parent_path() /
-                                      "installRPackages.sh"};
-    rpkgResolver.persist(dockerImage, rpkgCreator);
-
-    // COPY src dest does not work as it quickly exhaust the maximum layer depth
-    // instead a folder with all the relevant data is serialised to and then
-    // added to the image where it is unserialised.
-
-    // PERSIST FILES
-
-    std::unordered_map<absFilePath, std::string> dockerPathTranslator;
-
-    auto file = createLaunchScript(".", *this);
-    dockerPathTranslator.emplace(std::filesystem::canonical(file),
-                                 std::to_string(dockerPathTranslator.size()));
-    for (auto info : getUnmatchedFiles()) {
-        if (isSpecialCased(info->realpath)) {
-            continue;
-        }
-        if (std::filesystem::is_regular_file(info->realpath)) {
-            dockerPathTranslator.emplace(
-                info->realpath, std::to_string(dockerPathTranslator.size()));
-        }
-        // TODO: error on non symlink/dir/file
-    }
-
-    unpackFiles(dockerPathTranslator, dockerImage);
-
-    // PERSIST ENV
-
-    for (auto& env : env) {
-        dockerImage << "ENV " << replaceFirst(std::string(env), "="s, "=\""s)
-                    << "\"" << std::endl;
-    }
-    dockerImage << "WORKDIR " << programWorkdir << std::endl;
-
-    createBuildScript(dockerBuildScript, dockerPathTranslator, tag,
-                      runDockerScript, {directoryCreator, rpkgCreator});
-}
-
-std::vector<middleend::MiddleEndState::file_info*>
-CachingResolver::getUnmatchedFiles() {
-    std::vector<middleend::MiddleEndState::file_info*> res{};
-    for (auto& [path, info] : files) {
-        auto dpkg = optionalResolve(dpkgResolver.resolvedPaths, path)
-                        .value_or(std::nullopt);
-        auto rpkg = optionalResolve(rpkgResolver.resolvedPaths, path)
-                        .value_or(std::nullopt);
-        if (!dpkg && !rpkg) {
-            res.emplace_back(info.get());
-        }
-    }
-    return res;
-}
-
-std::vector<middleend::MiddleEndState::file_info*>
-CachingResolver::getExecutedFiles() {
-    std::vector<middleend::MiddleEndState::file_info*> res{};
-    for (auto& [path, info] : files) {
-        for (auto& val : info.get()->accessibleAs) {
-            if (val.executable) {
-                res.emplace_back(info.get());
-                break; // inner loop only
+        for (size_t i = 0; i < debian_packages.size(); ++i) {
+            auto const& pkg = debian_packages[i];
+            df << "      " << pkg.name << "=" << pkg.version;
+            if (i < debian_packages.size() - 1) {
+                df << " \\\n";
             }
         }
+        df << "\n\n";
     }
-    return res;
+
+    // install R packages
+    rpkg_resolver.persist(df, "install-r-packages.R");
+
+    // copy unmatched files
+
+    df.close();
 }
+
+// void DockerfileTraceInterpreter::dockerImage(absFilePath output,
+//                                   const std::string_view tag) {
+//     using std::string_literals::operator""s;
+//
+//     auto dockerImage =
+//         std::ofstream{output.parent_path() / "dockerImage",
+//                       std::ios::openmode::_S_trunc |
+//                           std::ios::openmode::_S_out}; // c++ 23noreplace
+//     auto dockerBuildScript =
+//         std::ofstream{output.parent_path() / "buildDocker.sh",
+//                       std::ios::openmode::_S_trunc |
+//                           std::ios::openmode::_S_out}; // c++ 23noreplace
+//     auto runDockerScript = std::ofstream{
+//         output.parent_path() / "runDocker.sh",
+//         std::ios::openmode::_S_trunc | std::ios::openmode::_S_out}; // TODO:
+//
+//     dockerImage << "FROM ubuntu:22.04" << std::endl;
+//
+//     // FIXME:
+//     // dpkgResolver.persist(dockerImage);
+//     // this is done before the R packages to ensure all  library paths are
+//     // accessible
+//     std::filesystem::path directoryCreator{output.parent_path() /
+//                                            "recreateDirectories.sh"};
+//     persistDirectoriesAndSymbolicLinks(dockerImage, directoryCreator);
+//
+//     std::filesystem::path rpkgCreator{output.parent_path() /
+//                                       "installRPackages.sh"};
+//     rpkgResolver.persist(dockerImage, rpkgCreator);
+//
+//     // COPY src dest does not work as it quickly exhaust the maximum layer
+//     depth
+//     // instead a folder with all the relevant data is serialised to and then
+//     // added to the image where it is unserialised.
+//
+//     // PERSIST FILES
+//
+//     std::unordered_map<absFilePath, std::string> dockerPathTranslator;
+//
+//     auto file = createLaunchScript(".", *this);
+//     dockerPathTranslator.emplace(std::filesystem::canonical(file),
+//                                  std::to_string(dockerPathTranslator.size()));
+//     for (auto info : getUnmatchedFiles()) {
+//         if (isSpecialCased(info->realpath)) {
+//             continue;
+//         }
+//         if (std::filesystem::is_regular_file(info->realpath)) {
+//             dockerPathTranslator.emplace(
+//                 info->realpath, std::to_string(dockerPathTranslator.size()));
+//         }
+//         // TODO: error on non symlink/dir/file
+//     }
+//
+//     unpackFiles(dockerPathTranslator, dockerImage);
+//
+//     // PERSIST ENV
+//
+//     for (auto& e : env) {
+//         dockerImage << "ENV " << replaceFirst(std::string(e), "="s, "=\""s)
+//                     << "\"" << std::endl;
+//     }
+//     dockerImage << "WORKDIR " << programWorkdir << std::endl;
+//
+//     createBuildScript(dockerBuildScript, dockerPathTranslator, tag,
+//                       runDockerScript, {directoryCreator, rpkgCreator});
+// }
+//
+// std::vector<middleend::MiddleEndState::file_info*>
+// DockerfileTraceInterpreter::getUnmatchedFiles() {
+//     std::vector<middleend::MiddleEndState::file_info*> res{};
+//     for (auto& [path, info] : files) {
+//
+//         // FIXME: dpkg
+//         // auto dpkg = optionalResolve(dpkgResolver.resolvedPaths, path)
+//         //                 .value_or(std::nullopt);
+//         auto rpkg = optionalResolve(rpkgResolver.resolvedPaths, path)
+//                         .value_or(std::nullopt);
+//         // FIXME:
+//         if (/*!dpkg &&*/ !rpkg) {
+//             res.emplace_back(info.get());
+//         }
+//     }
+//     return res;
+// }
+//
+// std::vector<middleend::MiddleEndState::file_info*>
+// DockerfileTraceInterpreter::getExecutedFiles() {
+//     std::vector<middleend::MiddleEndState::file_info*> res{};
+//     for (auto& [path, info] : files) {
+//         for (auto& val : info.get()->accessibleAs) {
+//             if (val.executable) {
+//                 res.emplace_back(info.get());
+//                 break; // inner loop only
+//             }
+//         }
+//     }
+//     return res;
+// }
+
 /*
 Package repositories may "own" files under both the fullpath and a symlinked
 path /usr/lib/a -> /lib/a -> we may only ever see one of these accessed. As
@@ -454,13 +507,13 @@ but it can be done in batches.
 
 */
 
-std::unordered_set<absFilePath> CachingResolver::symlinkList() {
+std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 
     std::unordered_set<absFilePath> currentList;
     // Resolving symlinks
     // take all the non-realpath ways to access this item
-    for (auto& [_, info] : files) {
-        for (auto& access : info->accessibleAs) {
+    for (auto& info : trace_.files) {
+        for (auto& access : info.accessibleAs) {
 
             // if the file path is an absolute path
             auto path = std::filesystem::path{};
@@ -469,9 +522,9 @@ std::unordered_set<absFilePath> CachingResolver::symlinkList() {
             } else {
                 path = (access.workdir / access.relPath).lexically_normal();
             }
-            if (path != info->realpath) {
+            if (path != info.realpath) {
                 if (std::filesystem::is_symlink(path)) {
-                    appendSymlinkResult(currentList, path, {info->realpath});
+                    appendSymlinkResult(currentList, path, {info.realpath});
                 }
                 currentList.emplace(std::move(path));
             }
@@ -480,96 +533,189 @@ std::unordered_set<absFilePath> CachingResolver::symlinkList() {
     return currentList;
 }
 
-void CachingResolver::persistDirectoriesAndSymbolicLinks(
-    std::ostream& dockerImage, const std::filesystem::path& scriptLocation) {
-    std::unordered_set<std::filesystem::path> resolvedPaths;
+// void DockerfileTraceInterpreter::persistDirectoriesAndSymbolicLinks(
+//     std::ostream& dockerImage, const std::filesystem::path& scriptLocation) {
+//     std::unordered_set<std::filesystem::path> resolvedPaths;
+//
+//     std::ofstream result{scriptLocation, std::ios::openmode::_S_trunc |
+//                                              std::ios::openmode::_S_out};
+//
+//     // TODO: add a method for detecting that a sublink here belongs to a
+//     package
+//     // and mark it as resolved. but this requires resolving all the symlinks
+//     // which are to be created to their real paths as we go along.
+//     auto all = symlinkList();
+//     for (const auto& [path, _] : files) {
+//         all.emplace(path);
+//     }
+//     // These should not actually be required but better safe than sorry in
+//     this
+//     // case. Any found library should have been detected before.
+//     all.merge(rpkgResolver.getLibraryPaths());
+//     all.emplace(programWorkdir);
+//     for (decltype(auto) path : all) {
+//         // do not persist links which will be persisted by dpkg.
+//         bool ignoreFinal = false;
+//         // FIXME:
+//         // if (auto found = dpkgResolver.resolvedPaths.find(path);
+//         //     found != dpkgResolver.resolvedPaths.end()) {
+//         //     ignoreFinal = found->second.has_value();
+//         // }
+//
+//         for (const auto& segment : SubdirIterator(path)) {
+//             if (isSpecialCased(segment) || (ignoreFinal && segment == path))
+//             {
+//                 continue;
+//             }
+//             if (!resolvedPaths.contains(segment)) {
+//                 if (std::filesystem::is_directory(segment)) {
+//                     result
+//                         << "mkdir -p " << segment
+//                         << std::endl; //-p is there just to be absolutely
+//                         sure
+//                                       // everything works. could be ommited
+//                 } else if (std::filesystem::is_symlink(segment)) {
+//                     result << "ln -s " <<
+//                     std::filesystem::read_symlink(segment)
+//                            << " " << segment << std::endl;
+//                 }
+//                 resolvedPaths.emplace(segment);
+//             }
+//         }
+//     }
+//     if (!resolvedPaths.empty()) {
+//         dockerImage << "COPY [" << scriptLocation << "," << scriptLocation
+//                     << "]" << std::endl;
+//         dockerImage << "RUN bash " << scriptLocation << " || true"
+//                     << std::endl; // we always want this to complete even if
+//                     the
+//                                   // directories did not get created
+//     }
+// }
 
-    std::ofstream result{scriptLocation, std::ios::openmode::_S_trunc |
-                                             std::ios::openmode::_S_out};
-
-    // TODO: add a method for detecting that a sublink here belongs to a package
-    // and mark it as resolved. but this requires resolving all the symlinks
-    // which are to be created to their real paths as we go along.
-    auto all = symlinkList();
-    for (const auto& [path, _] : files) {
-        all.emplace(path);
-    }
-    // These should not actually be required but better safe than sorry in this
-    // case. Any found library should have been detected before.
-    all.merge(rpkgResolver.getLibraryPaths());
-    all.emplace(programWorkdir);
-    for (decltype(auto) path : all) {
-        // do not persist links which will be persisted by dpkg.
-        bool ignoreFinal = false;
-        if (auto found = dpkgResolver.resolvedPaths.find(path);
-            found != dpkgResolver.resolvedPaths.end()) {
-            ignoreFinal = found->second.has_value();
-        }
-
-        for (const auto& segment : SubdirIterator(path)) {
-            if (isSpecialCased(segment) || (ignoreFinal && segment == path)) {
-                continue;
-            }
-            if (!resolvedPaths.contains(segment)) {
-                if (std::filesystem::is_directory(segment)) {
-                    result
-                        << "mkdir -p " << segment
-                        << std::endl; //-p is there just to be absolutely sure
-                                      //everything works. could be ommited
-                } else if (std::filesystem::is_symlink(segment)) {
-                    result << "ln -s " << std::filesystem::read_symlink(segment)
-                           << " " << segment << std::endl;
-                }
-                resolvedPaths.emplace(segment);
-            }
-        }
-    }
-    if (!resolvedPaths.empty()) {
-        dockerImage << "COPY [" << scriptLocation << "," << scriptLocation
-                    << "]" << std::endl;
-        dockerImage << "RUN bash " << scriptLocation << " || true"
-                    << std::endl; // we always want this to complete even if the
-                                  // directories did not get created
-    }
-}
-
-void CachingResolver::resolveRPackages() {
-    if (!rpkgResolver.areDependenciesPresent()) {
+void DockerfileTraceInterpreter::resolve_r_packages() {
+    auto links = symlinkList();
+    if (!rpkg_resolver.areDependenciesPresent()) {
         fprintf(stderr, "Unable to resolve R packages as the required "
                         "dependencies are not present\n");
         return;
     }
 
-    // TODO: only use me for files if the R executable or its variants are
-    // detected in accesses.
-    for (auto& [path, info] : files) {
-        rpkgResolver.resolvePathToPackage(
-            info->realpath); // always resolve all dependencies, the time
-                             // overlap is marginal and I need to know the
-                             // version even in dpkg packages.
-    }
+    auto op = [&](middleend::file_info const& f) -> bool {
+        // always resolve all dependencies, the time
+        // overlap is marginal and I need to know the
+        // version even in dpkg packages.
+        return rpkg_resolver.resolvePathToPackage(f.realpath).has_value();
+    };
 
-    // Resolving symlinks
-    // take all the non-realpath ways to access this item
-    for (auto& info : symlinkList()) {
-        rpkgResolver.resolvePathToPackage(info);
+    std::erase_if(trace_.files, op);
+
+    // FIXME: what to do with symlinks?
+    // // Resolving symlinks
+    // // take all the non-realpath ways to access this item
+    // for (auto& info : symlinkList()) {
+    //     rpkgResolver.resolvePathToPackage(info);
+    // }
+}
+
+void DockerfileTraceInterpreter::resolve_ignored_files() {
+    static const std::vector<std::regex> ignored_files = {
+        std::regex(R"(^/dev/.*)"),
+        std::regex(R"(^/etc/ld\.so\.cache$)"),
+        std::regex(R"(^/sys/.*)"),
+        std::regex(R"(^/proc/.*)"),
+        // produced by locale-gen, should be installed on each ubuntu box
+        std::regex(R"(^/usr/lib/locale/locale-archive$)"),
+    };
+
+    std::erase_if(trace_.files, [&](middleend::file_info const& f) {
+        auto const& path = f.realpath.string();
+        for (auto const& pattern : ignored_files) {
+            if (std::regex_match(path, pattern)) {
+                std::cout << "resolving: " << path << " to: ignored"
+                          << std::endl;
+                return true;
+            }
+        }
+        return false;
+    });
+}
+
+void populate_root_symlinks(std::unordered_map<fs::path, fs::path>& symlinks) {
+    fs::path root = "/";
+    for (const auto& entry : fs::directory_iterator(root)) {
+        if (entry.is_symlink()) {
+            std::error_code ec;
+            fs::path target = fs::read_symlink(entry.path(), ec);
+            if (!target.is_absolute()) {
+                target = fs::canonical(root / target);
+            }
+            if (!ec && fs::is_directory(target)) {
+                symlinks[entry.path()] = target;
+            }
+        }
     }
 }
-void CachingResolver::resolveDebianPackages() {
-    if (!dpkgResolver.areDependenciesPresent()) {
-        fprintf(stderr, "Unable to resolve DPKG/APT packages as the required "
-                        "dependencies are not present\n");
-        return;
-    }
-    std::unordered_set<std::filesystem::path> what;
 
-    for (auto& [path, info] : files) {
-        what.emplace(info->realpath);
-    }
-    dpkgResolver.batchResolvePathToPackage(what);
-    what = symlinkList();
+bool is_subpath(const fs::path& path, const fs::path& base) {
+    const auto mismatch_pair =
+        std::mismatch(path.begin(), path.end(), base.begin(), base.end());
+    return mismatch_pair.second == base.end();
+}
 
-    dpkgResolver.batchResolvePathToPackage(std::move(what), true);
+std::vector<fs::path> get_root_symlink(const fs::path& path) {
+    static std::unordered_map<fs::path, fs::path> symlinks;
+    if (symlinks.empty()) {
+        populate_root_symlinks(symlinks);
+    }
+
+    std::vector<fs::path> result = {path};
+
+    for (const auto& [symlink, target] : symlinks) {
+        if (is_subpath(path, target)) {
+            fs::path candidate = symlink / path.lexically_relative(target);
+
+            std::error_code ec;
+            if (fs::exists(candidate, ec) &&
+                fs::equivalent(candidate, path, ec)) {
+                result.push_back(candidate);
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+void DockerfileTraceInterpreter::resolve_debian_packages() {
+    auto dpkg = DpkgDatabase::from_path();
+
+    auto has_resolved = [&](middleend::file_info const& f) -> bool {
+        auto& path = f.realpath;
+        for (auto& p : get_root_symlink(path)) {
+            if (auto* resolved = dpkg.lookup(p); resolved) {
+                std::cout << "resolving: " << path << " to: " << resolved->name
+                          << std::endl;
+                debian_packages.emplace_back(*resolved);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::erase_if(trace_.files, has_resolved);
+}
+
+void DockerfileTraceInterpreter::finalize() {
+    resolve_debian_packages();
+    resolve_r_packages();
+    resolve_ignored_files();
+
+    for (auto& info : trace_.files) {
+        std::cout << "unresolved: " << info.realpath.string() << std::endl;
+    }
+
+    create_dockerfile();
 }
 
 } // namespace backend
