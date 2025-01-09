@@ -1,5 +1,7 @@
 #include "util.hpp"
 
+#include <array>
+
 namespace util {
 
 std::string escape_cmd_arg(std::string const& arg) {
