@@ -2,8 +2,9 @@
 #include "../cFileOptHelpers.hpp"
 #include "../processSpawnHelper.hpp"
 #include "../stringHelpers.hpp"
-#include <cassert>
+#include "../util.hpp"
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 
 namespace {
@@ -47,7 +48,7 @@ resolvePackageFromDescription(const std::filesystem::path& filePath) {
                          "q(\"no\",0);"};
 
     auto rpkg =
-        spawnStdoutReadProcess(backend::Rpkg::executablePath, argv,
+        spawnStdoutReadProcess(backend::Rpkg::Rscript, argv,
                                []() noexcept { setlocale(LC_ALL, "C.UTF-8"); });
 
     enum {
@@ -244,10 +245,20 @@ backend::Rpkg::resolvePathToPackage(const std::filesystem::path& fullpath) {
 }
 
 std::unordered_set<std::filesystem::path> backend::Rpkg::getLibraryPaths() {
+    auto candidates = util::execute_command(
+        STR(R << " -q -s -e 'cat(.libPaths(), sep=\"\n\")'"));
+
+    std::istringstream iss{candidates};
     std::unordered_set<std::filesystem::path> paths;
-    for (auto& package : packageNameToData) {
-        paths.insert(package.whereLocated.parent_path());
+
+    for (std::string part; std::getline(iss, part, '\n');) {
+        fs::path path = part;
+
+        if (fs::exists(path)) {
+            paths.insert(path);
+        }
     }
+
     return paths;
 }
 
@@ -255,8 +266,10 @@ bool backend::Rpkg::areDependenciesPresent() {
     // Rscript --help. I could just check that the file exists somewhere in path
     // but that would involve path variable resolution and this lets the stdlib
     // handle things.
-    return checkExecutableExists(backend::Rpkg::executablePath,
-                                 ArgvWrapper{"--help"});
+    return checkExecutableExists(backend::Rpkg::Rscript,
+                                 ArgvWrapper{"--help"}) &&
+           checkExecutableExists(backend::Rpkg::Rscript,
+                                 ArgvWrapper{"--version"});
 }
 
 // this is assumed to be only called after we have resolved all other files.

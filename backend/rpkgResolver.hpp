@@ -1,4 +1,5 @@
 #pragma once
+#include "../common.hpp"
 #include "../memberTypeHashCompare.hpp"
 #include <filesystem>
 #include <optional>
@@ -138,7 +139,9 @@ struct TopSortIterator {
 
 struct Rpkg {
   public:
-    static inline const auto executablePath = std::string("Rscript");
+    static inline const std::string_view Rscript = "Rscript"sv;
+    static inline const std::string_view R = "R"sv;
+
     // This needs to be a member variable due to lifetime.
     // As a temporary it would have to be a part of TopSortIterator as created
     // tempoeraries get their lifetime extended in c++23 on only. But
