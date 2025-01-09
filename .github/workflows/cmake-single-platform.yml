@@ -44,7 +44,7 @@ jobs:
 
     - name: Build
       working-directory: ${{github.workspace}}/build
-      run: cmake --build
+      run: cmake --build .
 
     - name: Test
       working-directory: ${{github.workspace}}/build
