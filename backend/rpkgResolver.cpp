@@ -7,13 +7,12 @@
 #include <fstream>
 
 namespace {
-static const std::unordered_set<std::u8string_view> basePackages = {
-    /*
-    heuristics - description "License: Part of R 4.4.0", "Version: 4.4.0" where
+/*
+heuristics - description "License: Part of R 4.4.0", "Version: 4.4.0" where
 the number fits the version.install.packages("tcltk") -> Warning message:
 package �tcltk� is a base package, and should not be updated
-
 the packages are also located in the default R install dir.*/
+static const std::unordered_set<std::u8string_view> basePackages = {
     u8"base",     u8"datasets", u8"utils",   u8"grDevices", u8"tools",
     u8"graphics", u8"compiler", u8"stats",   u8"methods",   u8"grid",
     u8"parallel", u8"stats4",   u8"splines", u8"tcltk",
@@ -309,11 +308,11 @@ void backend::Rpkg::persist(std::ostream& dockerImage,
         // the file works.
 
         // this way the require should not conflict with the installed version.
-        result << "cores = min(parallel::detectCores(),4);"
+        result << "cores <- min(parallel::detectCores(), 4)"
                << std::endl // parallel is a part of the core
-               << "tmpDir <- tempdir();" << std::endl
-               << "install.packages(\"remotes\",lib=c(tmpDir));" << std::endl
-               << "require(\"remotes\",lib.loc = c(tmpDir)); " << std::endl;
+               << "tmpDir <- tempdir()" << std::endl
+               << "install.packages('remotes', lib = c(tmpDir))" << std::endl
+               << "require('remotes', lib.loc = c(tmpDir)) " << std::endl;
 
         // TODO: if we wanted to be fancy, instead get a vector of all the R
         // packages currently topsorted. Install these in parallel.
@@ -325,15 +324,19 @@ void backend::Rpkg::persist(std::ostream& dockerImage,
             if (package.isBaseRpackage) {
                 continue; // these cannot be installed
             }
+
+            std::string version = toNormal(package.packageVersion);
+            if (version != "NULL") {
+                version = "'" + version + "'";
+            }
             // this works due to a combination of things explained here
             // https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
             // and here
             // https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
-            result
-                << "install_version(\"" << toNormal(package.packageName)
-                << "\",\"" << toNormal(package.packageVersion) << "\""
-                << ",upgrade = \"never\", dependencies = FALSE, Ncpus = cores"
-                << "); " << std::endl;
+            result << "install_version('" << toNormal(package.packageName)
+                   << "', " << version
+                   << ", upgrade = 'never', dependencies = FALSE, Ncpus = cores"
+                   << ")" << std::endl;
             // unfortunatelly upgrade=never is not sufficient
             //  the package may depend on other packages which are not installed
             //  and such packages would then get installed at possibly higher

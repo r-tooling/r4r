@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <ranges>
 #include <sys/stat.h> //mkdirat
 #include <unistd.h>
 #include <unordered_map>
@@ -211,102 +212,6 @@ void appendSymlinkResult(std::unordered_set<absFilePath>& resultStore,
 } // namespace
 namespace backend {
 
-// void DockerfileTraceInterpreter::csv(absFilePath output) {
-//     using std::string_literals::operator""s;
-//     auto openedFile = std::ofstream{
-//         output, std::ios::openmode::_S_trunc |
-//                     std::ios::openmode::_S_out}; // c++ 23noreplace
-//     openedFile << "filename"
-//                << ","
-//                << "flags"
-//                << ","
-//                << "created"
-//                << ","
-//                << "deleted"
-//                << ", needsSubfolders"
-//                << ", source dpkg package"
-//                << ", source R package" << std::endl;
-//     for (auto& [path, info] :
-//          files) { // TODO: trace absolute paths as well as relative paths.
-//         auto flags = 0;
-//         for (auto& relative : info->accessibleAs) {
-//             if (relative.executable) {
-//                 flags |= fileAccessFlags::execute;
-//             }
-//             if (relative.flags) {
-//                 if ((*relative.flags & O_ACCMODE) == O_RDONLY) {
-//                     flags |= fileAccessFlags::read;
-//                 } else if ((*relative.flags & O_ACCMODE) == O_WRONLY) {
-//                     flags |= fileAccessFlags::write;
-//                 } else if ((*relative.flags & O_ACCMODE) == O_RDWR) {
-//                     flags |= fileAccessFlags::read | fileAccessFlags::write;
-//                 }
-//             }
-//         }
-//         openedFile << "\""
-//                    << CSV::replaceAll(info->realpath.string(), "\""s,
-//                    "\"\"\""s)
-//                    << "\""
-//                    << "," << flags_to_str(flags) << ","
-//                    << (info->wasInitiallyOnTheDisk.value_or(false) ? "F" :
-//                    "T")
-//                    << ","
-//                    << (info->isCurrentlyOnTheDisk.value_or(false) ? "F" :
-//                    "T")
-//                    << ","
-//                    << (info->requiresAllSubEntities.value_or(false) ? "T"
-//                                                                     : "F");
-//         // FIXME: dpkg
-//         // auto dpkg =
-//         //     optTransform(optionalResolve(dpkgResolver.resolvedPaths, path)
-//         //                      .value_or(std::nullopt),
-//         //                  [](const auto* package) {
-//         //                      return static_cast<std::u8string>(*package);
-//         //                  });
-//         // openedFile << "," << escapeForCSV(dpkg.value_or(u8""s));
-//
-//         auto rpkg =
-//             optTransform(optionalResolve(rpkgResolver.resolvedPaths, path)
-//                              .value_or(std::nullopt),
-//                          [](const auto* package) {
-//                              return static_cast<std::u8string>(*package);
-//                          });
-//         openedFile << "," << escapeForCSV(rpkg.value_or(u8""s));
-//         openedFile << std::endl;
-//     }
-// }
-
-// void DockerfileTraceInterpreter::report(absFilePath output) {
-//     auto report = std::ofstream{output, std::ios::openmode::_S_trunc |
-//                                             std::ios::openmode::_S_out};
-//     auto exec = getExecutedFiles();
-//     report << "Discovered " << files.size() << " different file dependencies"
-//            << std::endl;
-//     report << "Of those " << getUnmatchedFiles().size()
-//            << " were not installed using any form of package manager"
-//            << std::endl;
-//     // FIXME:
-//     // report << "DebPackage provides " <<
-//     dpkgResolver.packageNameToData.size()
-//     //        << " different packages the program depends on. "
-//     //        << " This does not include dependencies of the packages which
-//     were
-//     //        "
-//     //           "not directly used during the program runtime "
-//     //        << std::endl;
-//     report << "R provides " << rpkgResolver.packageNameToData.size()
-//            << " packages used directly and "
-//            << rpkgResolver.topSortedPackages().items.size()
-//            << " packages the program directly or indirectly depends on."
-//            << std::endl;
-//     report << "The program incuding itself executed " << exec.size()
-//            << " files. Namely:" << std::endl;
-//
-//     for (decltype(auto) it : exec) {
-//         report << it->realpath << std::endl;
-//     }
-// }
-
 void DockerfileTraceInterpreter::create_dockerfile() {
     auto df = std::ofstream{"Dockerfile", std::ios::trunc | std::ios::out};
 
@@ -318,66 +223,92 @@ void DockerfileTraceInterpreter::create_dockerfile() {
     // it ignores the fact a package can come from multiple repos
     // and that these repos need to be installed.
 
-    // install debian packages
-    if (!debian_packages.empty()) {
-        df << "ENV DEBIAN_FRONTEND=noninteractive\n";
-        df << "RUN apt-get update -y && \\\n";
-        df << "    apt-get install -y \\\n";
-
-        for (size_t i = 0; i < debian_packages.size(); ++i) {
-            auto const& pkg = debian_packages[i];
-            df << "      " << pkg.name << "=" << pkg.version;
-            if (i < debian_packages.size() - 1) {
-                df << " \\\n";
-            }
-        }
-        df << "\n\n";
-    }
+    install_debian_packages(df);
 
     // install R packages
     rpkg_resolver.persist(df, "install-r-packages.R");
 
-    // copy unmatched files: first create an archive, second copy the archive
-    // and unarchive it there in /
-    fs::path archive = "archive.tar";
+    copy_unmatched_files(df, "archive.tar");
+
+    // environments
+    if (!trace_.env.empty()) {
+        df << "ENV \\\n";
+        auto env =
+            trace_.env | std::views::transform(util::escape_env_var_definition);
+        util::print_collection(df, env, " \\\n  ");
+        df << "\n\n";
+    }
+
+    df << "RUN mkdir -p " << trace_.work_dir << "\n";
+    df << "WORKDIR " << trace_.work_dir << "\n\n";
+
+    // exec
+    df << "CMD ";
+    auto args = trace_.args | std::views::transform(util::escape_cmd_arg);
+    util::print_collection(df, args, " ");
+    df << "\n";
+
+    df.close();
+}
+
+void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
+    if (debian_packages.empty()) {
+        return;
+    }
+    df << "ENV DEBIAN_FRONTEND=noninteractive\n";
+    df << "RUN apt-get update -y && \\\n";
+    df << "    apt-get install -y \\\n";
+
+    for (size_t i = 0; i < debian_packages.size(); ++i) {
+        auto const& pkg = debian_packages[i];
+        df << "      " << pkg.name << "=" << pkg.version;
+        if (i < debian_packages.size() - 1) {
+            df << " \\\n";
+        }
+    }
+    df << "\n\n";
+}
+
+void DockerfileTraceInterpreter::copy_unmatched_files(std::ofstream& df,
+                                                      fs::path const& archive) {
     std::vector<fs::path> unmatched_files{trace_.files.size()};
     for (auto const& f : trace_.files) {
         auto const& path = f.realpath;
 
+        std::cout << "resolving: " << path << " to: ";
+
+        if (!f.wasInitiallyOnTheDisk) {
+            std::cout << "ignore - was not originally on the disk\n";
+            continue;
+        }
+
         if (!fs::exists(path)) {
-            std::cerr << "File no longer exist: " << path << std::endl;
+            std::cout << "ignore - no longer exists\n";
             continue;
         }
 
         if (!fs::is_regular_file(path)) {
-            std::cerr << "File is not a regular file: " << path << std::endl;
+            std::cout << "ignore - not a regular file\n";
             continue;
         }
 
         std::ifstream i{path, std::ios::in};
         if (!i) {
-            std::cerr << "Unable to open file: " << path << std::endl;
+            std::cout << "ignore - cannot by opened\n";
             continue;
         }
 
+        std::cout << "copy\n";
         unmatched_files.push_back(path);
     }
 
     if (!unmatched_files.empty()) {
         util::create_tar_archive(archive, unmatched_files);
         df << "COPY [" << archive << ", " << archive << "]\n";
-        df << "RUN tar xfv --absolute-names " << archive << " && rm -f "
+        df << "RUN tar xfv " << archive << " --absolute-names && rm -f "
            << archive << "\n";
         df << "\n\n";
     }
-
-    // environments
-
-    // work directory
-
-    // exec
-
-    df.close();
 }
 
 // void DockerfileTraceInterpreter::dockerImage(absFilePath output,
@@ -593,6 +524,12 @@ std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 //     }
 // }
 
+// FIXME: simplify the R package resolution
+// The main assumption here is that there is just one R, and we know which one
+// and how it is called. This is an OK assumption IMHO (eventually, it could be
+// parameterized). Then this could be simpler. We could ask R which are the
+// library locations, and only resolve packages from there. It does not make
+// sense to consider any other files.
 void DockerfileTraceInterpreter::resolve_r_packages() {
     auto links = symlinkList();
     if (!rpkg_resolver.areDependenciesPresent()) {
@@ -623,11 +560,17 @@ void DockerfileTraceInterpreter::resolve_ignored_files() {
     if (ignored.is_empty()) {
         ignored.insert("/dev", true);
         ignored.insert("/etc/ld.so.cache", true);
-        ignored.insert("/etc/passwd", true);
         ignored.insert("/etc/nsswitch.conf", true);
-        ignored.insert("/sys", true);
+        ignored.insert("/etc/passwd", true);
         ignored.insert("/proc", true);
+        ignored.insert("/sys", true);
+        // created by locale-gen
         ignored.insert("/usr/lib/locale/locale-archive", true);
+        // fonts should be installed from a package
+        ignored.insert("/usr/local/share/fonts", true);
+        // this might be a bit too drastic, but cache is usually not
+        // transferable anyway
+        ignored.insert("/var/cache", true);
     }
 
     std::erase_if(trace_.files, [&](middleend::file_info const& f) {
@@ -635,6 +578,22 @@ void DockerfileTraceInterpreter::resolve_ignored_files() {
         if (ignored.find_last_matching(path)) {
             std::cout << "resolving: " << path << " to: ignored" << std::endl;
             return true;
+        }
+        return false;
+    });
+
+    // ignore the .uuid files from fontconfig
+    static const std::unordered_set<fs::path> fontconfig_dirs = {
+        "/usr/share/fonts", "/usr/share/poppler", "/usr/share/texmf/fonts"};
+
+    std::erase_if(trace_.files, [&](middleend::file_info const& f) {
+        auto const& path = f.realpath;
+        for (auto const& d : fontconfig_dirs) {
+            if (util::is_sub_path(path, d)) {
+                if (path.filename() == ".uuid") {
+                    return true;
+                }
+            }
         }
         return false;
     });
@@ -703,10 +662,6 @@ void DockerfileTraceInterpreter::finalize() {
     resolve_debian_packages();
     resolve_r_packages();
     resolve_ignored_files();
-
-    for (auto& info : trace_.files) {
-        std::cout << "unresolved: " << info.realpath.string() << std::endl;
-    }
 
     create_dockerfile();
 }

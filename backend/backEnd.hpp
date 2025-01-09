@@ -39,5 +39,7 @@ class DockerfileTraceInterpreter {
     DockerfileTraceInterpreter(Trace const& trace) : trace_(trace) {}
 
     void finalize();
+    void copy_unmatched_files(std::ofstream& df, const fs::path& archive);
+    void install_debian_packages(std::ofstream& df);
 };
 } // namespace backend
