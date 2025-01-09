@@ -212,6 +212,9 @@ void appendSymlinkResult(std::unordered_set<absFilePath>& resultStore,
 } // namespace
 namespace backend {
 
+// FIXME: encapsulate the Dockerfile builder in a class which
+// when outputted can format it
+
 void DockerfileTraceInterpreter::create_dockerfile() {
     auto df = std::ofstream{"Dockerfile", std::ios::trunc | std::ios::out};
 
@@ -219,9 +222,7 @@ void DockerfileTraceInterpreter::create_dockerfile() {
     df << "FROM ubuntu:22.04"
        << "\n\n";
 
-    // FIXME: the main problem with this implementation is that
-    // it ignores the fact a package can come from multiple repos
-    // and that these repos need to be installed.
+    // FIXME: set the LANG environment variable before installing packages
 
     install_debian_packages(df);
 
@@ -233,8 +234,13 @@ void DockerfileTraceInterpreter::create_dockerfile() {
     // environments
     if (!trace_.env.empty()) {
         df << "ENV \\\n";
-        auto env =
-            trace_.env | std::views::transform(util::escape_env_var_definition);
+        std::vector<std::string> env;
+        env.reserve(trace_.env.size());
+
+        for (const auto& x : trace_.env) {
+            env.push_back(util::escape_env_var_definition(x));
+        }
+
         util::print_collection(df, env, " \\\n  ");
         df << "\n\n";
     }
@@ -252,6 +258,10 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 }
 
 void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
+    // FIXME: the main problem with this implementation is that
+    // it ignores the fact a package can come from multiple repos
+    // and that these repos need to be installed.
+
     if (debian_packages.empty()) {
         return;
     }
@@ -271,7 +281,9 @@ void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
 
 void DockerfileTraceInterpreter::copy_unmatched_files(std::ofstream& df,
                                                       fs::path const& archive) {
-    std::vector<fs::path> unmatched_files{trace_.files.size()};
+    std::vector<fs::path> unmatched_files;
+    unmatched_files.reserve(trace_.files.size());
+
     for (auto const& f : trace_.files) {
         auto const& path = f.realpath;
 
