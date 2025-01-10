@@ -10,6 +10,7 @@
 #include <cassert>
 
 #include <cstddef>
+#include <string>
 #include <sys/ptrace.h>
 #include <unistd.h>
 
@@ -17,6 +18,7 @@
 #include <cstdio>
 
 #include <fcntl.h> //open, close...
+#include <unordered_map>
 
 using std::size_t;
 
@@ -51,17 +53,29 @@ void fileOpenFail(int err) noexcept {
 }
 } // namespace
 
-void doAnalysis(
-    std::unordered_map<absFilePath, middleend::file_info>& fileInfos,
-    std::vector<std::string>& origEnv, std::vector<std::string>& origArgs,
-    std::filesystem::__cxx11::path& origWrkdir) {
+void do_analysis(
+    std::unordered_map<absFilePath, middleend::file_info> const& fileInfos,
+    std::vector<std::string> const& envs, std::vector<std::string> const& cmd,
+    fs::path const& work_dir) {
 
     std::vector<middleend::file_info> files;
     for (const auto& [_, file] : fileInfos) {
         files.push_back(file);
     }
 
-    backend::Trace trace{files, origEnv, origArgs, origWrkdir};
+    std::unordered_map<std::string, std::string> env;
+    for (const auto& e : envs) {
+        auto pos = e.find('=');
+        if (pos != std::string::npos) {
+            env[e.substr(0, pos)] = e.substr(pos + 1);
+        } else {
+            // FIXME: logging
+            std::cerr << "Invalid env variable: " << e << ": missing `=`"
+                      << std::endl;
+        }
+    }
+
+    backend::Trace trace{files, env, cmd, work_dir};
     backend::DockerfileTraceInterpreter interpreter{trace};
 
     interpreter.finalize();
@@ -72,7 +86,7 @@ void LoadAndAnalyse() {
     auto origEnv = CSV::deSerializeEnv("env.csv");
     auto origArgs = CSV::deSerializeEnv("args.csv");
     auto origWrkdir = CSV::deSerializeWorkdir("workdir.txt");
-    doAnalysis(fileInfos, origEnv, origArgs, origWrkdir);
+    do_analysis(fileInfos, origEnv, origArgs, origWrkdir);
 }
 
 int main(int argc, char* argv[]) {

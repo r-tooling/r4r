@@ -218,11 +218,18 @@ namespace backend {
 void DockerfileTraceInterpreter::create_dockerfile() {
     auto df = std::ofstream{"Dockerfile", std::ios::trunc | std::ios::out};
 
-    // TODO: shall we upgrade? 24.04 the latest LTS?
+    // TODO: shall we upgrade? To 24.04 the latest LTS?
+    // We could, but either we need to have a corresponding dev environment
     df << "FROM ubuntu:22.04"
        << "\n\n";
 
-    // FIXME: set the LANG environment variable before installing packages
+    // set the LANG environment variable before installing packages
+    auto lang = "C"s;
+    if (auto it = trace_.env.find("LANG"); it != trace_.env.end()) {
+        lang = it->second;
+        trace_.env.erase(it);
+    }
+    df << "ENV LANG=" << lang << "\n\n";
 
     install_debian_packages(df);
 
@@ -231,30 +238,56 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 
     copy_unmatched_files(df, "archive.tar");
 
-    // environments
-    if (!trace_.env.empty()) {
-        df << "ENV \\\n";
-        std::vector<std::string> env;
-        env.reserve(trace_.env.size());
-
-        for (const auto& x : trace_.env) {
-            env.push_back(util::escape_env_var_definition(x));
-        }
-
-        util::print_collection(df, env, " \\\n  ");
-        df << "\n\n";
-    }
+    set_environment_variables(df);
 
     df << "RUN mkdir -p " << trace_.work_dir << "\n";
     df << "WORKDIR " << trace_.work_dir << "\n\n";
 
     // exec
     df << "CMD ";
-    auto args = trace_.args | std::views::transform(util::escape_cmd_arg);
+    auto args = trace_.cmd | std::views::transform(util::escape_cmd_arg);
     util::print_collection(df, args, " ");
     df << "\n";
 
     df.close();
+}
+
+void DockerfileTraceInterpreter::set_environment_variables(std::ofstream& df) {
+    if (trace_.env.empty()) {
+        return;
+    }
+
+    static const std::unordered_set<std::string> ignored_env = {
+        "DBUS_SESSION_BUS_ADDRES",
+        "GPG_TTY",
+        "HOME",
+        "LOGNAME",
+        "OLDPWD",
+        "PWD",
+        "SSH_AUTH_SOCK",
+        "SSH_CLIENT",
+        "SSH_CONNECTION",
+        "SSH_TTY",
+        "USER",
+        "XDG_RUNTIME_DIR",
+        "XDG_SESSION_CLASS",
+        "XDG_SESSION_ID",
+        "XDG_SESSION_TYPE"};
+
+    std::vector<std::string> env;
+    env.reserve(trace_.env.size());
+
+    for (auto const& [k, v] : trace_.env) {
+        if (!ignored_env.contains(k)) {
+            env.push_back(STR(k << "=\"" << v << "\""));
+        }
+    }
+
+    std::sort(env.begin(), env.end());
+
+    df << "ENV \\\n  ";
+    util::print_collection(df, env, " \\\n  ");
+    df << "\n\n";
 }
 
 void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
@@ -265,14 +298,24 @@ void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
     if (debian_packages.empty()) {
         return;
     }
+
+    std::vector<DebPackage> packages(debian_packages.begin(),
+                                     debian_packages.end());
+
+    std::sort(packages.begin(), packages.end(),
+              [](const DebPackage& a, const DebPackage& b) {
+                  return std::tie(a.name, a.version) <
+                         std::tie(b.name, b.version);
+              });
+
     df << "ENV DEBIAN_FRONTEND=noninteractive\n";
     df << "RUN apt-get update -y && \\\n";
     df << "    apt-get install -y \\\n";
 
-    for (size_t i = 0; i < debian_packages.size(); ++i) {
-        auto const& pkg = debian_packages[i];
+    for (size_t i = 0; i < packages.size(); ++i) {
+        auto const& pkg = packages[i];
         df << "      " << pkg.name << "=" << pkg.version;
-        if (i < debian_packages.size() - 1) {
+        if (i < packages.size() - 1) {
             df << " \\\n";
         }
     }
@@ -319,7 +362,7 @@ void DockerfileTraceInterpreter::copy_unmatched_files(std::ofstream& df,
         df << "COPY [" << archive << ", " << archive << "]\n";
         df << "RUN tar xfv " << archive << " --absolute-names && rm -f "
            << archive << "\n";
-        df << "\n\n";
+        df << "\n";
     }
 }
 
@@ -660,7 +703,7 @@ void DockerfileTraceInterpreter::resolve_debian_packages() {
             if (auto* resolved = dpkg.lookup(p); resolved) {
                 std::cout << "resolving: " << path << " to: " << resolved->name
                           << std::endl;
-                debian_packages.emplace_back(*resolved);
+                debian_packages.insert(*resolved);
                 return true;
             }
         }

@@ -52,27 +52,6 @@ TEST(UtilTest, CreateTarArchiveTest) {
     fs::remove_all(temp_dir);
 }
 
-TEST(UtilTest, EscapeEnvVarDefinition) {
-    using namespace util;
-    // clang-format off
-    EXPECT_EQ(escape_env_var_definition("key=value"), "key=\"value\"");
-    EXPECT_EQ(escape_env_var_definition("key=\"value\""), "key=\"value\"");
-    EXPECT_EQ(escape_env_var_definition("key= value"), "key=\" value\"");
-    EXPECT_EQ(escape_env_var_definition("key="), "key=\"\"");
-    EXPECT_EQ(escape_env_var_definition("=value"), "=\"value\"");
-    EXPECT_EQ(escape_env_var_definition("key=value "), "key=\"value \"");
-    EXPECT_EQ(escape_env_var_definition("key=  value "), "key=\"  value \"");
-    EXPECT_EQ(escape_env_var_definition("key"), "key");
-    EXPECT_EQ(escape_env_var_definition("= "), "=\" \"");
-    EXPECT_EQ(escape_env_var_definition("key=\tvalue"), "key=\"\tvalue\"");
-    EXPECT_EQ(escape_env_var_definition("key=\n"), "key=\"\n\"");
-    EXPECT_EQ(escape_env_var_definition("key=\r"), "key=\"\r\"");
-    EXPECT_EQ(escape_env_var_definition("key=\f"), "key=\"\f\"");
-    EXPECT_EQ(escape_env_var_definition("key=\v"), "key=\"\v\"");
-    EXPECT_EQ(escape_env_var_definition("key= \t"), "key=\" \t\"");
-    // clang-format on
-}
-
 TEST(UtilTest, EscapeCmdArg) {
     using namespace util;
     // clang-format off

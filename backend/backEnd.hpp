@@ -11,8 +11,8 @@ namespace backend {
 
 struct Trace {
     std::vector<middleend::file_info> files;
-    std::vector<std::string> env;
-    std::vector<std::string> args;
+    std::unordered_map<std::string, std::string> env;
+    std::vector<std::string> cmd;
     fs::path work_dir;
 };
 
@@ -27,11 +27,12 @@ class DockerfileTraceInterpreter {
                                             const fs::path& scriptLocation);
 
     Trace trace_;
-    std::vector<DebPackage> debian_packages;
+    std::unordered_set<DebPackage> debian_packages;
 
     void resolve_r_packages();
     void resolve_debian_packages();
     void resolve_ignored_files();
+    void set_environment_variables(std::ofstream& df);
 
     void create_dockerfile();
 

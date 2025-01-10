@@ -4,6 +4,7 @@
 #include "../common.hpp"
 #include "../util.hpp"
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -13,6 +14,8 @@ namespace backend {
 struct DebPackage {
     std::string name;
     std::string version;
+
+    bool operator==(const DebPackage& other) const = default;
 };
 
 class DpkgDatabase {
@@ -31,3 +34,15 @@ class DpkgDatabase {
 };
 
 } // namespace backend
+
+namespace std {
+
+template <>
+struct hash<backend::DebPackage> {
+    size_t operator()(const backend::DebPackage& pkg) const noexcept {
+        hash<string> string_hasher;
+        return string_hasher(pkg.name) ^ (string_hasher(pkg.version) << 1);
+    }
+};
+
+} // namespace std

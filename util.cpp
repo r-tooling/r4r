@@ -33,23 +33,6 @@ std::string escape_cmd_arg(std::string const& arg) {
     return quoted_arg;
 }
 
-std::string escape_env_var_definition(std::string env) {
-    size_t pos = env.find('=');
-
-    if (pos != std::string_view::npos) {
-        if (pos + 1 >= env.length() || env[pos + 1] != '"') {
-            size_t last_non_ws = env.find_last_not_of(" \t\n\r\f\v");
-            if ((last_non_ws != std::string::npos && env[last_non_ws] != '"') ||
-                last_non_ws == std::string::npos) {
-                env.insert(pos + 1, "\"");
-                env += "\"";
-            }
-        }
-    }
-
-    return env;
-}
-
 bool is_sub_path(fs::path const& path, fs::path const& base) {
     const auto mismatch =
         std::mismatch(path.begin(), path.end(), base.begin(), base.end());
