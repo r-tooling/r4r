@@ -215,6 +215,25 @@ namespace backend {
 // FIXME: encapsulate the Dockerfile builder in a class which
 // when outputted can format it
 
+// FIXME: test symlinks - accessing a file via a symlink
+// FIXME: test accessing a file via $HOME
+// FIXME: test acessing a file via group permissions
+
+void DockerfileTraceInterpreter::set_locale(std::ofstream& df) {
+    std::optional<std::string> lang = "C"s;
+    if (auto it = trace_.env.find("LANG"); it != trace_.env.end()) {
+        lang = it->second;
+        trace_.env.erase(it);
+    }
+    if (lang) {
+        df << "ENV LANG=" << *lang << "\n\n"
+           << "RUN apt-get update -y && \\\n"
+           << "    apt-get install -y locales && \\\n"
+           << "    locale-gen $LANG && \\\n"
+           << "    dpkg-reconfigure locales\n\n";
+    }
+}
+
 void DockerfileTraceInterpreter::create_dockerfile() {
     auto df = std::ofstream{"Dockerfile", std::ios::trunc | std::ios::out};
 
@@ -223,14 +242,7 @@ void DockerfileTraceInterpreter::create_dockerfile() {
     df << "FROM ubuntu:22.04"
        << "\n\n";
 
-    // set the LANG environment variable before installing packages
-    auto lang = "C"s;
-    if (auto it = trace_.env.find("LANG"); it != trace_.env.end()) {
-        lang = it->second;
-        trace_.env.erase(it);
-    }
-    df << "ENV LANG=" << lang << "\n\n";
-
+    set_locale(df);
     install_debian_packages(df);
 
     // install R packages
@@ -700,7 +712,7 @@ void DockerfileTraceInterpreter::resolve_debian_packages() {
     auto has_resolved = [&](middleend::file_info const& f) -> bool {
         auto& path = f.realpath;
         for (auto& p : get_root_symlink(path)) {
-            if (auto* resolved = dpkg.lookup(p); resolved) {
+            if (auto* resolved = dpkg.lookup_by_path(p); resolved) {
                 std::cout << "resolving: " << path << " to: " << resolved->name
                           << std::endl;
                 debian_packages.insert(*resolved);

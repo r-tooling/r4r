@@ -67,12 +67,17 @@ DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
     return DpkgDatabase{packages, std::move(trie)};
 }
 
-DebPackage const* DpkgDatabase::lookup(fs::path const& path) const {
+DebPackage const* DpkgDatabase::lookup_by_path(fs::path const& path) const {
     auto* pkg = files_.find(path);
     if (pkg) {
         return &packages_.at(*pkg);
     }
     return {};
+}
+
+DebPackage const* DpkgDatabase::lookup_by_name(std::string const& name) const {
+    auto it = packages_.find(name);
+    return it == packages_.end() ? nullptr : &it->second;
 }
 
 } // namespace backend

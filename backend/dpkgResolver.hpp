@@ -26,7 +26,8 @@ class DpkgDatabase {
                  util::FilesystemTrie<std::string> files)
         : packages_{std::move(packages)}, files_{std::move(files)} {}
 
-    DebPackage const* lookup(fs::path const& path) const;
+    DebPackage const* lookup_by_path(fs::path const& path) const;
+    DebPackage const* lookup_by_name(std::string const& name) const;
 
   private:
     std::unordered_map<std::string, DebPackage> packages_;

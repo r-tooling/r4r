@@ -33,6 +33,7 @@ class DockerfileTraceInterpreter {
     void resolve_debian_packages();
     void resolve_ignored_files();
     void set_environment_variables(std::ofstream& df);
+    void set_locale(std::ofstream& df);
 
     void create_dockerfile();
 
