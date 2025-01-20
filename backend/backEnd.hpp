@@ -9,11 +9,27 @@
 
 namespace backend {
 
+struct GroupInfo {
+    gid_t gid;
+    std::string name;
+};
+
+struct UserInfo {
+    uid_t uid;
+    GroupInfo group;
+
+    std::string username;
+    std::string home_directory;
+    std::string shell;
+    std::vector<GroupInfo> groups;
+};
+
 struct Trace {
     std::vector<middleend::file_info> files;
     std::unordered_map<std::string, std::string> env;
     std::vector<std::string> cmd;
     fs::path work_dir;
+    UserInfo user;
 };
 
 class DockerfileTraceInterpreter {
@@ -32,8 +48,12 @@ class DockerfileTraceInterpreter {
     void resolve_r_packages();
     void resolve_debian_packages();
     void resolve_ignored_files();
+
     void set_environment_variables(std::ofstream& df);
     void set_locale(std::ofstream& df);
+    void create_user(std::ofstream& df);
+    void copy_unmatched_files(std::ofstream& df, const fs::path& archive);
+    void install_debian_packages(std::ofstream& df);
 
     void create_dockerfile();
 
@@ -41,7 +61,5 @@ class DockerfileTraceInterpreter {
     DockerfileTraceInterpreter(Trace const& trace) : trace_(trace) {}
 
     void finalize();
-    void copy_unmatched_files(std::ofstream& df, const fs::path& archive);
-    void install_debian_packages(std::ofstream& df);
 };
 } // namespace backend

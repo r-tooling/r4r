@@ -2,6 +2,7 @@
 
 #include "common.hpp"
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -17,7 +18,7 @@ std::string escape_env_var_definition(std::string env);
 std::string escape_cmd_arg(std::string const& arg);
 
 template <typename T, typename S>
-void print_collection(std::ostream& os, const T& collection, S sep) {
+void print_collection(std::ostream& os, T const& collection, S const& sep) {
     if (std::empty(collection)) {
         return;
     }
@@ -32,6 +33,13 @@ void print_collection(std::ostream& os, const T& collection, S sep) {
     }
 }
 
+template <typename T, typename S>
+std::string mk_string(T const& collection, S const& sep) {
+    std::ostringstream res;
+    print_collection(res, collection, sep);
+    return res.str();
+}
+
 template <typename FileCollection>
 void create_tar_archive(fs::path const& archive, FileCollection const& files) {
     FILE* temp_file = std::tmpfile();
@@ -44,8 +52,8 @@ void create_tar_archive(fs::path const& archive, FileCollection const& files) {
     }
 
     std::fflush(temp_file);
-    std::string command = "tar --absolute-names -cvf " + archive.string() +
-                          " --files-from=/dev/fd/" +
+    std::string command = "tar --absolute-names --preserve-permissions -cvf " +
+                          archive.string() + " --files-from=/dev/fd/" +
                           std::to_string(fileno(temp_file));
 
     try {

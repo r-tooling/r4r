@@ -10,8 +10,11 @@
 #include <cassert>
 
 #include <cstddef>
+#include <grp.h>
+#include <pwd.h>
 #include <string>
 #include <sys/ptrace.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -53,6 +56,53 @@ void fileOpenFail(int err) noexcept {
 }
 } // namespace
 
+backend::UserInfo get_user_info() {
+
+    uid_t uid = getuid(); // Get the user ID of the calling process
+    gid_t gid = getgid(); // Get the group ID of the calling process
+
+    // Retrieve the passwd struct for the user
+    passwd* pwd = getpwuid(uid);
+    if (!pwd) {
+        throw std::runtime_error("Failed to get passwd struct for UID " +
+                                 std::to_string(uid));
+    }
+
+    std::string username = pwd->pw_name;
+    std::string home_directory = pwd->pw_dir;
+    std::string shell = pwd->pw_shell;
+
+    // Retrieve primary group information
+    group* grp = getgrgid(gid);
+    if (!grp) {
+        throw std::runtime_error("Failed to get group struct for GID " +
+                                 std::to_string(gid));
+    }
+    backend::GroupInfo primary_group = {gid, grp->gr_name};
+
+    // Get the list of groups
+    int ngroups = 0;
+    getgrouplist(username.c_str(), gid, nullptr,
+                 &ngroups); // Get number of groups
+
+    std::vector<gid_t> group_ids(ngroups);
+    if (getgrouplist(username.c_str(), gid, group_ids.data(), &ngroups) == -1) {
+        throw std::runtime_error("Failed to get group list for user " +
+                                 username);
+    }
+
+    // Map group IDs to GroupInfo
+    std::vector<backend::GroupInfo> groups;
+    for (gid_t group_id : group_ids) {
+        group* grp = getgrgid(group_id);
+        if (grp) {
+            groups.push_back({group_id, grp->gr_name});
+        }
+    }
+
+    return {uid, primary_group, username, home_directory, shell, groups};
+}
+
 void do_analysis(
     std::unordered_map<absFilePath, middleend::file_info> const& fileInfos,
     std::vector<std::string> const& envs, std::vector<std::string> const& cmd,
@@ -75,7 +125,8 @@ void do_analysis(
         }
     }
 
-    backend::Trace trace{files, env, cmd, work_dir};
+    auto user = get_user_info();
+    backend::Trace trace{files, env, cmd, work_dir, user};
     backend::DockerfileTraceInterpreter interpreter{trace};
 
     interpreter.finalize();

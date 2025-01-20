@@ -226,12 +226,53 @@ void DockerfileTraceInterpreter::set_locale(std::ofstream& df) {
         trace_.env.erase(it);
     }
     if (lang) {
-        df << "ENV LANG=" << *lang << "\n\n"
-           << "RUN apt-get update -y && \\\n"
-           << "    apt-get install -y locales && \\\n"
-           << "    locale-gen $LANG && \\\n"
-           << "    dpkg-reconfigure locales\n\n";
+        df << "ENV LANG=" << *lang << "\n\n";
+        df << "RUN apt-get update -y &&  && \\\n"
+           << "apt-get install -y --no-install-recommend locales &&  && \\\n"
+           << "locale-gen $LANG &&  && \\\n"
+           << "update-locale LANG=$LAN && \\\n";
     }
+}
+
+void DockerfileTraceInterpreter::create_user(std::ofstream& df) {
+    auto const& user = trace_.user;
+    std::vector<std::string> cmds;
+
+    // create the primary group
+    cmds.emplace_back(
+        STR("groupadd -g " << user.group.gid << " " << user.group.name));
+
+    // create groups
+    for (const auto& group : user.groups) {
+        cmds.emplace_back(STR("(groupadd -g " << group.gid << " " << group.name
+                                              << " || groupmod -g " << group.gid
+                                              << " " << group.name << ")"));
+    }
+
+    // Prepare additional groups for `-G`
+    std::vector<std::string> groups;
+    for (const auto& group : user.groups) {
+        groups.push_back(group.name);
+    }
+    std::sort(groups.begin(), groups.end());
+
+    std::string group_list = util::mk_string(groups, ',');
+
+    // add user
+    cmds.emplace_back(STR("useradd -u "
+                          << user.uid << " -g " << user.group.gid
+                          << (group_list.empty() ? "" : " -G " + group_list)
+                          << " -d " << user.home_directory << " -s "
+                          << user.shell << " " << user.username));
+
+    // ensure home directory exists
+    cmds.emplace_back(STR("mkdir -p " << user.home_directory));
+    cmds.emplace_back(STR("chown " << user.username << ":" << user.group.name
+                                   << " " << user.home_directory));
+
+    df << "RUN ";
+    util::print_collection(df, cmds, " && \\\n    ");
+    df << "\n\n";
 }
 
 void DockerfileTraceInterpreter::create_dockerfile() {
@@ -242,8 +283,11 @@ void DockerfileTraceInterpreter::create_dockerfile() {
     df << "FROM ubuntu:22.04"
        << "\n\n";
 
+    df << "ENV DEBIAN_FRONTEND=noninteractive\n\n";
     set_locale(df);
     install_debian_packages(df);
+
+    create_user(df);
 
     // install R packages
     rpkg_resolver.persist(df, "install-r-packages.R");
@@ -254,6 +298,7 @@ void DockerfileTraceInterpreter::create_dockerfile() {
 
     df << "RUN mkdir -p " << trace_.work_dir << "\n";
     df << "WORKDIR " << trace_.work_dir << "\n\n";
+    df << "USER " << trace_.user.username << "\n";
 
     // exec
     df << "CMD ";
@@ -320,9 +365,8 @@ void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
                          std::tie(b.name, b.version);
               });
 
-    df << "ENV DEBIAN_FRONTEND=noninteractive\n";
     df << "RUN apt-get update -y && \\\n";
-    df << "    apt-get install -y \\\n";
+    df << "    apt-get install -y --no-install-recommend \\\n";
 
     for (size_t i = 0; i < packages.size(); ++i) {
         auto const& pkg = packages[i];
@@ -372,7 +416,7 @@ void DockerfileTraceInterpreter::copy_unmatched_files(std::ofstream& df,
     if (!unmatched_files.empty()) {
         util::create_tar_archive(archive, unmatched_files);
         df << "COPY [" << archive << ", " << archive << "]\n";
-        df << "RUN tar xfv " << archive << " --absolute-names && rm -f "
+        df << "RUN tar -x --file " << archive << " --absolute-names && rm -f "
            << archive << "\n";
         df << "\n";
     }
