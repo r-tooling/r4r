@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 project("r4r")
 
 add_executable(
-  r4r
+  ${PROJECT_NAME}
   backend/aptResolver.cpp
   backend/backEnd.cpp
   backend/dpkgResolver.cpp
@@ -38,13 +38,17 @@ add_executable(
   util.cpp
 )
 
-target_compile_options(r4r PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_executable(generateMacro dispatchMacro.cpp)
+
+install(TARGETS ${PROJECT_NAME})
 
 # ------------------------------------------------------------------------------
 # TESTING
 # ------------------------------------------------------------------------------
+
+set(INSTALL_GTEST OFF CACHE BOOL "Disable installation of GoogleTest" FORCE)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -57,15 +61,15 @@ FetchContent_MakeAvailable(googletest)
 enable_testing()
 
 add_executable(
-  r4r_test
+  ${PROJECT_NAME}_test
   tests/util_test.cpp
   util.cpp
 )
 
 target_link_libraries(
-  r4r_test
+  ${PROJECT_NAME}_test
   GTest::gtest_main
 )
 
 include(GoogleTest)
-gtest_discover_tests(r4r_test)
+gtest_discover_tests(${PROJECT_NAME}_test)
