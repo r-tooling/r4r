@@ -1,7 +1,7 @@
 #include "dpkgResolver.hpp"
+#include "../util.hpp"
 #include <fstream>
 #include <iostream>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -9,7 +9,7 @@
 // FIXME: rename file
 namespace backend {
 
-static const std::string NO_PKG_SENTINEL {"NO_PKG_SENTINEL"};
+static const std::string NO_PKG_SENTINEL{"NO_PKG_SENTINEL"};
 
 std::unordered_map<std::string, DebPackage> load_installed_packages() {
     std::unordered_map<std::string, DebPackage> package_map;
@@ -36,7 +36,7 @@ std::unordered_map<std::string, DebPackage> load_installed_packages() {
     return package_map;
 }
 
-void process_list_file(util::FilesystemTrie<std::string>& trie,
+void process_list_file(util::FileSystemTrie<std::string>& trie,
                        fs::path const& file) {
     std::ifstream infile(file);
     if (!infile.is_open()) {
@@ -53,7 +53,7 @@ void process_list_file(util::FilesystemTrie<std::string>& trie,
 }
 
 DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
-    util::FilesystemTrie<std::string> trie{NO_PKG_SENTINEL};
+    util::FileSystemTrie<std::string> trie{NO_PKG_SENTINEL};
 
     auto packages = load_installed_packages();
     for (auto& [pkg_name, _] : packages) {

@@ -2,24 +2,6 @@
 #include <fstream>
 #include <gtest/gtest.h>
 
-// Demonstrate some basic assertions.
-TEST(UtilTest, FilesystemTrie) {
-    util::FilesystemTrie<bool> trie{false};
-
-    trie.insert("/dev", true);
-    trie.insert("/dev/null", false);
-
-    //    auto p = [](bool value) { return value; };
-
-    EXPECT_TRUE(*trie.find("/dev"));
-    EXPECT_FALSE(*trie.find("/dev/null"));
-    EXPECT_EQ(trie.find("/dev/tty"), nullptr);
-
-    EXPECT_TRUE(trie.find_last_matching("/dev"));
-    EXPECT_FALSE(trie.find_last_matching("/dev/null"));
-    EXPECT_TRUE(trie.find_last_matching("/dev/tty"));
-}
-
 TEST(UtilTest, CreateTarArchiveTest) {
     auto temp_dir = fs::temp_directory_path() / "tar_archive_test";
     if (fs::exists(temp_dir)) {

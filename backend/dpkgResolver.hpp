@@ -2,7 +2,7 @@
 
 // FIXME: do not use this relative includes
 #include "../common.hpp"
-#include "../util.hpp"
+#include "../filesystemtrie.hpp"
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -23,7 +23,7 @@ class DpkgDatabase {
     static DpkgDatabase from_path(fs::path const& path = "/var/lib/dpkg/info/");
 
     DpkgDatabase(std::unordered_map<std::string, DebPackage> packages,
-                 util::FilesystemTrie<std::string> files)
+                 util::FileSystemTrie<std::string> files)
         : packages_{std::move(packages)}, files_{std::move(files)} {}
 
     DebPackage const* lookup_by_path(fs::path const& path) const;
@@ -31,7 +31,7 @@ class DpkgDatabase {
 
   private:
     std::unordered_map<std::string, DebPackage> packages_;
-    util::FilesystemTrie<std::string> files_;
+    util::FileSystemTrie<std::string> files_;
 };
 
 } // namespace backend

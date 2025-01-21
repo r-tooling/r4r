@@ -1,6 +1,7 @@
 #include "backEnd.hpp"
 #include "../common.hpp"
 #include "../csv/serialisedFileInfo.hpp"
+#include "../filesystemtrie.hpp"
 #include "../util.hpp"
 #include "dpkgResolver.hpp"
 #include "rpkgResolver.hpp"
@@ -666,7 +667,7 @@ void DockerfileTraceInterpreter::resolve_r_packages() {
 }
 
 void DockerfileTraceInterpreter::resolve_ignored_files() {
-    static util::FilesystemTrie<bool> ignored{false};
+    static util::FileSystemTrie<bool> ignored{false};
     if (ignored.is_empty()) {
         ignored.insert("/dev", true);
         ignored.insert("/etc/ld.so.cache", true);
@@ -685,7 +686,7 @@ void DockerfileTraceInterpreter::resolve_ignored_files() {
 
     std::erase_if(trace_.files, [&](middleend::file_info const& f) {
         auto const& path = f.realpath.string();
-        if (ignored.find_last_matching(path)) {
+        if (*ignored.find_last_matching(path)) {
             std::cout << "resolving: " << path << " to: ignored" << std::endl;
             return true;
         }

@@ -3,6 +3,7 @@
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 project("r4r")
 
@@ -60,9 +61,11 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
+file(GLOB TEST_SOURCES "tests/*_test.cpp")
+
 add_executable(
   ${PROJECT_NAME}_test
-  tests/util_test.cpp
+  ${TEST_SOURCES}
   util.cpp
 )
 
