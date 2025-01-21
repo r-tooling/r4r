@@ -66,6 +66,7 @@ void create_tar_archive(fs::path const& archive, FileCollection const& files) {
     }
 }
 
+// FIXME: keep a set o all unique values and let the keys be just pointers
 template <typename T>
 class FilesystemTrie {
   private:

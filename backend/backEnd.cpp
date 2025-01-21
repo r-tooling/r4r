@@ -642,13 +642,12 @@ std::unordered_set<absFilePath> DockerfileTraceInterpreter::symlinkList() {
 // library locations, and only resolve packages from there. It does not make
 // sense to consider any other files.
 void DockerfileTraceInterpreter::resolve_r_packages() {
-    auto links = symlinkList();
     if (!rpkg_resolver.areDependenciesPresent()) {
-        fprintf(stderr, "Unable to resolve R packages as the required "
-                        "dependencies are not present\n");
+        fprintf(stderr, "Not resolving R dependencies, R is not present\n");
         return;
     }
 
+    auto links = symlinkList();
     auto op = [&](middleend::file_info const& f) -> bool {
         // always resolve all dependencies, the time
         // overlap is marginal and I need to know the

@@ -23,9 +23,9 @@ inline void NULLOPTFUNCTION() noexcept {};
 /**
         Creates a new array of char * from an array of unique_ptrs to char *
 */
-inline std::unique_ptr<char* []> unpackArray(size_t nrItems,
-                                             std::unique_ptr<char[]>* param) {
-    std::unique_ptr<char* []> result { new char*[nrItems + 1] };
+inline std::unique_ptr<char*[]> unpackArray(size_t nrItems,
+                                            std::unique_ptr<char[]>* param) {
+    std::unique_ptr<char*[]> result{new char*[nrItems + 1]};
     for (size_t iter = 0; iter < nrItems; iter++) {
         result.get()[iter] = param[iter].get();
     }
@@ -37,8 +37,8 @@ inline std::unique_ptr<char* []> unpackArray(size_t nrItems,
    char*
 
 */
-inline std::unique_ptr<char[]> fromConstCharToCharPtr(
-    const std::string_view charData) {
+inline std::unique_ptr<char[]>
+fromConstCharToCharPtr(const std::string_view charData) {
     auto retval = std::make_unique_for_overwrite<char[]>(charData.size() + 1);
     memcpy(retval.get(), charData.data(), charData.size());
     retval.get()[charData.size()] = 0;
@@ -129,9 +129,7 @@ struct ArgvWrapper {
 };
 // unused in the end
 template <typename T>
-concept ArgvWrapperLike = requires {
-    requires true;
-};
+concept ArgvWrapperLike = requires { requires true; };
 // TODO: gracefully ahndle the asserts in this file.
 
 /*
@@ -158,90 +156,6 @@ inline ToBeClosedFd writeClosedPipe() {
     (void)pipe_res;
     return ToBeClosedFd{pipefd[0]};
 }
-/*
- * Exec fail nice messages.
- */
-inline void execFail(int error) {
-    switch (error) {
-    case E2BIG:
-        fprintf(stderr, "Too many args");
-        break;
-    case EACCES:
-        fprintf(stderr,
-                "  Search permission is denied on a component of the path "
-                "prefix of filename or the name of a script interpreter. \n"
-                "| The file or a script interpreter is not a regular file. \n"
-                "| Execute permission is denied for the file or a script or "
-                "ELF interpreter.  \n"
-                "| The file system is mounted noexec. \n");
-        break;
-    case EFAULT:
-        fprintf(stderr,
-                "Filename points outside your accessible address space. ");
-        break;
-    case EINVAL:
-        fprintf(stderr, "An ELF executable had more than one PT_INTERP segment "
-                        "(i.e., tried to name more than one interpreter). ");
-        break;
-    case EIO:
-        fprintf(stderr, "An I/O error occurred. ");
-        break;
-    case EISDIR:
-        fprintf(stderr, "An ELF interpreter was a directory. ");
-        break;
-    case ELIBBAD:
-        fprintf(stderr, "An ELF interpreter was not in a recognized format. ");
-        break;
-    case ELOOP:
-        fprintf(stderr,
-                "Too many symbolic links were encountered in resolving "
-                "filename or the name of a script or ELF interpreter. ");
-        break;
-    case EMFILE:
-        fprintf(stderr, "The process has the maximum number of files open. ");
-        break;
-    case ENAMETOOLONG:
-        fprintf(stderr, "Filename too long. ");
-        break;
-    case ENFILE:
-        fprintf(stderr, "The system limit on the total number of open files "
-                        "has been reached. . ");
-        break;
-    case ENOENT:
-        fprintf(stderr, "The file filename or a script or ELF interpreter does "
-                        "not exist, or a shared library needed for file or "
-                        "interpreter cannot be found. ");
-        break;
-    case ENOEXEC:
-        fprintf(stderr, "An executable is not in a recognized format, is for "
-                        "the wrong architecture, or has some other format "
-                        "error that means it cannot be executed. ");
-        break;
-    case ENOMEM:
-        fprintf(stderr, "Insufficient kernel memory was available.");
-        break;
-    case ENOTDIR:
-        fprintf(stderr, "A component of the path prefix of filename or a "
-                        "script or ELF interpreter is not a directory. ");
-        break;
-    case EPERM:
-        fprintf(
-            stderr,
-            "  The file system is mounted nosuid, the user is not the "
-            "superuser, and the file has the set-user-ID or set-group-ID bit "
-            "set \n"
-            "| The process is being traced, the user is not the superuser and "
-            "the file has the set - user - ID or set - group - ID bit set.  ");
-        break;
-    case ETXTBSY:
-        fprintf(stderr,
-                "Executable was open for writing by one or more processes.");
-        break;
-    default:
-        fprintf(stderr, "unknown error %d", error);
-        break;
-    }
-}
 
 /*
 Spawns a new process using fork - so the arguments can be freed right after the
@@ -256,26 +170,13 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD,
                           Callback callback) noexcept {
     static_assert(noexcept(callback()));
     pid_t pid = fork();
-    if (pid != 0) {      // master
-        assert(pid > 0); // TODO: error handling cannot fork.
+    if (pid != 0) {
         return pid;
-    } else { // I am the child
-        /**
-        The child inherits copies of the parent's set of open file
-          descriptors.
-
-          but the table should differ
-
-        This could in theory also be noe with clone and setting of correct
-        flags.
-        */
-        // These could be realistically constants but I doubt the overhead
-        // matters.
+    } else {
+        // child process
         int in = fileno(stdin);
         int out = fileno(stdout);
         int err = fileno(stderr);
-
-        auto tempErr = dup(err);
 
         dup2(inFD, in);
         dup2(outFD, out);
@@ -284,13 +185,10 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD,
         close_range(3, ~0U, CLOSE_RANGE_CLOEXEC);
 
         callback();
-        execvp(programPath,
-               argv); // return error if any, otherwise the child thread will
-                      // return the sub-program's error. WE SEARCH PATH HERE!
-        int error = errno;
-        dup2(tempErr, err); // restore old stderr to valid state.
-        fprintf(stderr, "Execv failed with errorcode %d :\n", error);
-        execFail(error);
+
+        execvp(programPath, argv);
+
+        fprintf(stderr, "execvp: %s (%d)\n", strerror(errno), errno);
 
         exit(255); // we cannot be allowed to return from here.
     }
@@ -346,6 +244,10 @@ spawnProcessWithSimpleArgs(int inFd, int outFD, int errFD,
 
     auto ret =
         spawnProcess(inFd, outFD, errFD, args.filename, args.argv, callback);
+
+    // FIXME: check for teh ret value and return -1 if it is -1 call perror and
+    // exit
+
     return ret;
 };
 /*
@@ -530,9 +432,9 @@ spawnStdoutReadProcess(const std::filesystem::path& programPath, argv_t&& argv,
     (void)pipe_res;
     assert(pipe_res != -1);
     auto pipe = readClosedPipe();
-    auto pid = spawnProcessWithSimpleArgs(pipe.get(), outfd[1],
-                                          /*errfd */ errfd, programPath,
-                                          argv.get(), argv.argc, callback);
+    auto pid =
+        spawnProcessWithSimpleArgs(pipe.get(), outfd[1], errfd, programPath,
+                                   argv.get(), argv.argc, callback);
     close(outfd[1]);
     close(errfd);
     return {pid, -1, outfd[0]};

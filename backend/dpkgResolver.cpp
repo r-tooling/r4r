@@ -9,6 +9,8 @@
 // FIXME: rename file
 namespace backend {
 
+static const std::string NO_PKG_SENTINEL {"NO_PKG_SENTINEL"};
+
 std::unordered_map<std::string, DebPackage> load_installed_packages() {
     std::unordered_map<std::string, DebPackage> package_map;
 
@@ -51,7 +53,7 @@ void process_list_file(util::FilesystemTrie<std::string>& trie,
 }
 
 DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
-    util::FilesystemTrie<std::string> trie{""};
+    util::FilesystemTrie<std::string> trie{NO_PKG_SENTINEL};
 
     auto packages = load_installed_packages();
     for (auto& [pkg_name, _] : packages) {
@@ -70,7 +72,10 @@ DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
 DebPackage const* DpkgDatabase::lookup_by_path(fs::path const& path) const {
     auto* pkg = files_.find(path);
     if (pkg) {
-        return &packages_.at(*pkg);
+        auto it = packages_.find(*pkg);
+        if (it != packages_.end()) {
+            return &it->second;
+        }
     }
     return {};
 }
