@@ -82,11 +82,7 @@ struct freeDeleter {
         return fp != nullptr;
     }
 };
-/*
-unique_ptr with a free call instead of delete
-*/
-template <class Value>
-using FreeUniquePtr = ToBeClosedGeneric<Value*, freeDeleter<Value>>;
+
 /*
 This is used to allow the internal pointer to be referenced and modified by the
 outside API. IF they decide to set it to nullptr, it is assumed to be deleted.

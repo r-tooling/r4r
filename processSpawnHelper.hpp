@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <linux/close_range.h>
 #include <memory>
 #include <unistd.h>
@@ -169,6 +170,9 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD,
                           const char* programPath, char* const argv[],
                           Callback callback) noexcept {
     static_assert(noexcept(callback()));
+
+    int parent_stderr = dup(fileno(stderr));
+
     pid_t pid = fork();
     if (pid != 0) {
         return pid;
@@ -188,11 +192,13 @@ inline pid_t spawnProcess(int inFD, int outFD, int errFD,
 
         execvp(programPath, argv);
 
-        fprintf(stderr, "execvp: %s (%d)\n", strerror(errno), errno);
+        dup2(parent_stderr, err);
+        std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";
 
         exit(255); // we cannot be allowed to return from here.
     }
 };
+
 /*
  * A simple wrapper for all the arguments a clone call needs.
  */

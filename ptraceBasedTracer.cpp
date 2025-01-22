@@ -6,6 +6,7 @@
 #include "toBeClosedFd.hpp"
 
 #include "./external/argparse.hpp"
+#include "util.hpp"
 
 #include <cassert>
 
@@ -186,21 +187,18 @@ int main(int argc, char* argv[]) {
         std::cout << program;
         return 255;
     }
+
     if (!program.is_used("--analyse")) {
         std::filesystem::path programName{args.front()};
+        std::filesystem::path currentPath = std::filesystem::current_path();
 
-        auto Tofree = FreeUniquePtr{get_current_dir_name()};
-
-        middleend::MiddleEndState state{Tofree.get(), environ, args};
-        Tofree.reset();
+        middleend::MiddleEndState state{currentPath, environ, args};
 
         args.erase(args.begin());
 
         std::cout << "Running " << programName << " with " << args.size()
                   << " arguments ";
-        for (auto& item : args) {
-            std::cout << item << " ";
-        }
+        util::print_collection(std::cout, args, ' ');
         std::cout << std::endl;
 
         ///  TRACING
@@ -252,19 +250,21 @@ int main(int argc, char* argv[]) {
         // at the termination of main as otherwise we could get confused by
         // getting sigchaild called from any other source.
         //  so not waiting for this PID is intentional.
-        (void)childPid;
+
+        std::cout << "Child process spawned with PID " << childPid << '\n';
+
         frontend::ptraceChildren(state);
-        wait(nullptr);
-        printf("Child process terminated! Analysing data.\n");
 
         CSV::serializeFiles(state.encounteredFilenames, "rawFiles.csv");
         CSV::serializeEnv(state.env, "env.csv");
         CSV::serializeEnv(state.args, "args.csv");
         CSV::serializeWorkdir(state.initialDir, "workdir.txt");
     }
+
     if (!program.is_used("--run")) {
         // ANALYSIS
         LoadAndAnalyse();
     }
+
     return 0;
 }

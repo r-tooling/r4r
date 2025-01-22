@@ -128,9 +128,8 @@ MiddleEndState::MiddleEndState(absFilePath initialWorkdir, char* initialEnv[],
     }
 }
 
-file_info*
-MiddleEndState::createUnbackedFD(absFilePath&& filename,
-                                 file_info::FileType type) {
+file_info* MiddleEndState::createUnbackedFD(absFilePath&& filename,
+                                            file_info::FileType type) {
     auto file = std::unique_ptr<file_info>(
         new file_info{.realpath = filename,
                       .accessibleAs = {},
@@ -145,8 +144,7 @@ MiddleEndState::createUnbackedFD(absFilePath&& filename,
     return raw;
 }
 
-file_info*
-MiddleEndState::createErrorFD(const char* errorMessage) {
+file_info* MiddleEndState::createErrorFD(const char* errorMessage) {
     fprintf(stderr, "%s", errorMessage);
     auto filepath = "unknownFD ERROR" + std::to_string(++errorCount);
     auto ptr = std::unique_ptr<file_info>(new file_info{
@@ -164,8 +162,7 @@ MiddleEndState::createErrorFD(const char* errorMessage) {
     return raw;
 }
 
-file_info*
-MiddleEndState::tryFindFile(const absFilePath& filename) const {
+file_info* MiddleEndState::tryFindFile(const absFilePath& filename) const {
     if (auto it = encounteredFilenames.find(filename);
         it != encounteredFilenames.end()) {
         auto& [_, info] = *it;
@@ -187,15 +184,12 @@ void MiddleEndState::trackNewProcess(pid_t process) {
     }
 
     auto fdTable = std::make_shared<MiddleEndState::FD_Table>();
-    FreeUniquePtr workdir{
-        get_current_dir_name()}; // is there a better heuristic?
+    std::filesystem::path currentPath = std::filesystem::current_path();
 
-    processToInfo.emplace(
-        process,
-        MiddleEndState::running_thread_state{
-            process,
-            std::make_shared<FS_Info>(std::filesystem::path{workdir.get()}),
-            std::move(fdTable)});
+    processToInfo.emplace(process,
+                          MiddleEndState::running_thread_state{
+                              process, std::make_shared<FS_Info>(currentPath),
+                              std::move(fdTable)});
     if (!firstProcessInitialised) {
         auto in = createUnbackedFD("stdin", file_info::pipe);
         fdTable->table.emplace(0, in);
@@ -302,9 +296,9 @@ void MiddleEndState::removeDirectory(pid_t process,
     } else {
         auto ptr = std::unique_ptr<file_info>(new file_info{
             .realpath = filename,
-            .accessibleAs = {decltype(std::declval<file_info>()
-                                          .accessibleAs)::value_type{
-                process, filename, 0, false, val.fsInfo->workdir}},
+            .accessibleAs =
+                {decltype(std::declval<file_info>().accessibleAs)::value_type{
+                    process, filename, 0, false, val.fsInfo->workdir}},
             .wasEverCreated = false,
             .wasEverDeleted = true,
             .isCurrentlyOnTheDisk = false,

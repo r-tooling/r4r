@@ -140,6 +140,53 @@ void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
     ProcessingData processesInfo{};
     SignalInfo status;
     bool initialSigtrap = true;
+
+    // FIXME: here we need to get some information about how the process
+    // terminates
+
+    /* Something like:
+
+      int status = 0;
+      std::string message;
+      bool abort = false;
+
+      if (waitpid(childPid, &status, 0) > 0) {
+          if (WIFEXITED(status) && !WEXITSTATUS(status)) {
+              message = "Child process terminated normally";
+          } else {
+              abort = true;
+
+              if (WIFEXITED(status) && WEXITSTATUS(status)) {
+                  auto exit_code = WEXITSTATUS(status);
+                  if (exit_code == 127) {
+                      message = "execvp failed";
+                  } else {
+                      message =
+                          STR("Child process terminated abnormally, exit code: "
+                              << exit_code);
+                  }
+              } else if (WIFSIGNALED(status)) {
+                  message = STR("Child process was terminated by signal "
+                                << WTERMSIG(status));
+              } else if (WIFSTOPPED(status)) {
+                  message = STR("Child process was stopped by signal "
+                                << WSTOPSIG(status));
+              } else {
+                  message = "Child process terminated abnormally";
+              }
+          }
+      } else {
+          abort = true;
+          perror("waitpid");
+          message = "spawning of the process failed";
+      }
+
+      std::cout << message << '\n';
+      if (abort) {
+          return -1;
+      }
+      */
+
     while (tryWait(status)) {
         registeredHandler = [&]() {
             fprintf(stderr, "SIGINT received. Passing to children. This is not "

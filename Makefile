@@ -40,6 +40,6 @@ docker-image: devcontainer
 .PHONY: install
 install: clean
 	mkdir -p $(BUILD_DIR)
-	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release.
+	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug .
 	cmake --build $(BUILD_DIR) --target r4r -j
 	cmake --install $(BUILD_DIR)
