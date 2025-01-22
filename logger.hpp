@@ -329,8 +329,8 @@ class Logger {
 class LogStream {
   public:
     LogStream(Logger& logger, LogLevel level)
-        : logger_{logger}, level_{level}, time_{logger_clock::now()},
-          stream_{} {}
+        : logger_{logger}, level_{level}, time_{logger_clock::now()}, stream_{},
+          logged_{false} {}
 
     ~LogStream() {
         LogEntry entry = {
@@ -338,7 +338,7 @@ class LogStream {
         logger_.log(entry);
     }
 
-    bool operator!() const { return logged_; }
+    bool operator!() const { return !logged_; }
 
     template <typename T>
     LogStream& operator<<(const T& value) {

@@ -1,18 +1,18 @@
 ﻿#include "ptraceMainLoop.hpp"
+#include "../common.hpp"
 #include "platformSpecificSyscallHandling.hpp"
-#include "ptraceHelpers.hpp"
-#include "syscallMapping.hpp"
 #include "syscalls/syscallHandlerMapperInline.hpp"
 
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
+#include <iostream>
 #include <memory>
-#include <string>
-#include <type_traits>
 
 #include <fcntl.h> //open, AT_FDCWD
+#include <stdexcept>
 #include <sys/ptrace.h>
 #include <sys/syscall.h>
 #include <sys/user.h>
@@ -72,134 +72,58 @@ struct SignalInfo {
     int extendedSignalInfo;
 };
 
-bool tryWait(SignalInfo& info) {
-    while (true) {
-        // tracing all children, they SHOULD be ptraced, but hey, what if they
-        // are not? In that case we at least get a ptrace error down the line.
-        // I could have kept using the waitid as it turns out. But it gives me
-        // no new data and all documentation talks about this... for waitid
-        // usage see fields described in
-        // https://www.man7.org/linux/man-pages/man2/sigaction.2.html
-        pid_t waitStatus = waitpid(-1, &info.status, 0);
+void tryWait(SignalInfo& info) {
+    // tracing all children, they SHOULD be ptraced, but hey, what if they
+    // are not? In that case we at least get a ptrace error down the line.
+    // I could have kept using the waitid as it turns out. But it gives me
+    // no new data and all documentation talks about this... for waitid
+    // usage see fields described in
+    // https://www.man7.org/linux/man-pages/man2/sigaction.2.html
+    pid_t w = waitpid(-1, &info.status, 0);
 
-        auto waitError = errno;
-        if (waitStatus == -1) {
-            if (waitStatus == EAGAIN) {
-                continue;
-            } else if (waitError == ECHILD) {
-                return false;
-            } else {
-                fprintf(stderr, "Wait error %d", waitError);
-                return false;
-            }
-        }
-        info.pid = waitStatus;
-        info.code = WIFEXITED(info.status)      ? SignalInfo::exit
-                    : WIFSIGNALED(info.status)  ? SignalInfo::signal
-                    : WIFSTOPPED(info.status)   ? SignalInfo::stop
-                    : WIFCONTINUED(info.status) ? SignalInfo::cont
-                                                : SignalInfo::err;
-        if (info.code == SignalInfo::stop) {
-            info.signalNr = WSTOPSIG(info.status);
-            info.extendedSignalInfo = info.status >> 8;
-        }
-        // TODO: add qquick cases for when we just proceed to wait as this is
-        // not a relevant handling point.
-        break;
+    if (w == -1) {
+        throw make_system_error(errno, "waitpid");
     }
-    return true;
-}
 
-// this si dirty but the handler does not actually take a user-provided
-// pointer... if this ever gets threading support, give me guards! I am global!
-std::optional<std::function<void()>> registeredHandler;
+    info.pid = w;
 
-void sigterm_handler(int signalNr, siginfo_t*, void*) {
-    (void)signalNr;
-    assert(signalNr == SIGTERM); //
-    if (registeredHandler)
-        registeredHandler.value()();
+    if (WIFEXITED(info.status)) {
+        info.code = SignalInfo::exit;
+        info.signalNr = WEXITSTATUS(info.status);
+    } else if (WIFSIGNALED(info.status)) {
+        info.code = SignalInfo::signal;
+        info.signalNr = WTERMSIG(info.status);
+    } else if (WIFSTOPPED(info.status)) {
+        info.code = SignalInfo::stop;
+        info.signalNr = WSTOPSIG(info.status);
+        info.extendedSignalInfo = info.status >> 8;
+    } else if (WIFCONTINUED(info.status)) {
+        info.code = SignalInfo::cont;
+    } else {
+        info.code = SignalInfo::err;
+    }
+
+    // TODO: add quick cases for when we just proceed to wait as this is
+    // not a relevant handling point.
 }
 
 } // namespace
 
 namespace frontend {
 
-void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
-    // TODO: how about exception handling? unregister in finally?
-    struct sigaction oldHandler;
-    struct sigaction handler;
-    handler.sa_sigaction = sigterm_handler;
-    handler.sa_flags = SA_RESETHAND | SA_SIGINFO;
-    handler.sa_mask = sigset_t{0};
+TraceResult trace(middleend::MiddleEndState& state, bool logSyscalls) {
 
-    auto handlerInstall = sigaction(SIGINT, &handler, &oldHandler);
-    if (handlerInstall == -1) {
-        fprintf(stderr, "Unable to set sigterm handler\n");
-    }
-    ProcessingData processesInfo{};
+    ProcessingData processes_info{};
     SignalInfo status;
-    bool initialSigtrap = true;
+    bool initial_sigtrap = true;
 
-    // FIXME: here we need to get some information about how the process
-    // terminates
-
-    /* Something like:
-
-      int status = 0;
-      std::string message;
-      bool abort = false;
-
-      if (waitpid(childPid, &status, 0) > 0) {
-          if (WIFEXITED(status) && !WEXITSTATUS(status)) {
-              message = "Child process terminated normally";
-          } else {
-              abort = true;
-
-              if (WIFEXITED(status) && WEXITSTATUS(status)) {
-                  auto exit_code = WEXITSTATUS(status);
-                  if (exit_code == 127) {
-                      message = "execvp failed";
-                  } else {
-                      message =
-                          STR("Child process terminated abnormally, exit code: "
-                              << exit_code);
-                  }
-              } else if (WIFSIGNALED(status)) {
-                  message = STR("Child process was terminated by signal "
-                                << WTERMSIG(status));
-              } else if (WIFSTOPPED(status)) {
-                  message = STR("Child process was stopped by signal "
-                                << WSTOPSIG(status));
-              } else {
-                  message = "Child process terminated abnormally";
-              }
-          }
-      } else {
-          abort = true;
-          perror("waitpid");
-          message = "spawning of the process failed";
-      }
-
-      std::cout << message << '\n';
-      if (abort) {
-          return -1;
-      }
-      */
-
-    while (tryWait(status)) {
-        registeredHandler = [&]() {
-            fprintf(stderr, "SIGINT received. Passing to children. This is not "
-                            "a deterministic action, take care.\n");
-            for (auto& child : processesInfo.processing) {
-                kill(child.first, SIGINT);
-            }
-        };
+    for (;;) {
+        tryWait(status);
 
         bool doPtrace = true;
         void* signalToPass = 0;
         {
-            auto& process = processesInfo.getProcesState(status.pid, state);
+            auto& process = processes_info.getProcesState(status.pid, state);
             switch (status.code) {
             case SignalInfo::exit:
             case SignalInfo::signal:
@@ -208,14 +132,27 @@ void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
                 // properly. Will error on any more syscalls but not error on
                 // trace new with the same PID
                 state.toBeDeleted(process.pid);
-                processesInfo.removeProcessHandling(process);
+                processes_info.removeProcessHandling(process);
                 doPtrace = false;
+
+                if (process.pid == state.programPid) {
+                    TraceResult::Kind kind;
+
+                    if (status.code == SignalInfo::exit) {
+                        kind = TraceResult::Exit;
+                    } else {
+                        kind = TraceResult::Signal;
+                    }
+
+                    return TraceResult(kind, status.signalNr);
+                }
+
                 break;
             case SignalInfo::stop: //(traced child has trapped);
                 if (status.signalNr != (SIGTRAP | 0x80)) {
                     if (status.signalNr == SIGTRAP &&
-                        initialSigtrap) { // manual sigtrap
-                        initialSigtrap =
+                        initial_sigtrap) { // manual sigtrap
+                        initial_sigtrap =
                             false; // we sigtrap once in the entry callback.
                         break;
                     }
@@ -231,23 +168,24 @@ void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
                             (SIGTRAP | (PTRACE_EVENT_EXEC << 8))) {
                         break;
                     } else {
-                        // this seems to be delivered when a new process spawns.
-                        // I have no clue how to catch this properly using
-                        // waitid. all non-ptrace signals should just get passed
-                        // along.
+                        // this seems to be delivered when a new process
+                        // spawns. I have no clue how to catch this properly
+                        // using waitid. all non-ptrace signals should just
+                        // get passed along.
                         signalToPass = reinterpret_cast<void*>(status.signalNr);
                     }
                 }
                 /*
                 WHY THIS WORKS?
 
-                Syscall-enter-stop and syscall-exit-stop are indistinguishable
-                from each other by the tracer. The tracer needs to keep track of
-                the sequence of ptrace-stops in order to not misinterpret
-                syscall-enter-stop as syscall-exit-stop or vice versa. The rule
-                is that syscall-enter-stop is always followed by
-                syscall-exit-stop, PTRACE_EVENT stop or the tracee's death; no
-                other kinds of ptrace-stop can occur in between.
+                Syscall-enter-stop and syscall-exit-stop are
+                indistinguishable from each other by the tracer. The tracer
+                needs to keep track of the sequence of ptrace-stops in order
+                to not misinterpret syscall-enter-stop as syscall-exit-stop
+                or vice versa. The rule is that syscall-enter-stop is always
+                followed by syscall-exit-stop, PTRACE_EVENT stop or the
+                tracee's death; no other kinds of ptrace-stop can occur in
+                between.
                 */
                 else if (process.syscallState == processState::inside) {
                     long val = getSyscallRetval(process.pid);
@@ -261,10 +199,10 @@ void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
                     process.syscallState = processState::outside;
                 } else if (process.syscallState == processState::outside) {
                     if (getSyscallRetval(process.pid) !=
-                        -ENOSYS) { // syscall entry TODO: this may be platform
-                                   // specific!!!!
-                        assert(false); // i was not a syscall or was not syscall
-                                       // entry point.
+                        -ENOSYS) {     // syscall entry TODO: this may be
+                                       // platform specific!!!!
+                        assert(false); // i was not a syscall or was not
+                                       // syscall entry point.
                     };
                     long syscall_id = getSyscallNr(process.pid);
                     process.syscallHandlerObj->create(syscall_id);
@@ -276,7 +214,8 @@ void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
                     process.syscallState = processState::inside;
                 }
                 break;
-            case SignalInfo::cont: //(child continued by SIGCONT) - dont care
+            case SignalInfo::cont: //(child continued by SIGCONT) - dont
+                                   // care
                 break;
             default:
                 assert(false);
@@ -291,8 +230,6 @@ void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls) {
             }
         }
     }
-    registeredHandler = std::nullopt;
-    sigaction(SIGTERM, &oldHandler, nullptr);
 }
 // intentionally here this way as otherwise the unique_ptr will not compile
 processState::processState(pid_t pid)
@@ -300,33 +237,35 @@ processState::processState(pid_t pid)
       syscallHandlerObj(new frontend::SyscallHandlers::HandlerWrapper{}){
           /*
           * TODO: get this value consistently for threads as well.
-          pidFD.reset(static_cast<fileDescriptor>(syscall(SYS_pidfd_open, pid,
-          0))); //cannot default init as that results in invalid errno auto err
-          = errno; if (!pidFD) { //error state fprintf(stderr, "pidfd_open(%d):
+          pidFD.reset(static_cast<fileDescriptor>(syscall(SYS_pidfd_open,
+          pid, 0))); //cannot default init as that results in invalid errno
+          auto err = errno; if (!pidFD) { //error state fprintf(stderr,
+          "pidfd_open(%d):
           ",pid); switch (err)
                   {
                   case EINVAL:
-                          fprintf(stderr, "pid is not valid.(or flags but that
-          is impossible) \n");
+                          fprintf(stderr, "pid is not valid.(or flags but
+          that is impossible) \n");
                           //TODO: this happens when a process is cloned with
-          CLONE_THREAD it seems to me. Needs to be researched more. As if only
-          the thread group leader could pass its fd over. break; case EMFILE:
-                          fprintf(stderr, "The per-process limit on the number
-          of open file descriptors has been reached\n"); break; case ENFILE:
-                          fprintf(stderr, "The system-wide limit on the total
-          number of open fileshas been reached.\n"); break; case ENODEV:
-                          fprintf(stderr, "The anonymous inode filesystem is not
+          CLONE_THREAD it seems to me. Needs to be researched more. As if
+          only the thread group leader could pass its fd over. break; case
+          EMFILE: fprintf(stderr, "The per-process limit on the number of
+          open file descriptors has been reached\n"); break; case ENFILE:
+                          fprintf(stderr, "The system-wide limit on the
+          total number of open fileshas been reached.\n"); break; case
+          ENODEV: fprintf(stderr, "The anonymous inode filesystem is not
           available in this kernel.\n"); break; case ENOMEM: fprintf(stderr,
           "Insufficient kernel memory was available.\n"); break; case ESRCH:
-                          fprintf(stderr, "The process specified by pid does not
-          exist.\n");
+                          fprintf(stderr, "The process specified by pid does
+          not exist.\n");
                           //todo: recover?
                           assert(false);
                           break;
                   case ENOSYS:
                           fprintf(stderr, "The kernel you are using does not
           have this syscall.\n"); break; default: fprintf(stderr, "Unknown
-          error: %d\n", err); assert(false); //todo; handle unknown error break;
+          error: %d\n", err); assert(false); //todo; handle unknown error
+          break;
                   }
           }*/
 

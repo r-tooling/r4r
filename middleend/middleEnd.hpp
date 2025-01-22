@@ -110,6 +110,7 @@ class MiddleEndState {
     std::vector<std::string> args;
     std::vector<std::string> env;
     std::string initialDir;
+    pid_t programPid;
 
     /*
             Used for relevant parts of the stat call
@@ -209,7 +210,7 @@ class MiddleEndState {
   public:
     MiddleEndState() = delete;
     MiddleEndState(absFilePath initialWorkdir, char* initailEnv[],
-                   std::vector<std::string> initialCommand);
+                   std::vector<std::string> initialCommand, pid_t programPid);
     MiddleEndState(const MiddleEndState&) = delete;
     MiddleEndState(MiddleEndState&&) = delete;
 

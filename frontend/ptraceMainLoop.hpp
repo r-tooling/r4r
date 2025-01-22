@@ -6,8 +6,10 @@
 #include <cassert>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <unistd.h>
 #include <unistd.h> //syscall fn
+#include <variant>
 
 #include "sys/user.h"
 
@@ -55,9 +57,28 @@ struct processState {
         return frontend::userPtrToString(pid, ptr);
     }
 };
-/*
- * Will wait untill all children have terminated
- * Assumes all children are ptraced.
- */
-void ptraceChildren(middleend::MiddleEndState& state, bool logSyscalls = false);
+
+class TraceResult {
+  public:
+    const enum Kind { Exit, Signal } kind;
+
+    TraceResult(Kind kind, int payload) : kind{kind}, payload_{payload} {}
+
+    int exit_code() const {
+        assert(kind == Exit);
+        return payload_;
+    }
+
+    int signal() const {
+        assert(kind == Signal);
+        return payload_;
+    }
+
+    bool is_successfull() const { return kind == Exit && payload_ == 0; }
+
+  private:
+    const int payload_;
+};
+
+TraceResult trace(middleend::MiddleEndState& state, bool logSyscalls = false);
 } // namespace frontend

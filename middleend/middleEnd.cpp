@@ -110,8 +110,9 @@ MiddleEndState::pidToObj(const pid_t process) const {
 }
 
 MiddleEndState::MiddleEndState(absFilePath initialWorkdir, char* initialEnv[],
-                               std::vector<std::string> args)
-    : args{std::move(args)}, initialDir(initialWorkdir.native()) {
+                               std::vector<std::string> args, pid_t programPid)
+    : args{std::move(args)}, initialDir(initialWorkdir.native()),
+      programPid{programPid} {
     auto ptr = std::unique_ptr<file_info>(
         new file_info{.realpath = initialWorkdir,
                       .accessibleAs = {},
