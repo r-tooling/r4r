@@ -35,7 +35,7 @@ add_executable(
   frontend/syscalls/timer.cpp
   frontend/syscalls/unlink.cpp
   middleend/middleEnd.cpp
-  ptraceBasedTracer.cpp
+  main.cpp
   util.cpp
 )
 

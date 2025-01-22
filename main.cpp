@@ -1,7 +1,7 @@
-﻿#include "ptraceBasedTracer.hpp"
-#include "backend/backEnd.hpp"
+﻿#include "backend/backEnd.hpp"
 #include "csv/serialisedFileInfo.hpp"
 #include "frontend/ptraceMainLoop.hpp"
+#include "logger.hpp"
 #include "processSpawnHelper.hpp"
 #include "toBeClosedFd.hpp"
 
@@ -196,6 +196,7 @@ int main(int argc, char* argv[]) {
 
         args.erase(args.begin());
 
+        // FIXME: isn't there a better way using std::format?
         std::cout << "Running " << programName << " with " << args.size()
                   << " arguments ";
         util::print_collection(std::cout, args, ' ');
