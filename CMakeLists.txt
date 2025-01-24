@@ -39,8 +39,6 @@ add_executable(
 
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
-add_executable(generateMacro dispatchMacro.cpp)
-
 install(TARGETS ${PROJECT_NAME})
 
 # ------------------------------------------------------------------------------
