@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include "./external/argparse.hpp"
+#include "cli.hpp"
 #include "syscall_monitor.hpp"
 #include "util.hpp"
 
@@ -80,7 +81,8 @@ class FileTracer : public SyscallListener {
     };
 
   public:
-    void on_syscall_entry(pid_t pid, std::uint64_t syscall, SyscallArgs args) override {
+    void on_syscall_entry(pid_t pid, std::uint64_t syscall,
+                          SyscallArgs args) override {
         auto it = kHandlers_.find(syscall);
         if (it == kHandlers_.end()) {
             return;
@@ -147,7 +149,7 @@ class FileTracer : public SyscallListener {
             result /= pathname;
         }
 
-        std::cout << "openat: " << pathname << std::endl;
+        // std::cout << "openat: " << pathname << std::endl;
         File* file = new File{result, fs::exists(result)};
         *state = reinterpret_cast<SyscallState>(file);
     }
@@ -164,8 +166,8 @@ class FileTracer : public SyscallListener {
         // TODO: register the file
         if (file) {
             if (ret_val >= 0) {
-                std::cout << "openat: " << file->path << " => " << ret_val
-                          << std::endl;
+                // std::cout << "openat: " << file->path << " => " << ret_val
+                //           << std::endl;
             }
             delete file;
         }
@@ -197,6 +199,62 @@ class FileTracer : public SyscallListener {
     };
 
     std::unordered_map<pid_t, PidState> state_;
+};
+
+class TracingTask : public Task {
+  public:
+    TracingTask(fs::path const& program_path,
+                std::vector<std::string> const& args)
+        : Task{"Tracing"}, program_path_(program_path), args_(args) {}
+
+  public:
+    bool run_task(std::ostream& output, ProgressBar& bar) override {
+        bar.set_infinite_mode(true);
+
+        Logger log{"tracer", "{elapsed_time} {level} {message}"};
+        log.add_sink(std::make_shared<std::ostream>(output.rdbuf()));
+
+        FileTracer tracer;
+        monitor_ =
+            std::make_unique<SyscallMonitor>(program_path_, args_, tracer);
+        monitor_->redirect_stdout(output);
+        monitor_->redirect_stderr(output);
+
+        auto result = monitor_->start();
+
+        switch (result.kind) {
+        case SyscallMonitor::Result::Failure:
+            LOG_ERROR(log) << "Failed to spawn the process";
+            return false;
+
+        case SyscallMonitor::Result::Signal:
+            LOG_ERROR(log) << "Program was terminated by signal: "
+                           << *result.detail;
+            return false;
+
+        case SyscallMonitor::Result::Exit:
+            int exit_code = *result.detail;
+            if (exit_code != 0) {
+                LOG_ERROR(log) << "Program exited with: " << exit_code;
+                return false;
+            }
+            LOG_INFO(log)
+                << "Program exited successfully, analyzing the results";
+        }
+
+        return true;
+    }
+
+    void stop() override {
+        if (monitor_) {
+            monitor_->stop();
+        }
+    }
+
+  private:
+    fs::path const& program_path_;
+    std::vector<std::string> const& args_;
+    std::unique_ptr<SyscallMonitor> monitor_;
 };
 
 int main(int argc, char* argv[]) {
@@ -234,13 +292,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::filesystem::path program_path{args.front()};
-    std::filesystem::path cwd{std::filesystem::current_path()};
-
-    LOG_INFO(log) << "Running: " << util::mk_string(args, ' ') << " in " << cwd;
-
-    FileTracer tracer;
-    SyscallMonitor monitor{program_path, args, tracer};
+    TaskManager manager{15};
 
     // Interrupt signals generated in the terminal are delivered to the
     // active process group, which here includes both parent and child. A
@@ -253,30 +305,17 @@ int main(int argc, char* argv[]) {
     register_signal_handlers([&](int sig) {
         LOG_WARN(log) << "Received signal " << strsignal(sig)
                       << ", stopping the tracing process...";
-        monitor.stop();
+        manager.stop();
         exit(1);
     });
 
-    auto result = monitor.start();
+    std::filesystem::path program_path{args.front()};
+    std::filesystem::path cwd{std::filesystem::current_path()};
 
-    switch (result.kind) {
-    case SyscallMonitor::Result::Failure:
-        LOG_ERROR(log) << "Failed to spawn the process";
-        return 1;
+    LOG_INFO(log) << "Running: " << util::mk_string(args, ' ') << " in " << cwd;
 
-    case SyscallMonitor::Result::Signal:
-        LOG_ERROR(log) << "Program was terminated by signal: "
-                       << *result.detail;
-        return 1;
-
-    case SyscallMonitor::Result::Exit:
-        int exit_code = *result.detail;
-        if (exit_code != 0) {
-            LOG_ERROR(log) << "Program exited with: " << exit_code;
-            return 1;
-        }
-        LOG_INFO(log) << "Program exited successfully, analyzing the results";
-    }
+    TracingTask tracing_task{program_path, args};
+    manager.run_task(tracing_task);
 
     return 0;
 }

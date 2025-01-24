@@ -34,10 +34,10 @@ class SyscallMonitor {
         std::optional<int> detail;
     };
 
-    SyscallMonitor(fs::path program_path, std::vector<std::string> const& args,
+    SyscallMonitor(fs::path const& program_path,
+                   std::vector<std::string> const& args,
                    SyscallListener& listener)
-        : program_path_{std::move(program_path)}, args_{args},
-          listener_{listener} {}
+        : program_path_{program_path}, args_{args}, listener_{listener} {}
 
     void redirect_stdout(std::ostream& os) { stdout_ = &os; }
 
@@ -86,8 +86,8 @@ class SyscallMonitor {
 
     static void forward_output(int read_fd, std::ostream& os, const char* tag);
 
-    const fs::path program_path_;
-    const std::vector<std::string> args_;
+    fs::path const& program_path_;
+    std::vector<std::string> const& args_;
     SyscallListener& listener_;
     std::ostream* stdout_{&std::cout};
     std::ostream* stderr_{&std::cerr};
