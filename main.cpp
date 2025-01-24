@@ -278,14 +278,5 @@ int main(int argc, char* argv[]) {
         LOG_INFO(log) << "Program exited successfully, analyzing the results";
     }
 
-    // // FIXME: refactor
-    // CSV::serializeFiles(state.encounteredFilenames, "rawFiles.csv");
-    // CSV::serializeEnv(state.env, "env.csv");
-    // CSV::serializeEnv(state.args, "args.csv");
-    // CSV::serializeWorkdir(state.initialDir, "workdir.txt");
-    //
-    // // ANALYSIS
-    // LoadAndAnalyse();
-
     return 0;
 }

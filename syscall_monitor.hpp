@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <optional>
 #include <sys/ptrace.h>
 #include <sys/uio.h>
@@ -54,9 +55,24 @@ class SyscallMonitor {
                                                 size_t max_len);
 
   private:
-    static const int kSpawnErrorExitCode = 254;
+    static const int kSpawnErrorExitCode{254};
+    static const long kPtraceOptions{
+        // Stop the tracee at the next fork(2) and automatically start
+        // tracing the newly forked process
+        PTRACE_O_TRACEFORK
+        // Stop the tracee at the next vfork(2) and automatically start
+        // tracing the newly forked process
+        | PTRACE_O_TRACEVFORK
+        // Stop the tracee at the next clone(2) and automatically start
+        // tracing the newly cloned process
+        | PTRACE_O_TRACECLONE
+        // Send a SIGKILL signal to the tracee if the tracer exits.
+        | PTRACE_O_EXITKILL
+        // When delivering system call traps, set bit 7 in
+        // the signal number (i.e., deliver SIGTRAP|0x80).
+        | PTRACE_O_TRACESYSGOOD};
 
-    static void set_ptrace_option_on_pid(pid_t pid);
+    static void set_ptrace_options(pid_t pid);
 
     static void trace_syscalls(pid_t pid);
 
@@ -152,10 +168,12 @@ SyscallMonitor::process_tracer(const util::Pipe& out, const util::Pipe& err) {
         std::thread([&] { forward_output(out.read_fd, *stdout_, "STDOUT"); });
 
     auto stderr_thread_ =
-        std::thread([&] { forward_output(out.read_fd, *stderr_, "STDERR"); });
+        std::thread([&] { forward_output(err.read_fd, *stderr_, "STDERR"); });
 
     wait_for_initial_stop();
-    set_ptrace_option_on_pid(tracee_pid_);
+
+    set_ptrace_options(tracee_pid_);
+
     trace_syscalls(tracee_pid_);
 
     auto exit_code = monitor();
@@ -174,7 +192,8 @@ SyscallMonitor::process_tracer(const util::Pipe& out, const util::Pipe& err) {
     return exit_code;
 }
 
-inline std::string SyscallMonitor::read_string_from_process(pid_t pid, uint64_t remote_addr,
+inline std::string
+SyscallMonitor::read_string_from_process(pid_t pid, uint64_t remote_addr,
                                          size_t max_len) {
     static unsigned long page_size = 0;
     if (page_size == 0) {
@@ -243,33 +262,26 @@ inline std::string SyscallMonitor::read_string_from_process(pid_t pid, uint64_t 
     return {buffer, read_total};
 }
 
-inline void SyscallMonitor::set_ptrace_option_on_pid(pid_t pid) {
-    static long options =
-        // Stop the tracee at the next fork(2) and automatically start
-        // tracing the newly forked process
-        PTRACE_O_TRACEFORK
-        // Stop the tracee at the next vfork(2) and automatically start
-        // tracing the newly forked process
-        | PTRACE_O_TRACEVFORK
-        // Stop the tracee at the next clone(2) and automatically start
-        // tracing the newly cloned process
-        | PTRACE_O_TRACECLONE
-        // Send a SIGKILL signal to the tracee if the tracer exits.
-        | PTRACE_O_EXITKILL
-        // When delivering system call traps, set bit 7 in
-        // the signal number (i.e., deliver SIGTRAP|0x80).
-        | PTRACE_O_TRACESYSGOOD;
-
-    if (ptrace(PTRACE_SETOPTIONS, pid, nullptr, (void*)(options)) == -1) {
-        throw make_system_error(errno, "Failed to set ptrace options on " +
-                                           std::to_string(pid));
+inline void SyscallMonitor::trace_syscalls(pid_t pid) {
+    if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
+        if (errno == ESRCH) {
+            // the process has already exited
+            return;
+        }
+        throw make_system_error(
+            errno, STR("Failed to start tracing syscalls on pis: " << pid));
     }
 }
 
-inline void SyscallMonitor::trace_syscalls(pid_t pid) {
-    if (ptrace(PTRACE_SYSCALL, pid, nullptr, nullptr) == -1) {
-        throw make_system_error(errno, "Failed to start tracing syscalls on " +
-                                           std::to_string(pid));
+inline void SyscallMonitor::set_ptrace_options(pid_t pid) {
+    if (ptrace(PTRACE_SETOPTIONS, pid, nullptr, (void*)(kPtraceOptions)) ==
+        -1) {
+        if (errno == ESRCH) {
+            // the process has already exited
+            return;
+        }
+        throw make_system_error(
+            errno, STR("Failed to set ptrace options on pid: " << pid));
     }
 }
 
@@ -333,20 +345,26 @@ inline SyscallMonitor::Result SyscallMonitor::monitor() {
     }
 }
 
+// Handles the stop signal to the tracee or any of its children
+// It has to call trace_syscalls on the pid to continue tracing
 inline void SyscallMonitor::handle_stop(pid_t pid, int status) {
     unsigned long event = (unsigned long)status >> 16;
+
     if (event == PTRACE_EVENT_FORK || event == PTRACE_EVENT_CLONE ||
         event == PTRACE_EVENT_VFORK) {
+
         // new child was created
+        // try to setup tracing
         pid_t child_pid = 0;
         if (ptrace(PTRACE_GETEVENTMSG, pid, nullptr, &child_pid) == -1) {
             // FIXME: logging
-            std::cerr << "Failed to get event message for new child: "
+            std::cerr << "Failed to get pid of the new child: "
                       << strerror(errno) << std::endl;
         } else {
-            set_ptrace_option_on_pid(child_pid);
-            trace_syscalls(child_pid);
+            set_ptrace_options(child_pid);
         }
+
+        trace_syscalls(child_pid);
     }
 
     // 0x80 comes from PTRACE_O_TRACESYSGOOD, so we know that it is a ptrace
