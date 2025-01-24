@@ -1,13 +1,10 @@
 #include <gtest/gtest.h>
 #include <sys/ptrace.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <cerrno>
-#include <csignal>
 #include <cstring>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -23,13 +20,13 @@ static const char TEST_STRING[] = "Hello from child!";
 // Utility function: Fork a child process that contains 'g_test_string' and
 // stops itself. Returns child's PID to parent, or throws on failure.
 static pid_t fork_and_stop_child() {
-    pid_t cpid = fork();
-    if (cpid < 0) {
+    pid_t pid = fork();
+    if (pid < 0) {
         throw std::runtime_error("fork() failed: " +
                                  std::string(std::strerror(errno)));
     }
 
-    if (cpid == 0) {
+    if (pid == 0) {
         // child
         ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
         raise(SIGSTOP);
@@ -37,14 +34,14 @@ static pid_t fork_and_stop_child() {
     } else {
         // parent: wait for child to stop
         int status = 0;
-        if (waitpid(cpid, &status, 0) < 0) {
+        if (waitpid(pid, &status, 0) < 0) {
             throw std::runtime_error("waitpid() failed: " +
                                      std::string(std::strerror(errno)));
         }
         if (!WIFSTOPPED(status)) {
             throw std::runtime_error("Child did not stop as expected.");
         }
-        return cpid;
+        return pid;
     }
 }
 

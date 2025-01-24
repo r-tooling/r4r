@@ -141,7 +141,7 @@ class FileTracer : public SyscallListener {
   public:
     FileTracer() {}
 
-    void on_syscall_entry(pid_t pid, int syscall, SyscallArgs args) override {
+    void on_syscall_entry(pid_t pid, std::uint64_t syscall, SyscallArgs args) override {
         auto it = kHandlers_.find(syscall);
         if (it == kHandlers_.end()) {
             return;

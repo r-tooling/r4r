@@ -1,7 +1,7 @@
 #pragma once
 #include "../common.hpp"
+#include "../dpkg_database.hpp"
 #include "../middleend/middleEnd.hpp"
-#include "dpkgResolver.hpp"
 #include "rpkgResolver.hpp"
 #include <ostream>
 #include <string>
@@ -43,7 +43,7 @@ class DockerfileTraceInterpreter {
                                             const fs::path& scriptLocation);
 
     Trace trace_;
-    std::unordered_set<DebPackage> debian_packages;
+    std::unordered_set<r4r::DebPackage> debian_packages;
 
     void resolve_r_packages();
     void resolve_debian_packages();

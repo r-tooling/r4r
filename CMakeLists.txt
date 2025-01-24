@@ -11,7 +11,6 @@ add_executable(
   ${PROJECT_NAME}
   backend/aptResolver.cpp
   backend/backEnd.cpp
-  backend/dpkgResolver.cpp
   backend/rpkgResolver.cpp
   csv/serialisedFileInfo.cpp
   frontend/ptraceMainLoop.cpp

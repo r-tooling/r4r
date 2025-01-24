@@ -1,9 +1,8 @@
 #include "backEnd.hpp"
 #include "../common.hpp"
 #include "../csv/serialisedFileInfo.hpp"
-#include "../filesystemtrie.hpp"
+#include "../filesystem_trie.hpp"
 #include "../util.hpp"
-#include "dpkgResolver.hpp"
 #include "rpkgResolver.hpp"
 
 #include <fcntl.h> //O_* flags
@@ -357,11 +356,11 @@ void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
         return;
     }
 
-    std::vector<DebPackage> packages(debian_packages.begin(),
-                                     debian_packages.end());
+    std::vector<r4r::DebPackage> packages(debian_packages.begin(),
+                                          debian_packages.end());
 
     std::sort(packages.begin(), packages.end(),
-              [](const DebPackage& a, const DebPackage& b) {
+              [](const r4r::DebPackage& a, const r4r::DebPackage& b) {
                   return std::tie(a.name, a.version) <
                          std::tie(b.name, b.version);
               });
@@ -751,7 +750,7 @@ std::vector<fs::path> get_root_symlink(const fs::path& path) {
 }
 
 void DockerfileTraceInterpreter::resolve_debian_packages() {
-    auto dpkg = DpkgDatabase::from_path();
+    auto dpkg = r4r::DpkgDatabase::system_database();
 
     auto has_resolved = [&](middleend::file_info const& f) -> bool {
         auto& path = f.realpath;

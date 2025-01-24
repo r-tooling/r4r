@@ -109,7 +109,8 @@ TEST(ProcessCwdTest, SpawnProcessInTmp) {
         chdir("/tmp");
         pause();
         _exit(0);
-    } else if (pid > 0) {
+    } else {
+        // parent
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
         auto child_cwd = util::get_process_cwd(pid);

@@ -1,4 +1,4 @@
-#include "../filesystemtrie.hpp" // Replace with actual path to your header file
+#include "../filesystem_trie.hpp"
 #include <gtest/gtest.h>
 
 class FileSystemTrieTest : public ::testing::Test {
@@ -67,14 +67,24 @@ TEST_F(FileSystemTrieTest, RootNodePersistence) {
 }
 
 TEST_F(FileSystemTrieTest, DefaultValuePropagation) {
-    trie.insert("/a/b/c", "value1");
+    util::FileSystemTrie trie{42};
+    EXPECT_EQ(*trie.default_value(), 42);
+    trie.insert("/a/b/c", 1);
 
-    auto result1 = trie.find("/a/b/c/d");
-    EXPECT_EQ(result1, nullptr);
+    auto r = trie.find("/a/b/c/d");
+    EXPECT_EQ(r, nullptr);
 
-    auto last_matching = trie.find_last_matching("/a/b/c/d");
-    ASSERT_NE(last_matching, nullptr);
-    EXPECT_EQ(*last_matching, "value1");
+    r = trie.find("/a/b/c");
+    EXPECT_EQ(*r, 1);
+
+    r = trie.find_last_matching("/a/b/c/d");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(*r, 1);
+
+    r = trie.find_last_matching("/a/b");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(r, trie.default_value());
+    EXPECT_EQ(*r, 42);
 }
 
 TEST_F(FileSystemTrieTest, UniqueValueStorage) {
