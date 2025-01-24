@@ -2,7 +2,6 @@
 #include "common.hpp"
 #include "csv/serialisedFileInfo.hpp"
 #include "logger.hpp"
-#include <bitset>
 #include <filesystem>
 #include <grp.h>
 
@@ -140,11 +139,11 @@ class FileTracer : public SyscallListener {
     };
 
   public:
-    FileTracer() : handlers_{register_handlers()} {}
+    FileTracer() {}
 
     void on_syscall_entry(pid_t pid, int syscall, SyscallArgs args) override {
-        auto it = handlers_.find(syscall);
-        if (it == handlers_.end()) {
+        auto it = kHandlers_.find(syscall);
+        if (it == kHandlers_.end()) {
             return;
         }
 
@@ -164,8 +163,8 @@ class FileTracer : public SyscallListener {
         auto node = state_.extract(pid);
         if (node) {
             auto [syscall, state] = node.mapped();
-            auto it = handlers_.find(syscall);
-            if (it == handlers_.end()) {
+            auto it = kHandlers_.find(syscall);
+            if (it == kHandlers_.end()) {
                 throw std::runtime_error(
                     STR("No exit handler for syscall: " << syscall));
             }
@@ -175,23 +174,13 @@ class FileTracer : public SyscallListener {
     }
 
   private:
-#define REG_SYSCALL_HANDLER(nr)                                                \
-    entry_handlers_[nr] = &FileTracer::syscall_##nr##_entry;                   \
-    exit_handlers_[nr] = &FileTracer::syscall_##nr##_exit;
-
-    static std::unordered_map<int, SyscallHandler> register_handlers() {
-        return std::unordered_map<int, SyscallHandler>{
-            {__NR_openat,
-             {&FileTracer::openat_entry, &FileTracer::openat_exit}},
-        };
-    }
-
-    void openat_entry(pid_t pid, SyscallArgs args, SyscallState* state) {
+    void syscall_openat_entry(pid_t pid, SyscallArgs args,
+                              SyscallState* state) {
         fs::path result;
-
         fs::path pathname =
             SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
 
+        // the logic comes from the behavior of openat(2):
         if (pathname.is_absolute()) {
             result = pathname;
         } else {
@@ -206,6 +195,7 @@ class FileTracer : public SyscallListener {
                 }
                 result = *d;
             } else {
+                // TODO: log warning
                 auto d = resolve_fd_filename(pid, dirfd);
                 if (!d) {
                     std::cerr << "Failed to resolve dirfd: " << dirfd
@@ -222,8 +212,8 @@ class FileTracer : public SyscallListener {
         *state = reinterpret_cast<SyscallState>(file);
     }
 
-    void openat_exit([[maybe_unused]] pid_t pid, SyscallRet retval,
-                     bool is_error, SyscallState* state) {
+    void syscall_openat_exit([[maybe_unused]] pid_t pid, SyscallRet retval,
+                             bool is_error, SyscallState* state) {
         (void)pid;
 
         if (is_error) {
@@ -267,8 +257,21 @@ class FileTracer : public SyscallListener {
         return {std::string(resolved_path)};
     }
 
+    static const inline std::unordered_map<int, SyscallHandler> kHandlers_{
+#define REG_SYSCALL_HANDLER(nr)                                                \
+    {                                                                          \
+        __NR_##nr, {                                                           \
+            &FileTracer::syscall_##nr##_entry,                                 \
+                &FileTracer::syscall_##nr##_exit                               \
+        }                                                                      \
+    }
+
+        REG_SYSCALL_HANDLER(openat),
+
+#undef REG_SYSCALL_HANDLER
+    };
+
     std::unordered_map<pid_t, PidState> state_;
-    const std::unordered_map<int, SyscallHandler> handlers_;
 };
 
 int main(int argc, char* argv[]) {

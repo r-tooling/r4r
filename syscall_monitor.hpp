@@ -145,20 +145,20 @@ class SyscallMonitor {
             return {};
         }
 
-        std::string result(max_len, ' ');
+        char* buffer = new char[max_len];
 
         size_t read_total = 0;
-        bool cont = true;
-        while (read_total < max_len && cont) {
-            // do not read past page boundary
-            // see the note in process_vm_readv(2)
+        while (read_total < max_len) {
+            // Do not read past page boundary. It might trigger EFAULT while the
+            // end of the string might have been already read in the good page.
+            // See the note in process_vm_readv(2)
             size_t read_next = max_len > page_size ? page_size : max_len;
             size_t page_offset = (remote_addr + read_next) & (page_size - 1);
             if (read_next > page_offset) {
                 read_next -= page_offset;
             }
 
-            auto local_start = result.data() + read_total;
+            auto local_start = buffer + read_total;
             iovec local_iov{.iov_base = local_start, .iov_len = read_next};
 
             auto remote_start =
@@ -177,32 +177,28 @@ class SyscallMonitor {
                     throw make_system_error(errno, "process_vm_readv");
                 } else if (errno == EFAULT) {
                     // we can't read further; return what we have so far
-                    cont = false;
+                    break;
                 } else {
                     throw make_system_error(errno, "process_vm_readv");
                 }
             }
             read_total += read;
 
-            // we might have some data (read_count >= 0)
-            // look for '\0' in the chunk
+            // we might have some data (read_count >= 0) look for '\0'
             for (char* c = local_start; c < local_start + read; ++c) {
                 if (*c == '\0') {
-                    size_t new_size = c - result.data();
-                    result.resize(new_size);
-                    return result;
+                    size_t size = c - buffer;
+                    return std::string(buffer, size);
                 }
             }
 
             if (static_cast<size_t>(read) != read_next) {
-                // could not read more
-                // and no '\0' found
+                // could not read more and no '\0' found
                 break;
             }
         }
 
-        result.resize(read_total);
-        return result;
+        return std::string(buffer, read_total);
     }
 
   private:
