@@ -196,7 +196,7 @@ class FileTracer : public SyscallListener {
                 result = *d;
             } else {
                 // TODO: log warning
-                auto d = resolve_fd_filename(pid, dirfd);
+                auto d = util::resolve_fd_filename(pid, dirfd);
                 if (!d) {
                     std::cerr << "Failed to resolve dirfd: " << dirfd
                               << std::endl;
@@ -232,7 +232,7 @@ class FileTracer : public SyscallListener {
     }
 
     void register_fd(pid_t pid, int fd) {
-        auto path = resolve_fd_filename(pid, fd);
+        auto path = util::resolve_fd_filename(pid, fd);
         if (!path) {
             // FIXME: logging
             std::cout << "Unable to registered fd: " << fd << std::endl;
@@ -240,21 +240,6 @@ class FileTracer : public SyscallListener {
         }
 
         std::cout << "Registered fd: " << fd << ": " << *path << std::endl;
-    }
-
-    static std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
-        fs::path path =
-            fs::path("/proc") / std::to_string(pid) / "fd" / std::to_string(fd);
-
-        char resolved_path[PATH_MAX];
-        ssize_t len =
-            readlink(path.c_str(), resolved_path, sizeof(resolved_path) - 1);
-        if (len == -1) {
-            return {};
-        }
-
-        resolved_path[len] = '\0'; // readlink does not null-terminate
-        return {std::string(resolved_path)};
     }
 
     static const inline std::unordered_map<int, SyscallHandler> kHandlers_{

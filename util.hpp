@@ -126,4 +126,6 @@ struct Pipe {
 Pipe create_pipe();
 
 std::optional<fs::path> get_process_cwd(pid_t pid);
+
+std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd);
 } // namespace util

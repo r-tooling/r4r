@@ -162,4 +162,19 @@ std::optional<fs::path> get_process_cwd(pid_t pid) {
     return fs::path(buffer);
 }
 
+std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
+    fs::path path =
+        fs::path("/proc") / std::to_string(pid) / "fd" / std::to_string(fd);
+
+    char resolved_path[PATH_MAX];
+    ssize_t len =
+        readlink(path.c_str(), resolved_path, sizeof(resolved_path) - 1);
+    if (len == -1) {
+        return {};
+    }
+
+    resolved_path[len] = '\0'; // readlink does not null-terminate
+    return {std::string(resolved_path)};
+}
+
 } // namespace util

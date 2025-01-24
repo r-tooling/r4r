@@ -120,3 +120,27 @@ TEST(ProcessCwdTest, SpawnProcessInTmp) {
         waitpid(pid, nullptr, 0);
     }
 }
+
+TEST(ResolveFdFilenameTest, Valid) {
+    char temp_filename[] = "/tmp/testfileXXXXXX";
+    int temp_fd = mkstemp(temp_filename);
+    ASSERT_NE(temp_fd, -1) << "Failed to create a temporary file.";
+
+    write(temp_fd, "test", 4);
+
+    auto resolved_path = util::resolve_fd_filename(getpid(), temp_fd);
+
+    ASSERT_TRUE(resolved_path.has_value());
+    EXPECT_EQ(resolved_path.value(), temp_filename);
+
+    close(temp_fd);
+    unlink(temp_filename);
+}
+
+TEST(ResolveFdFilenameTest, Invalid) {
+    int invalid_fd = -1;
+
+    auto resolved_path = util::resolve_fd_filename(getpid(), invalid_fd);
+
+    EXPECT_FALSE(resolved_path.has_value());
+}
