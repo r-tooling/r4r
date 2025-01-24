@@ -9,27 +9,12 @@
 
 namespace backend {
 
-struct GroupInfo {
-    gid_t gid;
-    std::string name;
-};
-
-struct UserInfo {
-    uid_t uid;
-    GroupInfo group;
-
-    std::string username;
-    std::string home_directory;
-    std::string shell;
-    std::vector<GroupInfo> groups;
-};
-
 struct Trace {
     std::vector<middleend::file_info> files;
     std::unordered_map<std::string, std::string> env;
     std::vector<std::string> cmd;
     fs::path work_dir;
-    UserInfo user;
+    util::UserInfo user;
 };
 
 class DockerfileTraceInterpreter {

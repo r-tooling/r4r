@@ -1,6 +1,5 @@
 #include "backEnd.hpp"
 #include "../common.hpp"
-#include "../csv/serialisedFileInfo.hpp"
 #include "../filesystem_trie.hpp"
 #include "../util.hpp"
 #include "rpkgResolver.hpp"

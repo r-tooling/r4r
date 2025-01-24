@@ -12,7 +12,6 @@ add_executable(
   backend/aptResolver.cpp
   backend/backEnd.cpp
   backend/rpkgResolver.cpp
-  csv/serialisedFileInfo.cpp
   frontend/ptraceMainLoop.cpp
   frontend/syscalls/chroot.cpp
   frontend/syscalls/clone.cpp

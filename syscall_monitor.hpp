@@ -50,7 +50,7 @@ class SyscallMonitor {
                                      const util::Pipe& err) const;
     Result process_tracer(const util::Pipe& out, const util::Pipe& err);
 
-    static std::string read_string_from_process(pid_t pid, long remote_addr,
+    static std::string read_string_from_process(pid_t pid, uint64_t remote_addr,
                                                 size_t max_len);
 
   private:
@@ -174,9 +174,8 @@ SyscallMonitor::process_tracer(const util::Pipe& out, const util::Pipe& err) {
     return exit_code;
 }
 
-inline std::string SyscallMonitor::read_string_from_process(pid_t pid,
-                                                            long remote_addr,
-                                                            size_t max_len) {
+inline std::string SyscallMonitor::read_string_from_process(pid_t pid, uint64_t remote_addr,
+                                         size_t max_len) {
     static unsigned long page_size = 0;
     if (page_size == 0) {
         unsigned long ps = sysconf(_SC_PAGE_SIZE);

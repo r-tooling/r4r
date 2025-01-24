@@ -1,5 +1,14 @@
 #include "util.hpp"
 #include "common.hpp"
+#include <cerrno>
+#include <cstdlib>
+#include <filesystem>
+#include <grp.h>
+#include <iostream>
+#include <pwd.h>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 #include <array>
 #include <optional>
@@ -177,4 +186,51 @@ std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
     return {std::string(resolved_path)};
 }
 
+UserInfo get_user_info() {
+
+    uid_t uid = getuid(); // Get the user ID of the calling process
+    gid_t gid = getgid(); // Get the group ID of the calling process
+
+    // Retrieve the passwd struct for the user
+    passwd* pwd = getpwuid(uid);
+    if (!pwd) {
+        throw std::runtime_error("Failed to get passwd struct for UID " +
+                                 std::to_string(uid));
+    }
+
+    std::string username = pwd->pw_name;
+    std::string home_directory = pwd->pw_dir;
+    std::string shell = pwd->pw_shell;
+
+    // primary group information
+    group* grp = getgrgid(gid);
+    if (!grp) {
+        throw std::runtime_error("Failed to get group struct for GID " +
+                                 std::to_string(gid));
+    }
+    GroupInfo primary_group = {gid, grp->gr_name};
+
+    // Get the list of groups
+    int n_groups = 0;
+    getgrouplist(username.c_str(), gid, nullptr,
+                 &n_groups); // Get number of groups
+
+    std::vector<gid_t> group_ids(n_groups);
+    if (getgrouplist(username.c_str(), gid, group_ids.data(), &n_groups) ==
+        -1) {
+        throw std::runtime_error("Failed to get group list for user " +
+                                 username);
+    }
+
+    // map gids to GroupInfo
+    std::vector<GroupInfo> groups;
+    for (gid_t group_id : group_ids) {
+        group* g = getgrgid(group_id);
+        if (g) {
+            groups.push_back({group_id, g->gr_name});
+        }
+    }
+
+    return {uid, primary_group, username, home_directory, shell, groups};
+}
 } // namespace util

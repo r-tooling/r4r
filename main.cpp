@@ -1,9 +1,7 @@
 ﻿#include "backend/backEnd.hpp"
 #include "common.hpp"
-#include "csv/serialisedFileInfo.hpp"
 #include "logger.hpp"
 #include <filesystem>
-#include <grp.h>
 
 #include "./external/argparse.hpp"
 #include "syscall_monitor.hpp"
@@ -11,10 +9,8 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <functional>
 #include <iostream>
 #include <memory>
-#include <pwd.h>
 #include <stdexcept>
 #include <string>
 
@@ -22,53 +18,6 @@
 
 #include <unordered_map>
 #include <vector>
-
-backend::UserInfo get_user_info() {
-
-    uid_t uid = getuid(); // Get the user ID of the calling process
-    gid_t gid = getgid(); // Get the group ID of the calling process
-
-    // Retrieve the passwd struct for the user
-    passwd* pwd = getpwuid(uid);
-    if (!pwd) {
-        throw std::runtime_error("Failed to get passwd struct for UID " +
-                                 std::to_string(uid));
-    }
-
-    std::string username = pwd->pw_name;
-    std::string home_directory = pwd->pw_dir;
-    std::string shell = pwd->pw_shell;
-
-    // Retrieve primary group information
-    group* grp = getgrgid(gid);
-    if (!grp) {
-        throw std::runtime_error("Failed to get group struct for GID " +
-                                 std::to_string(gid));
-    }
-    backend::GroupInfo primary_group = {gid, grp->gr_name};
-
-    // Get the list of groups
-    int ngroups = 0;
-    getgrouplist(username.c_str(), gid, nullptr,
-                 &ngroups); // Get number of groups
-
-    std::vector<gid_t> group_ids(ngroups);
-    if (getgrouplist(username.c_str(), gid, group_ids.data(), &ngroups) == -1) {
-        throw std::runtime_error("Failed to get group list for user " +
-                                 username);
-    }
-
-    // Map group IDs to GroupInfo
-    std::vector<backend::GroupInfo> groups;
-    for (gid_t group_id : group_ids) {
-        group* grp = getgrgid(group_id);
-        if (grp) {
-            groups.push_back({group_id, grp->gr_name});
-        }
-    }
-
-    return {uid, primary_group, username, home_directory, shell, groups};
-}
 
 void do_analysis(
     std::unordered_map<absFilePath, middleend::file_info> const& fileInfos,
@@ -92,19 +41,11 @@ void do_analysis(
         }
     }
 
-    auto user = get_user_info();
+    auto user = util::get_user_info();
     backend::Trace trace{files, env, cmd, work_dir, user};
     backend::DockerfileTraceInterpreter interpreter{trace};
 
     interpreter.finalize();
-}
-
-void LoadAndAnalyse() {
-    auto fileInfos = CSV::deSerializeFiles("rawFiles.csv");
-    auto origEnv = CSV::deSerializeEnv("env.csv");
-    auto origArgs = CSV::deSerializeEnv("args.csv");
-    auto origWrkdir = CSV::deSerializeWorkdir("workdir.txt");
-    do_analysis(fileInfos, origEnv, origArgs, origWrkdir);
 }
 
 // refactoring start
@@ -135,12 +76,10 @@ class FileTracer : public SyscallListener {
 
     struct SyscallHandler {
         void (FileTracer::*entry)(pid_t, SyscallArgs, SyscallState*);
-        void (FileTracer::*exit)(pid_t, SyscallRet, bool, SyscallState*);
+        void (FileTracer::*exit)(pid_t, SyscallRet, bool, SyscallState const*);
     };
 
   public:
-    FileTracer() {}
-
     void on_syscall_entry(pid_t pid, std::uint64_t syscall, SyscallArgs args) override {
         auto it = kHandlers_.find(syscall);
         if (it == kHandlers_.end()) {
@@ -159,7 +98,8 @@ class FileTracer : public SyscallListener {
         }
     }
 
-    void on_syscall_exit(pid_t pid, SyscallRet retval, bool is_error) override {
+    void on_syscall_exit(pid_t pid, SyscallRet ret_val,
+                         bool is_error) override {
         auto node = state_.extract(pid);
         if (node) {
             auto [syscall, state] = node.mapped();
@@ -169,7 +109,7 @@ class FileTracer : public SyscallListener {
                     STR("No exit handler for syscall: " << syscall));
             }
             auto handler = it->second;
-            (this->*(handler.exit))(pid, retval, is_error, &state);
+            (this->*(handler.exit))(pid, ret_val, is_error, &state);
         }
     }
 
@@ -212,8 +152,8 @@ class FileTracer : public SyscallListener {
         *state = reinterpret_cast<SyscallState>(file);
     }
 
-    void syscall_openat_exit([[maybe_unused]] pid_t pid, SyscallRet retval,
-                             bool is_error, SyscallState* state) {
+    void syscall_openat_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
+                             bool is_error, SyscallState const* state) {
         (void)pid;
 
         if (is_error) {
@@ -223,8 +163,8 @@ class FileTracer : public SyscallListener {
         auto file = reinterpret_cast<File*>(*state);
         // TODO: register the file
         if (file) {
-            if (retval >= 0) {
-                std::cout << "openat: " << file->path << " => " << retval
+            if (ret_val >= 0) {
+                std::cout << "openat: " << file->path << " => " << ret_val
                           << std::endl;
             }
             delete file;
@@ -242,7 +182,7 @@ class FileTracer : public SyscallListener {
         std::cout << "Registered fd: " << fd << ": " << *path << std::endl;
     }
 
-    static const inline std::unordered_map<int, SyscallHandler> kHandlers_{
+    static const inline std::unordered_map<uint64_t, SyscallHandler> kHandlers_{
 #define REG_SYSCALL_HANDLER(nr)                                                \
     {                                                                          \
         __NR_##nr, {                                                           \
@@ -307,7 +247,7 @@ int main(int argc, char* argv[]) {
     // signal manually generated and sent to an individual process (perhaps
     // with kill) will be delivered only to that process, regardless of
     // whether it is the parent or child. That is why we need to register a
-    // signal handler that will terminate the the tracee when the tracer
+    // signal handler that will terminate the tracee when the tracer
     // gets killed.
 
     register_signal_handlers([&](int sig) {
@@ -325,7 +265,8 @@ int main(int argc, char* argv[]) {
         return 1;
 
     case SyscallMonitor::Result::Signal:
-        LOG_ERROR(log) << "Program was termined by signal: " << *result.detail;
+        LOG_ERROR(log) << "Program was terminated by signal: "
+                       << *result.detail;
         return 1;
 
     case SyscallMonitor::Result::Exit:
