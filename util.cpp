@@ -1,10 +1,9 @@
 #include "util.hpp"
+#include "common.hpp"
 
 #include <array>
-#include <cassert>
 #include <optional>
 #include <sys/wait.h>
-#include <system_error>
 #include <thread>
 
 namespace util {
@@ -146,6 +145,21 @@ Pipe create_pipe() {
         throw make_system_error(errno, "pipe");
     }
     return {fds[0], fds[1]};
+}
+
+std::optional<fs::path> get_process_cwd(pid_t pid) {
+    if (pid <= 0) {
+        throw std::invalid_argument("Invalid PID.");
+    }
+
+    std::string path = "/proc/" + std::to_string(pid) + "/cwd";
+    char buffer[PATH_MAX];
+    ssize_t len = readlink(path.c_str(), buffer, sizeof(buffer) - 1);
+    if (len == -1) {
+        return {};
+    }
+    buffer[len] = '\0';
+    return fs::path(buffer);
 }
 
 } // namespace util

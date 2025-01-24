@@ -61,7 +61,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-file(GLOB TEST_SOURCES "tests/*_test.cpp")
+file(GLOB TEST_SOURCES "tests/*.cpp")
 
 add_executable(
   ${PROJECT_NAME}_test

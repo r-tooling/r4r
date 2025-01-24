@@ -97,3 +97,26 @@ TEST(CollectionToCArrayTest, StringTest) {
     }
     ASSERT_EQ(c_arr[3], nullptr);
 }
+
+TEST(ProcessCwdTest, SpawnProcessInTmp) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        throw std::runtime_error("fork() failed: " +
+                                 std::string(strerror(errno)));
+    }
+    if (pid == 0) {
+        // child
+        chdir("/tmp");
+        pause();
+        _exit(0);
+    } else if (pid > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        auto child_cwd = util::get_process_cwd(pid);
+        EXPECT_TRUE(child_cwd.has_value());
+        EXPECT_EQ(*child_cwd, "/tmp");
+
+        kill(pid, SIGKILL);
+        waitpid(pid, nullptr, 0);
+    }
+}
