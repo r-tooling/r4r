@@ -4,17 +4,18 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <iostream>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
+// TODO: upgrade to ubuntu:24.04
 #ifdef USE_STD_FORMAT
 #include <format>
 #endif
@@ -82,14 +83,13 @@ class LogPatternToken {
         }
     }
 
-    Kind kind() const { return kind_; }
+    [[nodiscard]] Kind kind() const { return kind_; }
 
-    std::string payload() const {
+    [[nodiscard]] std::string payload() const {
         if (payload_.has_value()) {
             return *payload_;
         } else {
-            // FIXME: say which tokey STR macro
-            throw std::runtime_error("Token does not have paylaod");
+            throw std::runtime_error("Token does not have payload");
         }
     }
 
@@ -113,7 +113,7 @@ class LogPatternToken {
                       {"white", "\033[37m"},  {"reset", "\033[0m"}};
 
     friend std::ostream& operator<<(std::ostream& os,
-                                    const LogPatternToken& token) {
+                                    LogPatternToken const& token) {
         os << "LogPatternToken { kind: "
            << keywords_[static_cast<size_t>(token.kind_)];
         if (token.kind_ == Kind::Text && token.payload_.has_value()) {
@@ -125,13 +125,9 @@ class LogPatternToken {
 };
 
 class LogPatternParser {
-    const std::string_view pattern_;
-    const char* pos;
-    const char* const end;
-
   public:
     explicit LogPatternParser(std::string_view pattern)
-        : pattern_{pattern}, pos{pattern.begin()}, end{pattern.end()} {}
+        : pos{pattern.begin()}, end{pattern.end()} {}
 
     std::vector<LogPatternToken> parse() {
         std::vector<LogPatternToken> tokens;
@@ -193,7 +189,7 @@ class LogPatternParser {
         if (kind) {
             // past the closing '}'
             pos++;
-            return LogPatternToken(*kind);
+            return *kind;
         } else {
 #ifdef USE_STD_FORMAT
             throw std::runtime_error(std::format("Unknown keyword: {}", kw));
@@ -203,30 +199,39 @@ class LogPatternParser {
         }
     }
 
-    bool eof() const { return pos == end; }
+    [[nodiscard]] bool eof() const { return pos == end; }
+
+    const char* pos;
+    const char* const end;
 };
 
 class Logger {
   public:
-    Logger(std::string name, std::string const& pattern = "{message}")
+    explicit Logger(std::string name, std::ostream& sink = std::cout,
+                    std::string const& pattern = "{message}")
         : name_(std::move(name)) {
         set_pattern(pattern);
+        set_sink(sink);
     }
 
-    void add_sink(std::shared_ptr<std::ostream> sink) {
-        std::lock_guard lock(mutex_);
-        sinks_.push_back(sink);
+    Logger(std::string const& name, std::string const& pattern)
+        : Logger{name, std::cout, pattern} {}
+
+    Logger(std::string name, Logger const& log)
+        : name_{name}, patterns_{log.patterns_}, sinks_{log.sinks_} {}
+
+    void set_sink(LogLevel level, std::ostream& sink) {
+        sinks_[static_cast<int>(level)] = &sink;
     }
 
-    void remove_sink(std::shared_ptr<std::ostream> sink) {
-        std::lock_guard lock(mutex_);
-        sinks_.erase(std::remove(sinks_.begin(), sinks_.end(), sink),
-                     sinks_.end());
+    void set_sink(std::ostream& sink) {
+        for (size_t i = 0; i < LogLevelCount; i++) {
+            set_sink(static_cast<LogLevel>(i), sink);
+        }
     }
 
     void set_pattern(LogLevel level, std::string const& pattern) {
         auto tokens = LogPatternParser(pattern).parse();
-        std::lock_guard lock(mutex_);
         patterns_[static_cast<int>(level)] = tokens;
     }
 
@@ -234,6 +239,19 @@ class Logger {
         for (size_t i = 0; i < LogLevelCount; i++) {
             set_pattern(static_cast<LogLevel>(i), pattern);
         }
+    }
+
+    [[nodiscard]] bool is_enabled(LogLevel level) const {
+        std::uint8_t n = 1 << static_cast<int>(level);
+        return (enabled_levels_ & n) == n;
+    }
+
+    void enable(LogLevel level) {
+        enabled_levels_ |= 1 << static_cast<int>(level);
+    }
+
+    void disable(LogLevel level) {
+        enabled_levels_ ^= 1 << static_cast<int>(level);
     }
 
 #ifdef USE_STD_FORMAT
@@ -259,10 +277,12 @@ class Logger {
 #endif
 
   private:
-    template <typename... Args>
-
 #ifdef USE_STD_FORMAT
+    template <typename... Args>
     void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
+        if (!is_enabled(level)) {
+            return;
+        }
         auto now = logger_clock::now();
         std::string message = std::format(fmt, args...);
 
@@ -272,14 +292,11 @@ class Logger {
 #endif
 
     void log(LogEntry const& entry) {
-        std::lock_guard lock(mutex_);
-
-        for (const auto& sink : sinks_) {
-            output_log_entry(entry, *sink);
+        if (!is_enabled(entry.level)) {
+            return;
         }
-    }
+        auto output = sinks_[static_cast<int>(entry.level)];
 
-    void output_log_entry(const LogEntry& entry, std::ostream& output) const {
         static const std::array levels = {
 #define X(a, b) b,
             LOG_LEVELS
@@ -292,36 +309,36 @@ class Logger {
             switch (token.kind()) {
             case LogPatternToken::Kind::Text:
             case LogPatternToken::Kind::Color:
-                output << token.payload();
+                *output << token.payload();
                 break;
             case LogPatternToken::Kind::Logger:
-                output << name_;
+                *output << name_;
                 break;
             case LogPatternToken::Kind::Level:
-                output << levels[static_cast<int>(entry.level)];
+                *output << levels[static_cast<int>(entry.level)];
                 break;
             case LogPatternToken::Kind::ElapsedTime: {
                 auto d = entry.time - start_time_;
-                output << std::chrono::duration_cast<std::chrono::milliseconds>(
-                              d)
-                              .count()
-                       << "ms";
+                *output
+                    << std::chrono::duration_cast<std::chrono::milliseconds>(d)
+                           .count()
+                    << "ms";
                 break;
             }
             case LogPatternToken::Kind::Message:
-                output << entry.message;
+                *output << entry.message;
                 break;
             }
         }
 
-        output << "\n";
+        *output << "\n";
     }
 
     const std::string name_;
     std::array<std::vector<LogPatternToken>, LogLevelCount> patterns_;
-    std::vector<std::shared_ptr<std::ostream>> sinks_;
-    std::mutex mutex_;
+    std::array<std::ostream*, LogLevelCount> sinks_{};
     logger_clock::time_point start_time_ = logger_clock::now();
+    std::uint8_t enabled_levels_{(1 << LogLevelCount) - 1};
 
     friend class LogStream;
 };
@@ -338,7 +355,7 @@ class LogStream {
         logger_.log(entry);
     }
 
-    bool operator!() const { return !logged_; }
+    bool operator!() const { return !logged_ && logger_.is_enabled(level_); }
 
     template <typename T>
     LogStream& operator<<(const T& value) {

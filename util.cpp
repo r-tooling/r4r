@@ -47,7 +47,7 @@ std::string escape_cmd_arg(std::string const& arg) {
 }
 
 bool is_sub_path(fs::path const& path, fs::path const& base) {
-    const auto mismatch =
+    auto const mismatch =
         std::mismatch(path.begin(), path.end(), base.begin(), base.end());
     return mismatch.second == base.end();
 }
@@ -186,51 +186,47 @@ std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
     return {std::string(resolved_path)};
 }
 
-UserInfo get_user_info() {
+std::vector<std::string> string_split(std::string const& str, char delim) {
+    std::vector<std::string> lines;
+    std::istringstream iss(str);
+    std::string line;
 
-    uid_t uid = getuid(); // Get the user ID of the calling process
-    gid_t gid = getgid(); // Get the group ID of the calling process
-
-    // Retrieve the passwd struct for the user
-    passwd* pwd = getpwuid(uid);
-    if (!pwd) {
-        throw std::runtime_error("Failed to get passwd struct for UID " +
-                                 std::to_string(uid));
+    while (std::getline(iss, line, delim)) {
+        lines.push_back(line);
     }
 
-    std::string username = pwd->pw_name;
-    std::string home_directory = pwd->pw_dir;
-    std::string shell = pwd->pw_shell;
+    return lines;
+}
 
-    // primary group information
-    group* grp = getgrgid(gid);
-    if (!grp) {
-        throw std::runtime_error("Failed to get group struct for GID " +
-                                 std::to_string(gid));
+std::variant<std::uintmax_t, std::error_code> file_size(fs::path const& path) {
+    std::error_code ec;
+    std::uintmax_t size = fs::file_size(path, ec);
+
+    if (ec) {
+        return ec;
+    } else {
+        return size;
     }
-    GroupInfo primary_group = {gid, grp->gr_name};
+}
 
-    // Get the list of groups
-    int n_groups = 0;
-    getgrouplist(username.c_str(), gid, nullptr,
-                 &n_groups); // Get number of groups
+std::string remove_ansi(std::string const& input) {
+    // Regular expression to match ANSI escape codes.
+    // This regex covers most common ANSI escape sequences:
+    // - \x1B\[...m (SGR codes)
+    // - \x1B\[...;...m (SGR codes with multiple parameters)
+    // - \x1B\[...K (EL codes)
+    // - \x1B\[...J (ED codes)
+    // - \x1B\[...h/\x1B\[...l (SM/RM codes)
+    // - \x1B[0-9]*A/B/C/D/E/F/G/H/J/K/S/T/f/n/s/u (Other control codes)
+    // - \x1B\][^\x07]*\x07 (OSC codes)
+    // - \x1B\(./\x1B\). (Character set codes)
+    // - \x1B#./\x1B%./\x1B(./\x1B). (Designator codes)
+    // It's important to use raw string literal to avoid escaping backslashes in
+    // the regex
+    std::regex ansi_regex(
+        R"(\x1B\[[0-9;]*[mKJhhlABCDFGJSTfnsu]|\x1B\][^\x07]*\x07|\x1B\(.|\x1B\).|\x1B#.|x1B%.|x1B\(.|x1B\).)");
 
-    std::vector<gid_t> group_ids(n_groups);
-    if (getgrouplist(username.c_str(), gid, group_ids.data(), &n_groups) ==
-        -1) {
-        throw std::runtime_error("Failed to get group list for user " +
-                                 username);
-    }
-
-    // map gids to GroupInfo
-    std::vector<GroupInfo> groups;
-    for (gid_t group_id : group_ids) {
-        group* g = getgrgid(group_id);
-        if (g) {
-            groups.push_back({group_id, g->gr_name});
-        }
-    }
-
-    return {uid, primary_group, username, home_directory, shell, groups};
+    // Replace all matches with an empty string.
+    return std::regex_replace(input, ansi_regex, "");
 }
 } // namespace util

@@ -18,12 +18,12 @@ inline std::system_error make_system_error(int error_code,
 
 #define UNIMPLEMENTED()                                                        \
     do {                                                                       \
-        stop("not implemented", __FILE__, __LINE__);                           \
+        ::stop("not implemented", __FILE__, __LINE__);                         \
     } while (0)
 
 #define UNREACHABLE()                                                          \
     do {                                                                       \
-        stop("reached unreachable", __FILE__, __LINE__);                       \
+        ::stop("reached unreachable", __FILE__, __LINE__);                     \
     } while (0)
 
 [[noreturn]] inline void stop(const char* msg, const char* file, int line) {

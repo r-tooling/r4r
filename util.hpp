@@ -1,13 +1,15 @@
 #pragma once
 
 #include "common.hpp"
+#include <cstdint>
 #include <memory>
 #include <ranges>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
+#include <variant>
 #include <vector>
 
 namespace util {
@@ -43,6 +45,8 @@ std::string mk_string(T const& collection, S const& sep) {
     return res.str();
 }
 
+std::vector<std::string> string_split(std::string const& str, char delim);
+
 template <typename FileCollection>
 void create_tar_archive(fs::path const& archive, FileCollection const& files) {
     FILE* temp_file = std::tmpfile();
@@ -71,11 +75,11 @@ void create_tar_archive(fs::path const& archive, FileCollection const& files) {
 
 template <typename Collection>
 std::unique_ptr<typename Collection::value_type[]>
-collection_to_c_array(const Collection& container) {
+collection_to_c_array(Collection const& container) {
     using T = typename Collection::value_type;
     static_assert(std::ranges::sized_range<Collection>);
 
-    const size_t size = std::ranges::size(container);
+    size_t const size = std::ranges::size(container);
     if (size == 0) {
         return nullptr;
     }
@@ -90,8 +94,8 @@ collection_to_c_array(const Collection& container) {
 template <typename Collection>
     requires std::is_same_v<typename Collection::value_type, std::string>
 std::unique_ptr<char* const[]>
-collection_to_c_array(const Collection& container) {
-    const size_t size = std::ranges::size(container);
+collection_to_c_array(Collection const& container) {
+    size_t const size = std::ranges::size(container);
     if (size == 0) {
         return nullptr;
     }
@@ -129,21 +133,8 @@ std::optional<fs::path> get_process_cwd(pid_t pid);
 
 std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd);
 
-struct GroupInfo {
-    gid_t gid;
-    std::string name;
-};
+std::variant<std::uintmax_t, std::error_code> file_size(fs::path const& path);
 
-struct UserInfo {
-    uid_t uid;
-    GroupInfo group;
-
-    std::string username;
-    std::string home_directory;
-    std::string shell;
-    std::vector<GroupInfo> groups;
-};
-
-UserInfo get_user_info();
+std::string remove_ansi(std::string const& input);
 
 } // namespace util

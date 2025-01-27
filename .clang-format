@@ -5,3 +5,4 @@ PointerAlignment: Left
 AlwaysBreakTemplateDeclarations: true
 AlignTrailingComments: true
 AllowShortBlocksOnASingleLine: false
+QualifierAlignment: Right

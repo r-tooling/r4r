@@ -1,55 +1,29 @@
-﻿#include "backend/backEnd.hpp"
 #include "common.hpp"
 #include "logger.hpp"
+#include <algorithm>
+#include <csignal>
 #include <filesystem>
 
-#include "./external/argparse.hpp"
 #include "cli.hpp"
 #include "syscall_monitor.hpp"
 #include "util.hpp"
 
 #include <cstdint>
 #include <cstdlib>
+#include <grp.h>
 #include <iostream>
 #include <memory>
+#include <pwd.h>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
 #include <cerrno>
 
+#include <system_error>
 #include <unordered_map>
+#include <variant>
 #include <vector>
-
-void do_analysis(
-    std::unordered_map<absFilePath, middleend::file_info> const& fileInfos,
-    std::vector<std::string> const& envs, std::vector<std::string> const& cmd,
-    fs::path const& work_dir) {
-
-    std::vector<middleend::file_info> files;
-    for (const auto& [_, file] : fileInfos) {
-        files.push_back(file);
-    }
-
-    std::unordered_map<std::string, std::string> env;
-    for (const auto& e : envs) {
-        auto pos = e.find('=');
-        if (pos != std::string::npos) {
-            env[e.substr(0, pos)] = e.substr(pos + 1);
-        } else {
-            // FIXME: logging
-            std::cerr << "Invalid env variable: " << e << ": missing `=`"
-                      << std::endl;
-        }
-    }
-
-    auto user = util::get_user_info();
-    backend::Trace trace{files, env, cmd, work_dir, user};
-    backend::DockerfileTraceInterpreter interpreter{trace};
-
-    interpreter.finalize();
-}
-
-// refactoring start
 
 std::function<void(int)> global_signal_handler;
 
@@ -66,12 +40,118 @@ void register_signal_handlers(std::function<void(int)> handler) {
     }
 }
 
-struct File {
+struct GroupInfo {
+    gid_t gid;
+    std::string name;
+
+    friend std::ostream& operator<<(std::ostream& os, GroupInfo const& group) {
+        os << "GroupInfo {\n";
+        prefixed_ostream(os, "  ", [&] {
+            os << "gid: " << group.gid << "\n";
+            os << "name: '" << group.name << "\n";
+        });
+        os << "}";
+        return os;
+    }
+};
+
+struct UserInfo {
+    uid_t uid;
+    GroupInfo group;
+
+    std::string username;
+    std::string home_directory;
+    std::string shell;
+    std::vector<GroupInfo> groups;
+
+    friend std::ostream& operator<<(std::ostream& os, UserInfo const& user) {
+        os << "UserInfo {\n";
+        prefixed_ostream(os, "  ", [&] {
+            os << "uid: " << user.uid << "\n";
+            os << "group: " << user.group << "\n";
+            os << "username: '" << user.username << "'\n";
+            os << "home_directory: '" << user.home_directory << "'\n";
+            os << "shell: '" << user.shell << "'\n";
+            os << "groups:\n";
+            if (!user.groups.empty()) {
+                prefixed_ostream(os, "  ", [&] {
+                    for (auto const& g : user.groups) {
+                        os << "- " << g << "\n";
+                    }
+                });
+            }
+            os << "\n";
+        });
+        os << "}";
+        return os;
+    }
+};
+
+UserInfo get_user_info() {
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+
+    // retrieve the passwd struct for the user
+    passwd* pwd = getpwuid(uid);
+    if (!pwd) {
+        throw std::runtime_error("Failed to get passwd struct for UID " +
+                                 std::to_string(uid));
+    }
+
+    std::string username = pwd->pw_name;
+    std::string home_directory = pwd->pw_dir;
+    std::string shell = pwd->pw_shell;
+
+    // primary group information
+    group* grp = getgrgid(gid);
+    if (!grp) {
+        throw std::runtime_error("Failed to get group struct for GID " +
+                                 std::to_string(gid));
+    }
+    GroupInfo primary_group = {gid, grp->gr_name};
+
+    // get the list of groups
+    int n_groups = 0;
+    getgrouplist(username.c_str(), gid, nullptr,
+                 &n_groups); // Get number of groups
+
+    std::vector<gid_t> group_ids(n_groups);
+    if (getgrouplist(username.c_str(), gid, group_ids.data(), &n_groups) ==
+        -1) {
+        throw std::runtime_error("Failed to get group list for user " +
+                                 username);
+    }
+
+    // map gids to GroupInfo
+    std::vector<GroupInfo> groups;
+    for (gid_t group_id : group_ids) {
+        group* g = getgrgid(group_id);
+        if (g) {
+            groups.push_back({group_id, g->gr_name});
+        }
+    }
+
+    return {uid, primary_group, username, home_directory, shell, groups};
+}
+
+struct FileInfo {
     fs::path path;
-    bool existed_before;
+    std::optional<std::uintmax_t> size;
+
+    friend std::ostream& operator<<(std::ostream& os, FileInfo const& info) {
+        os << "FileInfo { " << info.path << ", size: ";
+        if (info.size) {
+            os << *info.size;
+        } else {
+            os << "N/A";
+        }
+        os << "}";
+        return os;
+    }
 };
 
 class FileTracer : public SyscallListener {
+    using Warnings = std::vector<std::string>;
     using SyscallState = std::uint64_t;
     using PidState = std::pair<int, SyscallState>;
 
@@ -81,6 +161,10 @@ class FileTracer : public SyscallListener {
     };
 
   public:
+    using Files = std::unordered_map<fs::path, FileInfo>;
+
+    FileTracer(Logger const& log) : log_{log} {}
+
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override {
         auto it = kHandlers_.find(syscall);
@@ -115,7 +199,26 @@ class FileTracer : public SyscallListener {
         }
     }
 
+    Files files() const { return files_; }
+
   private:
+    void register_warning(std::string message) { warnings_.push_back(message); }
+
+    void register_file(fs::path file) {
+        auto size = util::file_size(file);
+        FileInfo info{file, {}};
+
+        if (std::holds_alternative<std::error_code>(size)) {
+            register_warning(STR("Failed to get file size of:  "
+                                 << file << ": "
+                                 << std::get<std::error_code>(size).message()));
+        } else {
+            info.size = std::get<std::uintmax_t>(size);
+        }
+
+        files_.try_emplace(file, info);
+    }
+
     void syscall_openat_entry(pid_t pid, SyscallArgs args,
                               SyscallState* state) {
         fs::path result;
@@ -130,18 +233,14 @@ class FileTracer : public SyscallListener {
             if (dirfd == AT_FDCWD) {
                 auto d = util::get_process_cwd(pid);
                 if (!d) {
-                    // TODO: log warning
-                    std::cerr << "Failed to resolve cwd of: " << pid
-                              << std::endl;
+                    register_warning(STR("failed to resolve cwd of: " << pid));
                     return;
                 }
                 result = *d;
             } else {
-                // TODO: log warning
                 auto d = util::resolve_fd_filename(pid, dirfd);
                 if (!d) {
-                    std::cerr << "Failed to resolve dirfd: " << dirfd
-                              << std::endl;
+                    register_warning(STR("Failed to resolve dirfd: " << dirfd));
                     return;
                 }
                 result = *d;
@@ -149,9 +248,10 @@ class FileTracer : public SyscallListener {
             result /= pathname;
         }
 
-        // std::cout << "openat: " << pathname << std::endl;
-        File* file = new File{result, fs::exists(result)};
-        *state = reinterpret_cast<SyscallState>(file);
+        if (fs::exists(result)) {
+            auto file = new fs::path{result};
+            *state = reinterpret_cast<SyscallState>(file);
+        }
     }
 
     void syscall_openat_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
@@ -162,29 +262,28 @@ class FileTracer : public SyscallListener {
             return;
         }
 
-        auto file = reinterpret_cast<File*>(*state);
-        // TODO: register the file
-        if (file) {
+        auto entry_file = reinterpret_cast<fs::path*>(*state);
+        if (entry_file) {
             if (ret_val >= 0) {
-                // std::cout << "openat: " << file->path << " => " << ret_val
-                //           << std::endl;
+                auto exit_file =
+                    util::resolve_fd_filename(pid, static_cast<int>(ret_val));
+
+                if (!exit_file) {
+                    LOG_WARN(log_)
+                        << "Unable to resolve fd: " << ret_val << " to a path";
+                } else if (exit_file != *entry_file) {
+                    LOG_WARN(log_)
+                        << "File entry/exit mismatch: " << *entry_file << " vs "
+                        << *exit_file;
+                } else {
+                    register_file(*exit_file);
+                }
             }
-            delete file;
+            delete entry_file;
         }
     }
 
-    void register_fd(pid_t pid, int fd) {
-        auto path = util::resolve_fd_filename(pid, fd);
-        if (!path) {
-            // FIXME: logging
-            std::cout << "Unable to registered fd: " << fd << std::endl;
-            return;
-        }
-
-        std::cout << "Registered fd: " << fd << ": " << *path << std::endl;
-    }
-
-    static const inline std::unordered_map<uint64_t, SyscallHandler> kHandlers_{
+    static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
 #define REG_SYSCALL_HANDLER(nr)                                                \
     {                                                                          \
         __NR_##nr, {                                                           \
@@ -198,23 +297,30 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
+    Logger log_;
     std::unordered_map<pid_t, PidState> state_;
+    Files files_;
+    Warnings warnings_;
 };
 
-class TracingTask : public Task {
+class TaskException : public std::runtime_error {
   public:
-    TracingTask(fs::path const& program_path,
+    TaskException(std::string const& message) : std::runtime_error{message} {}
+};
+
+class TracingTask : public Task<FileTracer::Files> {
+  public:
+    TracingTask(Logger const& log, fs::path const& program_path,
                 std::vector<std::string> const& args)
-        : Task{"Tracing"}, program_path_(program_path), args_(args) {}
+        : log_{log}, program_path_(program_path), args_(args) {}
 
   public:
-    bool run_task(std::ostream& output, ProgressBar& bar) override {
-        bar.set_infinite_mode(true);
+    FileTracer::Files run(std::ostream& output) override {
+        LOG_INFO(log_) << "Starting to trace program: "
+                       << util::mk_string(args_, ' ');
 
-        Logger log{"tracer", "{elapsed_time} {level} {message}"};
-        log.add_sink(std::make_shared<std::ostream>(output.rdbuf()));
+        FileTracer tracer{log_};
 
-        FileTracer tracer;
         monitor_ =
             std::make_unique<SyscallMonitor>(program_path_, args_, tracer);
         monitor_->redirect_stdout(output);
@@ -224,25 +330,21 @@ class TracingTask : public Task {
 
         switch (result.kind) {
         case SyscallMonitor::Result::Failure:
-            LOG_ERROR(log) << "Failed to spawn the process";
-            return false;
+            throw TaskException("Failed to spawn the process");
 
         case SyscallMonitor::Result::Signal:
-            LOG_ERROR(log) << "Program was terminated by signal: "
-                           << *result.detail;
-            return false;
+            throw TaskException(
+                STR("Program was terminated by signal: " << *result.detail));
 
         case SyscallMonitor::Result::Exit:
             int exit_code = *result.detail;
             if (exit_code != 0) {
-                LOG_ERROR(log) << "Program exited with: " << exit_code;
-                return false;
+                throw TaskException(STR("Program exited with: " << exit_code));
             }
-            LOG_INFO(log)
-                << "Program exited successfully, analyzing the results";
+            return tracer.files();
         }
 
-        return true;
+        UNREACHABLE();
     }
 
     void stop() override {
@@ -252,47 +354,134 @@ class TracingTask : public Task {
     }
 
   private:
+    Logger log_;
     fs::path const& program_path_;
     std::vector<std::string> const& args_;
     std::unique_ptr<SyscallMonitor> monitor_;
 };
 
-int main(int argc, char* argv[]) {
-    Logger log{"main", "{elapsed_time} {level} {message}"};
-    log.add_sink(std::make_shared<std::ostream>(std::cout.rdbuf()));
+struct Options {
+    std::vector<std::string> tracee_args;
+};
 
-    argparse::ArgumentParser program{"", "", argparse::default_arguments::help};
-    program.add_description("The tracer is used for analysing the dependencies "
-                            "of other computer programs.");
-
+Options parse_cmd_args(int argc, char* argv[]) {
     std::vector<std::string> args;
+    for (int i = 1; i < argc; i++) {
+        args.emplace_back(argv[i]);
+    }
+    return {args};
+}
 
-    auto& group = program.add_mutually_exclusive_group(true);
-    group.add_argument("--")
-        .help("used to signify end of arguments")
-        .metavar(" ")
-        .remaining()
-        .nargs(argparse::nargs_pattern::at_least_one)
-        .store_into(args);
-    group.add_argument("arguments")
-        .help("Subprogram name and arguments")
-        .metavar("<subprogram arguments>")
-        .remaining()
-        .nargs(argparse::nargs_pattern::any)
-        .store_into(args);
+struct Trace {
+    std::vector<std::string> cmd;
+    fs::path cwd;
+    std::unordered_map<std::string, std::string> env;
+    UserInfo user;
+    std::vector<FileInfo> files;
 
-    program.set_usage_break_on_mutex();
+    friend std::ostream& operator<<(std::ostream& os, Trace const& trace) {
+        os << "Trace {\n";
+        prefixed_ostream(os, "  ", [&] {
+            os << "cmd: '";
+            util::print_collection(os, trace.cmd, " ");
+            os << "'\n";
+            os << "cwd: " << trace.cwd << "\n";
+            os << "env:\n";
+            prefixed_ostream(os, "  ", [&] {
+                for (auto& [k, v] : trace.env) {
+                    os << "- " << k << ": " << util::remove_ansi(v) << "\n";
+                }
+            });
+            os << "user: ";
+            prefixed_ostream(os, "  ", [&] { os << trace.user; });
+            os << "\n";
+            os << "files:\n";
+            prefixed_ostream(os, "  ", [&] {
+                for (auto& info : trace.files) {
+                    os << "- " << info << "\n";
+                }
+            });
+        });
 
-    try {
-        program.parse_args(argc, argv);
-    } catch (const std::exception& err) {
-        std::cerr << err.what() << std::endl;
-        std::cerr << std::endl;
-        std::cerr << program;
-        return 1;
+        os << "}";
+        return os;
+    }
+};
+
+class Tracer {
+  public:
+    Tracer(Options options)
+        : options_{options}, log_{"r4r"}, runner_{std::cout} {
+
+        log_.set_pattern(LogLevel::Debug, "[debug]: {message}");
+        log_.set_pattern(LogLevel::Info, "{message} [{elapsed_time}]");
+        log_.set_pattern(LogLevel::Warn, "[warning] {logger}: {message}");
+        log_.set_sink(LogLevel::Warn, warnings_);
+        log_.set_sink(LogLevel::Error, std::cerr);
     }
 
-    TaskManager manager{15};
+    void trace() {
+        initialize_trace();
+        trace_program();
+        resolve_files();
+        // create_dockerfile();
+        // build_docker_image();
+        // rerun();
+        // diff();
+
+        std::cout << trace_;
+    }
+
+    void stop() { runner_.stop(); }
+
+  private:
+    void initialize_trace() {
+        trace_.cmd = options_.tracee_args;
+        trace_.cwd = std::filesystem::current_path();
+        trace_.user = get_user_info();
+
+        extern char** environ;
+        if (environ != nullptr) {
+            for (char** env = environ; *env != nullptr; ++env) {
+                std::string s(*env);
+                size_t pos = s.find('=');
+                if (pos != std::string::npos) {
+                    trace_.env.emplace(s.substr(0, pos), s.substr(pos + 1));
+                }
+            }
+        } else {
+            throw std::runtime_error("Unable to get environment variables");
+        }
+    }
+
+    void trace_program() {
+        Logger task_log = Logger("tracing", log_);
+        TracingTask tracing_task{task_log, trace_.cmd.front(), trace_.cmd};
+        auto files = runner_.run(tracing_task);
+
+        for (auto& [_, info] : files) {
+            trace_.files.push_back(info);
+        }
+
+        std::sort(trace_.files.begin(), trace_.files.end(),
+                  [](FileInfo f1, FileInfo f2) { return f1.path == f2.path; });
+
+        LOG_INFO(task_log) << "Finished tracing, recorded "
+                           << trace_.files.size() << " files";
+    }
+
+    void resolve_files() {}
+
+    std::ostringstream warnings_;
+    Options options_;
+    Logger log_;
+    TaskRunner runner_;
+    Trace trace_;
+};
+
+int main(int argc, char* argv[]) {
+    Options options = parse_cmd_args(argc, argv);
+    Tracer tracer{options};
 
     // Interrupt signals generated in the terminal are delivered to the
     // active process group, which here includes both parent and child. A
@@ -302,20 +491,31 @@ int main(int argc, char* argv[]) {
     // signal handler that will terminate the tracee when the tracer
     // gets killed.
 
-    register_signal_handlers([&](int sig) {
-        LOG_WARN(log) << "Received signal " << strsignal(sig)
-                      << ", stopping the tracing process...";
-        manager.stop();
-        exit(1);
+    register_signal_handlers([&, got_sigint = false](int sig) mutable {
+        switch (sig) {
+        case SIGTERM:
+            tracer.stop();
+            exit(1);
+        case SIGINT:
+            if (got_sigint) {
+                std::cerr << "SIGINT twice, exiting the tracer!";
+                exit(1);
+            } else {
+                std::cerr << "SIGINT, stopping the current task...";
+                tracer.stop();
+                got_sigint = true;
+            }
+            break;
+        default:
+            UNREACHABLE();
+        }
     });
 
-    std::filesystem::path program_path{args.front()};
-    std::filesystem::path cwd{std::filesystem::current_path()};
-
-    LOG_INFO(log) << "Running: " << util::mk_string(args, ' ') << " in " << cwd;
-
-    TracingTask tracing_task{program_path, args};
-    manager.run_task(tracing_task);
-
-    return 0;
+    try {
+        tracer.trace();
+        return 0;
+    } catch (TaskException& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
+    }
 }

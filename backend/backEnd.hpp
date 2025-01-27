@@ -14,7 +14,7 @@ struct Trace {
     std::unordered_map<std::string, std::string> env;
     std::vector<std::string> cmd;
     fs::path work_dir;
-    util::UserInfo user;
+    UserInfo user;
 };
 
 class DockerfileTraceInterpreter {
@@ -25,7 +25,7 @@ class DockerfileTraceInterpreter {
     std::vector<middleend::file_info*> getExecutedFiles();
     std::unordered_set<absFilePath> symlinkList();
     void persistDirectoriesAndSymbolicLinks(std::ostream& dockerImage,
-                                            const fs::path& scriptLocation);
+                                            fs::path const& scriptLocation);
 
     Trace trace_;
     std::unordered_set<r4r::DebPackage> debian_packages;
@@ -37,7 +37,7 @@ class DockerfileTraceInterpreter {
     void set_environment_variables(std::ofstream& df);
     void set_locale(std::ofstream& df);
     void create_user(std::ofstream& df);
-    void copy_unmatched_files(std::ofstream& df, const fs::path& archive);
+    void copy_unmatched_files(std::ofstream& df, fs::path const& archive);
     void install_debian_packages(std::ofstream& df);
 
     void create_dockerfile();

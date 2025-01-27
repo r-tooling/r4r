@@ -4,112 +4,127 @@
 #include <sstream>
 
 TEST(LoggerTest, BasicLogging) {
-    std::stringstream ss;
-    Logger logger("TestLogger");
-    auto sink = std::make_shared<std::ostream>(ss.rdbuf());
-    logger.add_sink(sink);
-
-    logger.set_pattern("{logger} {level}: {message}");
-    LOG_INFO(logger) << "Test message";
-    ASSERT_EQ(ss.str(), "TestLogger INFO: Test message\n");
+    std::stringstream s;
+    Logger log("TestLogger", s, "{logger} {level}: {message}");
+    LOG_INFO(log) << "Test message";
+    ASSERT_EQ(s.str(), "TestLogger INFO: Test message\n");
 }
 
-TEST(LoggerTest, MultipleSinks) {
-    std::stringstream ss1;
-    std::stringstream ss2;
-    Logger logger("TestLogger");
-    auto sink1 = std::make_shared<std::ostream>(ss1.rdbuf());
-    auto sink2 = std::make_shared<std::ostream>(ss2.rdbuf());
-    logger.add_sink(sink1);
-    logger.add_sink(sink2);
+TEST(LoggerTest, LevelSpecificSink) {
+    std::stringstream s1;
+    std::stringstream s2;
 
-    logger.set_pattern("{level} - {message}");
-    LOG_DEBUG(logger) << "Debug message";
-    ASSERT_EQ(ss1.str(), "DEBUG - Debug message\n");
-    ASSERT_EQ(ss2.str(), "DEBUG - Debug message\n");
+    Logger log("TestLogger", "{level} - {message}");
+    log.set_sink(LogLevel::Info, s1);
+    log.set_sink(LogLevel::Debug, s2);
+
+    LOG_INFO(log) << "message1";
+    ASSERT_EQ(s1.str(), "INFO - message1\n");
+    ASSERT_TRUE(s2.str().empty());
+    LOG_DEBUG(log) << "message2";
+    ASSERT_EQ(s1.str(), "INFO - message1\n");
+    ASSERT_EQ(s2.str(), "DEBUG - message2\n");
 }
 
 TEST(LoggerTest, PatternParsing) {
-    std::stringstream ss;
-    Logger logger("TestLogger");
-    auto sink = std::make_shared<std::ostream>(ss.rdbuf());
-    logger.add_sink(sink);
+    std::stringstream s;
+    Logger log("TestLogger", s);
 
-    logger.set_pattern("[{logger}]({level}) {message}");
-    LOG_WARN(logger) << "Warning message";
-    ASSERT_EQ(ss.str(), "[TestLogger](WARN) Warning message\n");
+    log.set_pattern("[{logger}]({level}) {message}");
+    LOG_WARN(log) << "Warning message";
+    ASSERT_EQ(s.str(), "[TestLogger](WARN) Warning message\n");
 
-    ss.str("");
+    s.str("");
 
-    logger.set_pattern(
+    log.set_pattern(
         "Prefix: {logger} - {level} - {message} - [{elapsed_time}]");
-    LOG_INFO(logger) << "Complex test";
+    LOG_INFO(log) << "Complex test";
 
     std::regex pattern(
         R"(Prefix: TestLogger - INFO - Complex test - \[\d+ms\]\n)");
-    ASSERT_TRUE(std::regex_match(ss.str(), pattern));
-}
-
-TEST(LoggerTest, ChangePattern) {
-    std::stringstream ss;
-    Logger logger("TestLogger");
-    auto sink = std::make_shared<std::ostream>(ss.rdbuf());
-    logger.add_sink(sink);
-
-    logger.set_pattern("{logger} {message}");
-    LOG_INFO(logger) << "First message";
-    ASSERT_EQ(ss.str(), "TestLogger First message\n");
-
-    ss.str("");
-
-    logger.set_pattern("{level}: {message} ({logger})");
-    LOG_WARN(logger) << "Second message";
-    ASSERT_EQ(ss.str(), "WARN: Second message (TestLogger)\n");
+    ASSERT_TRUE(std::regex_match(s.str(), pattern));
 }
 
 TEST(LoggerTest, LevelSpecificPattern) {
-    std::stringstream ss;
-    Logger logger("TestLogger");
-    auto sink = std::make_shared<std::ostream>(ss.rdbuf());
-    logger.add_sink(sink);
+    std::stringstream s;
+    Logger log("TestLogger", s);
 
-    logger.set_pattern("{message}"); // Default pattern
-    logger.set_pattern(LogLevel::Warn, "Warning: {message} ({logger})");
+    log.set_pattern("{message}");
+    log.set_pattern(LogLevel::Warn, "Warning: {message} ({logger})");
 
-    LOG_INFO(logger) << "Regular message";
-    ASSERT_EQ(ss.str(), "Regular message\n");
-    ss.str("");
+    LOG_INFO(log) << "Regular message";
+    ASSERT_EQ(s.str(), "Regular message\n");
+    s.str("");
 
-    LOG_WARN(logger) << "Important message";
-    ASSERT_EQ(ss.str(), "Warning: Important message (TestLogger)\n");
+    LOG_WARN(log) << "Important message";
+    ASSERT_EQ(s.str(), "Warning: Important message (TestLogger)\n");
 }
 
 TEST(LoggerTest, ColorCodes) {
-    std::stringstream ss;
-    Logger logger("TestLogger");
-    auto sink = std::make_shared<std::ostream>(ss.rdbuf());
-    logger.add_sink(sink);
+    std::stringstream s;
+    Logger log("TestLogger", s);
 
-    logger.set_pattern("{fg_red}{level}{fg_reset}: {message}");
-    LOG_INFO(logger) << "Colored message";
+    log.set_pattern("{fg_red}{level}{fg_reset}: {message}");
+    LOG_INFO(log) << "Colored message";
 
     std::string expected = "\033[31mINFO\033[0m: Colored message\n";
-    ASSERT_EQ(ss.str(), expected);
+    ASSERT_EQ(s.str(), expected);
 }
 
 TEST(LoggerTest, EscapingBraces) {
-    std::stringstream ss;
-    Logger logger("TestLogger");
-    auto sink = std::make_shared<std::ostream>(ss.rdbuf());
-    logger.add_sink(sink);
+    std::stringstream s;
+    Logger log("TestLogger", s);
 
-    logger.set_pattern("{{ {level}");
-    LOG_INFO(logger) << "Test message";
+    log.set_pattern("{{ {level}");
+    LOG_INFO(log) << "Test message";
 
-    ASSERT_EQ(ss.str(), "{ INFO\n");
+    ASSERT_EQ(s.str(), "{ INFO\n");
 
-    ss.str("");
-    logger.set_pattern("{{{{");
-    LOG_INFO(logger) << "Test";
-    ASSERT_EQ(ss.str(), "{{\n");
+    s.str("");
+    log.set_pattern("{{{{");
+    LOG_INFO(log) << "Test";
+    ASSERT_EQ(s.str(), "{{\n");
+}
+
+TEST(LoggerTest, EnablingAndDisablingLevels) {
+    std::stringstream s;
+    Logger log("TestLogger", s, "{level}");
+
+    auto log_all = [&log]() {
+        LOG_DEBUG(log) << "";
+        LOG_INFO(log) << "";
+        LOG_WARN(log) << "";
+        LOG_ERROR(log) << "";
+    };
+
+    log_all();
+    ASSERT_EQ(s.str(), "DEBUG\nINFO\nWARN\nERROR\n");
+    s.str("");
+
+    log.disable(LogLevel::Debug);
+    log_all();
+    ASSERT_EQ(s.str(), "INFO\nWARN\nERROR\n");
+    s.str("");
+
+    log.disable(LogLevel::Warn);
+    log_all();
+    ASSERT_EQ(s.str(), "INFO\nERROR\n");
+    s.str("");
+
+    log.enable(LogLevel::Debug);
+    log_all();
+    ASSERT_EQ(s.str(), "DEBUG\nINFO\nERROR\n");
+    s.str("");
+
+    log.enable(LogLevel::Warn);
+    log_all();
+    ASSERT_EQ(s.str(), "DEBUG\nINFO\nWARN\nERROR\n");
+    s.str("");
+
+    auto fail = []() {
+        assert(false);
+        return "never return";
+    };
+    log.disable(LogLevel::Debug);
+    LOG_DEBUG(log) << fail();
 }
