@@ -3,8 +3,6 @@
 #include <sstream>
 #include <unordered_map>
 
-using namespace r4r;
-
 // Common dpkg output header for reuse in tests
 // clang-format off
 const std::string kDpkgHeader = R"(Desired=Unknown/Install/Remove/Purge/Hold

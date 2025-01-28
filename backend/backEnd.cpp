@@ -23,15 +23,15 @@ struct SubdirIterator {
     struct dummy {};
 
     struct IterImpl {
-        const std::filesystem::path& origPath;
+        std::filesystem::path const& origPath;
         std::filesystem::path::iterator currentPos;
         std::filesystem::path soFar;
 
-        IterImpl(const std::filesystem::path& origPath)
+        IterImpl(std::filesystem::path const& origPath)
             : origPath{origPath}, currentPos(origPath.begin()),
               soFar{currentPos != origPath.end() ? *currentPos : ""} {};
 
-        const auto& operator*() { return soFar; }
+        auto const& operator*() { return soFar; }
 
         auto operator++() {
             ++currentPos;
@@ -40,7 +40,7 @@ struct SubdirIterator {
             return this;
         }
 
-        auto operator!=(const dummy&) { return currentPos != origPath.end(); }
+        auto operator!=(dummy const&) { return currentPos != origPath.end(); }
     };
 
     auto begin() { return IterImpl(pathToWalk); }
@@ -50,7 +50,7 @@ struct SubdirIterator {
 enum fileAccessFlags { read = 1, write = 2, execute = 4 };
 
 template <class T>
-T&& replaceFirst(T&& source, const T&& from, const T&& to) {
+T&& replaceFirst(T&& source, T const&& from, T const&& to) {
     using noref = std::remove_reference_t<T>;
     noref newString{};
     newString.reserve(source.length()); // avoids a few memory allocations
@@ -135,8 +135,8 @@ T&& replaceFirst(T&& source, const T&& from, const T&& to) {
 
 template <class Key, class Result>
 std::optional<Result>
-optionalResolve(const std::unordered_map<Key, Result>& container,
-                const Key& key) {
+optionalResolve(std::unordered_map<Key, Result> const& container,
+                Key const& key) {
     if (auto ptr = container.find(key); ptr != container.end())
         return ptr->second;
     else
@@ -242,7 +242,7 @@ void DockerfileTraceInterpreter::create_user(std::ofstream& df) {
         STR("groupadd -g " << user.group.gid << " " << user.group.name));
 
     // create groups
-    for (const auto& group : user.groups) {
+    for (auto const& group : user.groups) {
         cmds.emplace_back(STR("(groupadd -g " << group.gid << " " << group.name
                                               << " || groupmod -g " << group.gid
                                               << " " << group.name << ")"));
@@ -250,7 +250,7 @@ void DockerfileTraceInterpreter::create_user(std::ofstream& df) {
 
     // Prepare additional groups for `-G`
     std::vector<std::string> groups;
-    for (const auto& group : user.groups) {
+    for (auto const& group : user.groups) {
         groups.push_back(group.name);
     }
     std::sort(groups.begin(), groups.end());
@@ -313,7 +313,7 @@ void DockerfileTraceInterpreter::set_environment_variables(std::ofstream& df) {
         return;
     }
 
-    static const std::unordered_set<std::string> ignored_env = {
+    static std::unordered_set<std::string> const ignored_env = {
         "DBUS_SESSION_BUS_ADDRES",
         "GPG_TTY",
         "HOME",
@@ -359,7 +359,7 @@ void DockerfileTraceInterpreter::install_debian_packages(std::ofstream& df) {
                                           debian_packages.end());
 
     std::sort(packages.begin(), packages.end(),
-              [](const r4r::DebPackage& a, const r4r::DebPackage& b) {
+              [](r4r::DebPackage const& a, r4r::DebPackage const& b) {
                   return std::tie(a.name, a.version) <
                          std::tie(b.name, b.version);
               });
@@ -692,7 +692,7 @@ void DockerfileTraceInterpreter::resolve_ignored_files() {
     });
 
     // ignore the .uuid files from fontconfig
-    static const std::unordered_set<fs::path> fontconfig_dirs = {
+    static std::unordered_set<fs::path> const fontconfig_dirs = {
         "/usr/share/fonts", "/usr/share/poppler", "/usr/share/texmf/fonts"};
 
     std::erase_if(trace_.files, [&](middleend::file_info const& f) {
@@ -706,46 +706,6 @@ void DockerfileTraceInterpreter::resolve_ignored_files() {
         }
         return false;
     });
-}
-
-void populate_root_symlinks(std::unordered_map<fs::path, fs::path>& symlinks) {
-    fs::path root = "/";
-    for (const auto& entry : fs::directory_iterator(root)) {
-        if (entry.is_symlink()) {
-            std::error_code ec;
-            fs::path target = fs::read_symlink(entry.path(), ec);
-            if (!target.is_absolute()) {
-                target = fs::canonical(root / target);
-            }
-            if (!ec && fs::is_directory(target)) {
-                symlinks[entry.path()] = target;
-            }
-        }
-    }
-}
-
-std::vector<fs::path> get_root_symlink(const fs::path& path) {
-    static std::unordered_map<fs::path, fs::path> symlinks;
-    if (symlinks.empty()) {
-        populate_root_symlinks(symlinks);
-    }
-
-    std::vector<fs::path> result = {path};
-
-    for (const auto& [symlink, target] : symlinks) {
-        if (util::is_sub_path(path, target)) {
-            fs::path candidate = symlink / path.lexically_relative(target);
-
-            std::error_code ec;
-            if (fs::exists(candidate, ec) &&
-                fs::equivalent(candidate, path, ec)) {
-                result.push_back(candidate);
-                break;
-            }
-        }
-    }
-
-    return result;
 }
 
 void DockerfileTraceInterpreter::resolve_debian_packages() {

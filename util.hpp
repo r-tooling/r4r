@@ -137,4 +137,42 @@ std::variant<std::uintmax_t, std::error_code> file_size(fs::path const& path);
 
 std::string remove_ansi(std::string const& input);
 
+template <typename Duration>
+std::string format_elapsed_time(Duration elapsed) {
+    using namespace std::chrono;
+    using namespace std::chrono_literals;
+
+    constexpr int MS_PER_SEC = 1000;
+    constexpr int MS_PER_MIN = 60 * MS_PER_SEC;
+    constexpr int MS_PER_HOUR = 60 * MS_PER_MIN;
+
+    auto total_ms = duration_cast<milliseconds>(elapsed).count();
+
+    if (total_ms < MS_PER_SEC) {
+        return STR(total_ms << " ms");
+    }
+
+    auto total_seconds = duration_cast<duration<double>>(elapsed).count();
+    if (total_ms < MS_PER_MIN) {
+        return STR(std::fixed << std::setprecision(1) << total_seconds << " s");
+    }
+
+    auto mins = total_ms / MS_PER_MIN;
+    auto remaining_ms = total_ms % MS_PER_MIN;
+
+    if (total_ms < MS_PER_HOUR) {
+        auto secs = remaining_ms / MS_PER_SEC;
+        auto deci_secs = (remaining_ms % MS_PER_SEC) / 100;
+        return STR(std::setfill('0')
+                   << mins << ":" << std::setw(2) << secs << "." << deci_secs);
+    }
+
+    auto hrs = total_ms / MS_PER_HOUR;
+    mins = (total_ms % MS_PER_HOUR) / MS_PER_MIN;
+    auto secs = (total_ms % MS_PER_MIN) / MS_PER_SEC;
+
+    return STR(std::setfill('0') << hrs << ":" << std::setw(2) << mins << ":"
+                                 << std::setw(2) << secs);
+}
+
 } // namespace util

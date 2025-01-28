@@ -12,7 +12,6 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 using SyscallArgs = std::uint64_t[6];
@@ -34,10 +33,9 @@ class SyscallMonitor {
         std::optional<int> detail;
     };
 
-    SyscallMonitor(fs::path const& program_path,
-                   std::vector<std::string> const& args,
+    SyscallMonitor(std::vector<std::string> const& cmd,
                    SyscallListener& listener)
-        : program_path_{program_path}, args_{args}, listener_{listener} {}
+        : cmd_{cmd}, listener_{listener} {}
 
     void redirect_stdout(std::ostream& os) { stdout_ = &os; }
 
@@ -47,16 +45,16 @@ class SyscallMonitor {
 
     Result start();
 
-    [[noreturn]] void process_tracee(const util::Pipe& out,
-                                     const util::Pipe& err) const;
-    Result process_tracer(const util::Pipe& out, const util::Pipe& err);
+    [[noreturn]] void process_tracee(util::Pipe const& out,
+                                     util::Pipe const& err) const;
+    Result process_tracer(util::Pipe const& out, util::Pipe const& err);
 
     static std::string read_string_from_process(pid_t pid, uint64_t remote_addr,
                                                 size_t max_len);
 
   private:
-    static const int kSpawnErrorExitCode{254};
-    static const long kPtraceOptions{
+    static int const kSpawnErrorExitCode{254};
+    static long const kPtraceOptions{
         // Stop the tracee at the next fork(2) and automatically start
         // tracing the newly forked process
         PTRACE_O_TRACEFORK
@@ -84,10 +82,9 @@ class SyscallMonitor {
 
     void handle_syscall(pid_t pid);
 
-    static void forward_output(int read_fd, std::ostream& os, const char* tag);
+    static void forward_output(int read_fd, std::ostream& os, char const* tag);
 
-    fs::path const& program_path_;
-    std::vector<std::string> const& args_;
+    std::vector<std::string> const& cmd_;
     SyscallListener& listener_;
     std::ostream* stdout_{&std::cout};
     std::ostream* stderr_{&std::cerr};
@@ -122,8 +119,8 @@ inline SyscallMonitor::Result SyscallMonitor::start() {
     }
 }
 
-inline void SyscallMonitor::process_tracee(const util::Pipe& out,
-                                           const util::Pipe& err) const {
+inline void SyscallMonitor::process_tracee(util::Pipe const& out,
+                                           util::Pipe const& err) const {
     if (dup2(out.write_fd, STDOUT_FILENO) == -1) {
         std::cerr << "dup2 stderr: " << strerror(errno) << " (" << errno
                   << ")\n";
@@ -150,8 +147,9 @@ inline void SyscallMonitor::process_tracee(const util::Pipe& out,
     // stop itself and wait until the parent is ready
     raise(SIGSTOP);
 
-    auto c_args = util::collection_to_c_array(args_);
-    execvp(program_path_.c_str(), c_args.get());
+    auto c_args = util::collection_to_c_array(cmd_);
+    auto program = cmd_.front();
+    execvp(program.c_str(), c_args.get());
 
     std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";
 
@@ -159,7 +157,7 @@ inline void SyscallMonitor::process_tracee(const util::Pipe& out,
 }
 
 inline SyscallMonitor::Result
-SyscallMonitor::process_tracer(const util::Pipe& out, const util::Pipe& err) {
+SyscallMonitor::process_tracer(util::Pipe const& out, util::Pipe const& err) {
 
     close(out.write_fd);
     close(err.write_fd);
@@ -392,7 +390,7 @@ inline void SyscallMonitor::handle_syscall(pid_t pid) {
 }
 
 inline void SyscallMonitor::forward_output(int read_fd, std::ostream& os,
-                                           const char* tag) {
+                                           char const* tag) {
     constexpr size_t BUFFER_SIZE = 1024;
     std::array<char, BUFFER_SIZE> buffer{};
     while (true) {

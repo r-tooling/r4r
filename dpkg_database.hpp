@@ -11,13 +11,11 @@
 #include <unordered_map>
 #include <utility>
 
-namespace r4r {
-
 struct DebPackage {
     std::string name;
     std::string version;
 
-    bool operator==(const DebPackage& other) const = default;
+    bool operator==(DebPackage const& other) const = default;
 };
 
 using DebPackageMap = std::unordered_map<std::string, DebPackage>;
@@ -35,7 +33,7 @@ class DpkgDatabase {
     DebPackage const* lookup_by_name(std::string const& name) const;
 
   private:
-    static const inline std::string kNoPkgSentinel{"no-package-found"};
+    static inline std::string const kNoPkgSentinel{"no-package-found"};
 
     DebPackageMap packages_;
     util::FileSystemTrie<std::string> files_;
@@ -123,13 +121,11 @@ DpkgDatabase::lookup_by_name(std::string const& name) const {
     return it == packages_.end() ? nullptr : &it->second;
 }
 
-} // namespace r4r
-
 namespace std {
 
 template <>
-struct hash<r4r::DebPackage> {
-    size_t operator()(const r4r::DebPackage& pkg) const noexcept {
+struct hash<DebPackage> {
+    size_t operator()(DebPackage const& pkg) const noexcept {
         hash<string> string_hasher;
         return string_hasher(pkg.name) ^ (string_hasher(pkg.version) << 1);
     }

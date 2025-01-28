@@ -1,6 +1,6 @@
 #include "common.hpp"
+#include "dpkg_database.hpp"
 #include "logger.hpp"
-#include <algorithm>
 #include <csignal>
 #include <filesystem>
 
@@ -22,13 +22,14 @@
 
 #include <system_error>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
 std::function<void(int)> global_signal_handler;
 
 void register_signal_handlers(std::function<void(int)> handler) {
-    global_signal_handler = handler;
+    global_signal_handler = std::move(handler);
     std::array signals = {SIGINT, SIGTERM};
     for (int sig : signals) {
         auto status = signal(sig, [](int sig) { global_signal_handler(sig); });
@@ -163,7 +164,7 @@ class FileTracer : public SyscallListener {
   public:
     using Files = std::unordered_map<fs::path, FileInfo>;
 
-    FileTracer(Logger const& log) : log_{log} {}
+    explicit FileTracer(Logger log) : log_{std::move(log)} {}
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override {
@@ -199,10 +200,13 @@ class FileTracer : public SyscallListener {
         }
     }
 
-    Files files() const { return files_; }
+    Files const& files() const { return files_; }
 
   private:
-    void register_warning(std::string message) { warnings_.push_back(message); }
+    // FIXME: use logger
+    void register_warning(std::string const& message) {
+        warnings_.push_back(message);
+    }
 
     void register_file(fs::path file) {
         auto size = util::file_size(file);
@@ -308,25 +312,25 @@ class TaskException : public std::runtime_error {
     TaskException(std::string const& message) : std::runtime_error{message} {}
 };
 
-class TracingTask : public Task<FileTracer::Files> {
+class TracingTask : public Task<std::vector<FileInfo>> {
   public:
-    TracingTask(Logger const& log, fs::path const& program_path,
-                std::vector<std::string> const& args)
-        : log_{log}, program_path_(program_path), args_(args) {}
+    TracingTask(std::vector<std::string> const& cmd)
+        : Task{"trace"}, cmd_(cmd) {}
 
   public:
-    FileTracer::Files run(std::ostream& output) override {
-        LOG_INFO(log_) << "Starting to trace program: "
-                       << util::mk_string(args_, ' ');
+    std::vector<FileInfo> run(Logger& log, std::ostream& output) override {
+        LOG_INFO(log) << "Tracing program: " << util::mk_string(cmd_, ' ');
 
-        FileTracer tracer{log_};
+        FileTracer tracer{log};
+        SyscallMonitor monitor{cmd_, tracer};
+        monitor.redirect_stdout(output);
+        monitor.redirect_stderr(output);
 
-        monitor_ =
-            std::make_unique<SyscallMonitor>(program_path_, args_, tracer);
-        monitor_->redirect_stdout(output);
-        monitor_->redirect_stderr(output);
+        monitor_ = &monitor;
 
         auto result = monitor_->start();
+
+        monitor_ = nullptr;
 
         switch (result.kind) {
         case SyscallMonitor::Result::Failure:
@@ -341,7 +345,20 @@ class TracingTask : public Task<FileTracer::Files> {
             if (exit_code != 0) {
                 throw TaskException(STR("Program exited with: " << exit_code));
             }
-            return tracer.files();
+
+            auto file_map = tracer.files();
+            std::vector<FileInfo> files;
+            files.reserve(file_map.size());
+            for (auto const& [key, value] : file_map) {
+                files.push_back(value);
+            }
+
+            std::sort(files.begin(), files.end(),
+                      [](auto const& lhs, auto const& rhs) {
+                          return lhs.path < rhs.path;
+                      });
+
+            return files;
         }
 
         UNREACHABLE();
@@ -354,14 +371,12 @@ class TracingTask : public Task<FileTracer::Files> {
     }
 
   private:
-    Logger log_;
-    fs::path const& program_path_;
-    std::vector<std::string> const& args_;
-    std::unique_ptr<SyscallMonitor> monitor_;
+    std::vector<std::string> const& cmd_;
+    SyscallMonitor* monitor_;
 };
 
 struct Options {
-    std::vector<std::string> tracee_args;
+    std::vector<std::string> cmd;
 };
 
 Options parse_cmd_args(int argc, char* argv[]) {
@@ -372,35 +387,26 @@ Options parse_cmd_args(int argc, char* argv[]) {
     return {args};
 }
 
-struct Trace {
-    std::vector<std::string> cmd;
+struct Environment {
     fs::path cwd;
-    std::unordered_map<std::string, std::string> env;
+    std::unordered_map<std::string, std::string> vars;
     UserInfo user;
-    std::vector<FileInfo> files;
 
-    friend std::ostream& operator<<(std::ostream& os, Trace const& trace) {
-        os << "Trace {\n";
+    friend std::ostream& operator<<(std::ostream& os,
+                                    Environment const& trace) {
+        os << "Environment {\n";
         prefixed_ostream(os, "  ", [&] {
-            os << "cmd: '";
-            util::print_collection(os, trace.cmd, " ");
             os << "'\n";
             os << "cwd: " << trace.cwd << "\n";
             os << "env:\n";
             prefixed_ostream(os, "  ", [&] {
-                for (auto& [k, v] : trace.env) {
+                for (auto& [k, v] : trace.vars) {
                     os << "- " << k << ": " << util::remove_ansi(v) << "\n";
                 }
             });
             os << "user: ";
             prefixed_ostream(os, "  ", [&] { os << trace.user; });
             os << "\n";
-            os << "files:\n";
-            prefixed_ostream(os, "  ", [&] {
-                for (auto& info : trace.files) {
-                    os << "- " << info << "\n";
-                }
-            });
         });
 
         os << "}";
@@ -408,37 +414,16 @@ struct Trace {
     }
 };
 
-class Tracer {
+class CaptureEnvironmentTask : public Task<Environment> {
   public:
-    Tracer(Options options)
-        : options_{options}, log_{"r4r"}, runner_{std::cout} {
+    CaptureEnvironmentTask() : Task{"capture-environment"} {}
 
-        log_.set_pattern(LogLevel::Debug, "[debug]: {message}");
-        log_.set_pattern(LogLevel::Info, "{message} [{elapsed_time}]");
-        log_.set_pattern(LogLevel::Warn, "[warning] {logger}: {message}");
-        log_.set_sink(LogLevel::Warn, warnings_);
-        log_.set_sink(LogLevel::Error, std::cerr);
-    }
+    Environment run(Logger& log,
+                    [[maybe_unused]] std::ostream& ostream) override {
+        Environment envir{};
 
-    void trace() {
-        initialize_trace();
-        trace_program();
-        resolve_files();
-        // create_dockerfile();
-        // build_docker_image();
-        // rerun();
-        // diff();
-
-        std::cout << trace_;
-    }
-
-    void stop() { runner_.stop(); }
-
-  private:
-    void initialize_trace() {
-        trace_.cmd = options_.tracee_args;
-        trace_.cwd = std::filesystem::current_path();
-        trace_.user = get_user_info();
+        envir.cwd = std::filesystem::current_path();
+        envir.user = get_user_info();
 
         extern char** environ;
         if (environ != nullptr) {
@@ -446,37 +431,162 @@ class Tracer {
                 std::string s(*env);
                 size_t pos = s.find('=');
                 if (pos != std::string::npos) {
-                    trace_.env.emplace(s.substr(0, pos), s.substr(pos + 1));
+                    envir.vars.emplace(s.substr(0, pos), s.substr(pos + 1));
+                } else {
+                    LOG_WARN(log)
+                        << "Invalid environment variable: '" << s << "'";
                 }
             }
         } else {
-            throw std::runtime_error("Unable to get environment variables");
+            LOG_WARN(log) << "Unable to get environment variables";
+        }
+
+        return envir;
+    }
+};
+
+void populate_root_symlinks(std::unordered_map<fs::path, fs::path>& symlinks) {
+    fs::path root = "/";
+    for (auto const& entry : fs::directory_iterator(root)) {
+        if (entry.is_symlink()) {
+            std::error_code ec;
+            fs::path target = fs::read_symlink(entry.path(), ec);
+            if (!target.is_absolute()) {
+                target = fs::canonical(root / target);
+            }
+            if (!ec && fs::is_directory(target)) {
+                symlinks[entry.path()] = target;
+            }
+        }
+    }
+}
+
+std::vector<fs::path> get_root_symlink(fs::path const& path) {
+    static std::unordered_map<fs::path, fs::path> symlinks;
+    if (symlinks.empty()) {
+        populate_root_symlinks(symlinks);
+    }
+
+    std::vector<fs::path> result = {path};
+
+    for (auto const& [symlink, target] : symlinks) {
+        if (util::is_sub_path(path, target)) {
+            fs::path candidate = symlink / path.lexically_relative(target);
+
+            std::error_code ec;
+            if (fs::exists(candidate, ec) &&
+                fs::equivalent(candidate, path, ec)) {
+                result.push_back(candidate);
+                break;
+            }
         }
     }
 
-    void trace_program() {
-        Logger task_log = Logger("tracing", log_);
-        TracingTask tracing_task{task_log, trace_.cmd.front(), trace_.cmd};
-        auto files = runner_.run(tracing_task);
+    return result;
+}
 
-        for (auto& [_, info] : files) {
-            trace_.files.push_back(info);
+class Manifest {
+  public:
+    virtual ~Manifest() = default;
+
+    virtual void load_from_files(std::vector<FileInfo>& files) = 0;
+
+    // virtual void load_from_string(const std::string& text) = 0;
+    // virtual std::string to_text() const = 0;
+};
+
+class DebPackagesManifest : public Manifest {
+  public:
+    DebPackagesManifest(Logger log, DpkgDatabase dpkg_database =
+                                        DpkgDatabase::system_database())
+        : log_{log}, dpkg_database_(dpkg_database) {}
+
+    virtual void load_from_files(std::vector<FileInfo>& files) {
+        auto resolved = [&](FileInfo const& info) {
+            auto path = info.path;
+            for (auto& p : get_root_symlink(path)) {
+                if (auto* pkg = dpkg_database_.lookup_by_path(p); pkg) {
+
+                    LOG_DEBUG(log_)
+                        << "resolved: " << path << " to: " << pkg->name;
+
+                    auto it = packages_.insert(*pkg);
+                    files_.insert_or_assign(p, &(*it.first));
+
+                    // TODO: check the size
+
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        std::erase_if(files, resolved);
+        LOG_INFO(log_) << "Resolved " << files_.size() << " to "
+                       << packages_.size() << " debian packages";
+    };
+
+  private:
+    Logger log_;
+    DpkgDatabase dpkg_database_;
+    std::unordered_map<fs::path, DebPackage const*> files_;
+    std::unordered_set<DebPackage> packages_;
+};
+
+using Manifests = std::vector<std::unique_ptr<Manifest>>;
+
+class ManifestsTask : public Task<Manifests> {
+  public:
+    explicit ManifestsTask(std::vector<FileInfo>& files)
+        : Task{"manifest"}, files_{files} {}
+
+  private:
+    Manifests run(Logger& log,
+                  [[maybe_unused]] std::ostream& ostream) override {
+        Manifests manifests;
+        manifests.push_back(
+            std::make_unique<DebPackagesManifest>(Logger{"deb-manifest", log}));
+
+        LOG_INFO(log) << "Resolving " << files_.size() << " files";
+        for (auto& m : manifests) {
+            m->load_from_files(files_);
         }
 
-        std::sort(trace_.files.begin(), trace_.files.end(),
-                  [](FileInfo f1, FileInfo f2) { return f1.path == f2.path; });
-
-        LOG_INFO(task_log) << "Finished tracing, recorded "
-                           << trace_.files.size() << " files";
+        return manifests;
     }
 
-    void resolve_files() {}
+  private:
+    std::vector<FileInfo>& files_;
+};
 
-    std::ostringstream warnings_;
+class Tracer {
+  public:
+    Tracer(Options options)
+        : options_{options}, log_{"r4r"}, runner_{std::cout} {}
+
+    void trace() {
+        auto envir = runner_.run(CaptureEnvironmentTask{});
+        auto files = runner_.run(TracingTask{options_.cmd});
+        auto manifests = runner_.run(ManifestsTask{files});
+
+        // resolve_files();
+        // create_dockerfile();
+        // build_docker_image();
+        // rerun();
+        // diff();
+
+        // std::cout << envir;
+        // util::print_collection(std::cout, files, '\n');
+    }
+
+    void stop() { runner_.stop(); }
+
+  private:
+    void trace_program() {}
+
     Options options_;
     Logger log_;
     TaskRunner runner_;
-    Trace trace_;
 };
 
 int main(int argc, char* argv[]) {

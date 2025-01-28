@@ -145,3 +145,28 @@ TEST(ResolveFdFilenameTest, Invalid) {
 
     EXPECT_FALSE(resolved_path.has_value());
 }
+
+using namespace std::chrono_literals;
+
+TEST(FormatElapsedTime, Milliseconds) {
+    using namespace std::chrono;
+    EXPECT_EQ(util::format_elapsed_time(999ms), "999ms");
+}
+
+TEST(FormatElapsedTime, SecondsWithPrecision) {
+    using namespace std::chrono;
+    EXPECT_EQ(util::format_elapsed_time(1234ms), "1.2s");
+    EXPECT_EQ(util::format_elapsed_time(59999ms), "60.0s");
+}
+
+TEST(FormatElapsedTime, MinutesAndSeconds) {
+    using namespace std::chrono;
+    EXPECT_EQ(util::format_elapsed_time(1min), "1:00.0");
+    EXPECT_EQ(util::format_elapsed_time(12min + 34s + 321ms), "12:34.3");
+}
+
+TEST(FormatElapsedTime, HoursMinutesSeconds) {
+    using namespace std::chrono;
+    EXPECT_EQ(util::format_elapsed_time(1h), "1:00:00");
+    EXPECT_EQ(util::format_elapsed_time(1h + 1min + 1s), "1:01:01");
+}
