@@ -229,4 +229,25 @@ std::string remove_ansi(std::string const& input) {
     // Replace all matches with an empty string.
     return std::regex_replace(input, ansi_regex, "");
 }
+fs::path create_temp_file(std::string const& prefix,
+                          std::string const& suffix) {
+    static std::random_device rd;
+    static std::mt19937_64 engine(rd());
+    static std::uniform_int_distribution<unsigned long long> dist;
+
+    fs::path temp_dir = fs::temp_directory_path();
+    fs::path temp_file;
+
+    while (true) {
+        unsigned long long random_num = dist(engine);
+        std::string filename = prefix + std::to_string(random_num) + suffix;
+        temp_file = temp_dir / filename;
+
+        if (!fs::exists(temp_file)) {
+            break;
+        }
+    }
+
+    return temp_file;
+}
 } // namespace util

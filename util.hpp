@@ -3,6 +3,7 @@
 #include "common.hpp"
 #include <cstdint>
 #include <memory>
+#include <random>
 #include <ranges>
 #include <regex>
 #include <sstream>
@@ -174,5 +175,7 @@ std::string format_elapsed_time(Duration elapsed) {
     return STR(std::setfill('0') << hrs << ":" << std::setw(2) << mins << ":"
                                  << std::setw(2) << secs);
 }
+
+fs::path create_temp_file(std::string const& prefix, std::string const& suffix);
 
 } // namespace util

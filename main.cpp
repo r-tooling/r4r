@@ -2,6 +2,7 @@
 #include "dpkg_database.hpp"
 #include "logger.hpp"
 #include <csignal>
+#include <fcntl.h>
 #include <filesystem>
 
 #include "cli.hpp"
@@ -25,6 +26,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+// FIXME: use assert instead of runtime_exception
 
 std::function<void(int)> global_signal_handler;
 
@@ -168,6 +171,8 @@ class FileTracer : public SyscallListener {
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override {
+        LOG_DEBUG(log_) << "syscall_entry: " << syscall << " pid: " << pid;
+
         auto it = kHandlers_.find(syscall);
         if (it == kHandlers_.end()) {
             return;
@@ -179,6 +184,7 @@ class FileTracer : public SyscallListener {
         (this->*(handler.entry))(pid, args, &state);
 
         auto [s_it, inserted] = state_.try_emplace(pid, syscall, state);
+
         if (!inserted) {
             throw std::runtime_error(
                 STR("There is already a syscall handler for pid: " << pid));
@@ -187,6 +193,8 @@ class FileTracer : public SyscallListener {
 
     void on_syscall_exit(pid_t pid, SyscallRet ret_val,
                          bool is_error) override {
+        LOG_DEBUG(log_) << "syscall_exit: pid: " << pid;
+
         auto node = state_.extract(pid);
         if (node) {
             auto [syscall, state] = node.mapped();
@@ -208,7 +216,7 @@ class FileTracer : public SyscallListener {
         warnings_.push_back(message);
     }
 
-    void register_file(fs::path file) {
+    void register_file(fs::path const& file) {
         auto size = util::file_size(file);
         FileInfo info{file, {}};
 
@@ -223,17 +231,16 @@ class FileTracer : public SyscallListener {
         files_.try_emplace(file, info);
     }
 
-    void syscall_openat_entry(pid_t pid, SyscallArgs args,
-                              SyscallState* state) {
+    void generic_open_entry(pid_t pid, int dirfd, fs::path const& pathname,
+                            SyscallState* state) {
         fs::path result;
-        fs::path pathname =
-            SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+
+        LOG_DEBUG(log_) << "open " << pathname;
 
         // the logic comes from the behavior of openat(2):
         if (pathname.is_absolute()) {
             result = pathname;
         } else {
-            auto dirfd = static_cast<int>(args[0]);
             if (dirfd == AT_FDCWD) {
                 auto d = util::get_process_cwd(pid);
                 if (!d) {
@@ -258,10 +265,8 @@ class FileTracer : public SyscallListener {
         }
     }
 
-    void syscall_openat_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
-                             bool is_error, SyscallState const* state) {
-        (void)pid;
-
+    void generic_open_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
+                           bool is_error, SyscallState const* state) {
         if (is_error) {
             return;
         }
@@ -275,7 +280,7 @@ class FileTracer : public SyscallListener {
                 if (!exit_file) {
                     LOG_WARN(log_)
                         << "Unable to resolve fd: " << ret_val << " to a path";
-                } else if (exit_file != *entry_file) {
+                } else if (!fs::equivalent(*exit_file, *entry_file)) {
                     LOG_WARN(log_)
                         << "File entry/exit mismatch: " << *entry_file << " vs "
                         << *exit_file;
@@ -287,6 +292,30 @@ class FileTracer : public SyscallListener {
         }
     }
 
+    void syscall_openat_entry(pid_t pid, SyscallArgs args,
+                              SyscallState* state) {
+        auto pathname =
+            SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+
+        generic_open_entry(pid, static_cast<int>(args[0]), pathname, state);
+    }
+
+    void syscall_openat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+                             SyscallState const* state) {
+        generic_open_exit(pid, ret_val, is_error, state);
+    }
+
+    void syscall_open_entry(pid_t pid, SyscallArgs args, SyscallState* state) {
+        auto pathname =
+            SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+        generic_open_entry(pid, AT_FDCWD, pathname, state);
+    }
+
+    void syscall_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+                           SyscallState const* state) {
+        generic_open_exit(pid, ret_val, is_error, state);
+    }
+
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
 #define REG_SYSCALL_HANDLER(nr)                                                \
     {                                                                          \
@@ -296,6 +325,7 @@ class FileTracer : public SyscallListener {
         }                                                                      \
     }
 
+        REG_SYSCALL_HANDLER(open),
         REG_SYSCALL_HANDLER(openat),
 
 #undef REG_SYSCALL_HANDLER
@@ -309,12 +339,13 @@ class FileTracer : public SyscallListener {
 
 class TaskException : public std::runtime_error {
   public:
-    TaskException(std::string const& message) : std::runtime_error{message} {}
+    explicit TaskException(std::string const& message)
+        : std::runtime_error{message} {}
 };
 
 class TracingTask : public Task<std::vector<FileInfo>> {
   public:
-    TracingTask(std::vector<std::string> const& cmd)
+    explicit TracingTask(std::vector<std::string> const& cmd)
         : Task{"trace"}, cmd_(cmd) {}
 
   public:
@@ -326,6 +357,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
         monitor.redirect_stdout(output);
         monitor.redirect_stderr(output);
 
+        // this is just to support the stop()
         monitor_ = &monitor;
 
         auto result = monitor_->start();
@@ -372,7 +404,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
 
   private:
     std::vector<std::string> const& cmd_;
-    SyscallMonitor* monitor_;
+    SyscallMonitor* monitor_{};
 };
 
 struct Options {
@@ -425,7 +457,6 @@ class CaptureEnvironmentTask : public Task<Environment> {
         envir.cwd = std::filesystem::current_path();
         envir.user = get_user_info();
 
-        extern char** environ;
         if (environ != nullptr) {
             for (char** env = environ; *env != nullptr; ++env) {
                 std::string s(*env);
@@ -497,11 +528,12 @@ class Manifest {
 
 class DebPackagesManifest : public Manifest {
   public:
-    DebPackagesManifest(Logger log, DpkgDatabase dpkg_database =
-                                        DpkgDatabase::system_database())
-        : log_{log}, dpkg_database_(dpkg_database) {}
+    explicit DebPackagesManifest(
+        Logger log,
+        DpkgDatabase dpkg_database = DpkgDatabase::system_database())
+        : log_{std::move(log)}, dpkg_database_(std::move(dpkg_database)) {}
 
-    virtual void load_from_files(std::vector<FileInfo>& files) {
+    void load_from_files(std::vector<FileInfo>& files) override {
         auto resolved = [&](FileInfo const& info) {
             auto path = info.path;
             for (auto& p : get_root_symlink(path)) {
@@ -513,7 +545,7 @@ class DebPackagesManifest : public Manifest {
                     auto it = packages_.insert(*pkg);
                     files_.insert_or_assign(p, &(*it.first));
 
-                    // TODO: check the size
+                    // TODO: check that the size is the same
 
                     return true;
                 }
@@ -522,7 +554,7 @@ class DebPackagesManifest : public Manifest {
         };
 
         std::erase_if(files, resolved);
-        LOG_INFO(log_) << "Resolved " << files_.size() << " to "
+        LOG_INFO(log_) << "Resolved " << files_.size() << " files to "
                        << packages_.size() << " debian packages";
     };
 
@@ -531,6 +563,59 @@ class DebPackagesManifest : public Manifest {
     DpkgDatabase dpkg_database_;
     std::unordered_map<fs::path, DebPackage const*> files_;
     std::unordered_set<DebPackage> packages_;
+};
+
+class IgnoreFilesManifest : public Manifest {
+  public:
+    void load_from_files(std::vector<FileInfo>& files) override {
+        std::erase_if(files, [&](FileInfo const& info) {
+            auto& path = info.path;
+            if (*ignored.find_last_matching(path)) {
+                LOG_DEBUG(log_) << "resolving: " << path << " to: ignored";
+                return true;
+            }
+            return false;
+        });
+
+        // ignore the .uuid files from fontconfig
+        static std::unordered_set<fs::path> const fontconfig_dirs = {
+            "/usr/share/fonts", "/usr/share/poppler", "/usr/share/texmf/fonts"};
+
+        std::erase_if(files, [&](FileInfo const& info) {
+            auto& path = info.path;
+            for (auto const& d : fontconfig_dirs) {
+                if (util::is_sub_path(path, d)) {
+                    if (path.filename() == ".uuid") {
+                        LOG_DEBUG(log_)
+                            << "resolving: " << path << " to: ignored";
+                        return true;
+                    }
+                }
+            }
+            return false;
+        });
+    }
+
+  private:
+    static inline util::FileSystemTrie<bool> ignored = [] {
+        util::FileSystemTrie<bool> trie{false};
+        trie.insert("/dev", true);
+        trie.insert("/etc/ld.so.cache", true);
+        trie.insert("/etc/nsswitch.conf", true);
+        trie.insert("/etc/passwd", true);
+        trie.insert("/proc", true);
+        trie.insert("/sys", true);
+        // created by locale-gen
+        trie.insert("/usr/lib/locale/locale-archive", true);
+        // fonts should be installed from a package
+        trie.insert("/usr/local/share/fonts", true);
+        // this might be a bit too drastic, but cache is usually not
+        // transferable anyway
+        trie.insert("/var/cache", true);
+        return trie;
+    }();
+
+    Logger log_;
 };
 
 using Manifests = std::vector<std::unique_ptr<Manifest>>;
@@ -547,8 +632,8 @@ class ManifestsTask : public Task<Manifests> {
         manifests.push_back(
             std::make_unique<DebPackagesManifest>(Logger{"deb-manifest", log}));
 
-        LOG_INFO(log) << "Resolving " << files_.size() << " files";
         for (auto& m : manifests) {
+            LOG_INFO(log) << "Resolving " << files_.size() << " files";
             m->load_from_files(files_);
         }
 
@@ -561,8 +646,8 @@ class ManifestsTask : public Task<Manifests> {
 
 class Tracer {
   public:
-    Tracer(Options options)
-        : options_{options}, log_{"r4r"}, runner_{std::cout} {}
+    explicit Tracer(Options options)
+        : options_{std::move(options)}, log_{"r4r"}, runner_{std::cout} {}
 
     void trace() {
         auto envir = runner_.run(CaptureEnvironmentTask{});

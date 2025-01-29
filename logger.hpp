@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -15,7 +16,6 @@
 #include <utility>
 #include <vector>
 
-// TODO: upgrade to ubuntu:24.04
 #ifdef USE_STD_FORMAT
 #include <format>
 #endif
@@ -99,14 +99,14 @@ class LogPatternToken {
     // the TEXT, COLOR kind has content
     std::optional<std::string> payload_;
 
-    inline static const std::array keywords_ = {
+    inline static std::array const keywords_ = {
 #define X(a, b) #b##sv,
         LOG_PATTER_TOKEN_KINDS
 #
 #undef X
     };
 
-    inline static const std::unordered_map<std::string_view, std::string_view>
+    inline static std::unordered_map<std::string_view, std::string_view> const
         fg_colors_ = {{"red", "\033[31m"},    {"green", "\033[32m"},
                       {"blue", "\033[34m"},   {"cyan", "\033[36m"},
                       {"yellow", "\033[33m"}, {"magenta", "\033[35m"},
@@ -201,8 +201,8 @@ class LogPatternParser {
 
     [[nodiscard]] bool eof() const { return pos == end; }
 
-    const char* pos;
-    const char* const end;
+    char const* pos;
+    char const* const end;
 };
 
 class Logger {
@@ -297,7 +297,7 @@ class Logger {
         }
         auto output = sinks_[static_cast<int>(entry.level)];
 
-        static const std::array levels = {
+        static std::array const levels = {
 #define X(a, b) b,
             LOG_LEVELS
 #undef X
@@ -305,7 +305,7 @@ class Logger {
 
         auto const& pattern = patterns_[static_cast<int>(entry.level)];
 
-        for (const auto& token : pattern) {
+        for (auto const& token : pattern) {
             switch (token.kind()) {
             case LogPatternToken::Kind::Text:
             case LogPatternToken::Kind::Color:
@@ -334,7 +334,7 @@ class Logger {
         *output << "\n";
     }
 
-    const std::string name_;
+    std::string const name_;
     std::array<std::vector<LogPatternToken>, LogLevelCount> patterns_;
     std::array<std::ostream*, LogLevelCount> sinks_{};
     logger_clock::time_point start_time_ = logger_clock::now();
@@ -358,7 +358,7 @@ class LogStream {
     bool operator!() const { return !logged_ && logger_.is_enabled(level_); }
 
     template <typename T>
-    LogStream& operator<<(const T& value) {
+    LogStream& operator<<(T const& value) {
         stream_ << value;
         logged_ = true;
         return *this;

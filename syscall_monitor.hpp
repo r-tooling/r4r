@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <sys/ptrace.h>
@@ -12,6 +13,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using SyscallArgs = std::uint64_t[6];
@@ -33,9 +35,12 @@ class SyscallMonitor {
         std::optional<int> detail;
     };
 
+    SyscallMonitor(std::function<int()> tracee, SyscallListener& listener)
+        : tracee_{std::move(tracee)}, listener_{listener} {}
+
     SyscallMonitor(std::vector<std::string> const& cmd,
                    SyscallListener& listener)
-        : cmd_{cmd}, listener_{listener} {}
+        : SyscallMonitor{spawn_process(cmd), listener} {}
 
     void redirect_stdout(std::ostream& os) { stdout_ = &os; }
 
@@ -84,7 +89,10 @@ class SyscallMonitor {
 
     static void forward_output(int read_fd, std::ostream& os, char const* tag);
 
-    std::vector<std::string> const& cmd_;
+    static std::function<int()>
+    spawn_process(std::vector<std::string> const& cmd);
+
+    std::function<int()> tracee_;
     SyscallListener& listener_;
     std::ostream* stdout_{&std::cout};
     std::ostream* stderr_{&std::cerr};
@@ -147,13 +155,21 @@ inline void SyscallMonitor::process_tracee(util::Pipe const& out,
     // stop itself and wait until the parent is ready
     raise(SIGSTOP);
 
-    auto c_args = util::collection_to_c_array(cmd_);
-    auto program = cmd_.front();
-    execvp(program.c_str(), c_args.get());
-
-    std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";
-
-    exit(kSpawnErrorExitCode);
+    int exit_code = tracee_();
+    exit(exit_code);
+    //    if (fun_) {
+    //        (*fun_)();
+    //        exit(0);
+    //    } else {
+    //        auto c_args = util::collection_to_c_array(cmd_);
+    //        auto program = cmd_.front();
+    //        execvp(program.c_str(), c_args.get());
+    //
+    //        std::cerr << "execvp: " << strerror(errno) << " (" << errno <<
+    //        ")\n";
+    //
+    //        exit(kSpawnErrorExitCode);
+    //    }
 }
 
 inline SyscallMonitor::Result
@@ -352,7 +368,7 @@ inline void SyscallMonitor::handle_stop(pid_t pid, int status) {
         event == PTRACE_EVENT_VFORK) {
 
         // new child was created
-        // try to setup tracing
+        // try to set up tracing
         pid_t child_pid = 0;
         if (ptrace(PTRACE_GETEVENTMSG, pid, nullptr, &child_pid) == -1) {
             // FIXME: logging
@@ -408,4 +424,17 @@ inline void SyscallMonitor::forward_output(int read_fd, std::ostream& os,
         os.write(buffer.data(), bytes);
         os.flush();
     }
+}
+
+inline std::function<int()>
+SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
+    return [&cmd]() -> int {
+        auto c_args = util::collection_to_c_array(cmd);
+        auto program = cmd.front();
+        execvp(program.c_str(), c_args.get());
+
+        std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";
+
+        return kSpawnErrorExitCode;
+    };
 }
