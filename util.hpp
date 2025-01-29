@@ -178,4 +178,6 @@ std::string format_elapsed_time(Duration elapsed) {
 
 fs::path create_temp_file(std::string const& prefix, std::string const& suffix);
 
+fs::path get_user_cache_dir();
+
 } // namespace util

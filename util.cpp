@@ -240,7 +240,7 @@ fs::path create_temp_file(std::string const& prefix,
 
     while (true) {
         unsigned long long random_num = dist(engine);
-        std::string filename = prefix + std::to_string(random_num) + suffix;
+        std::string filename = STR(prefix << random_num << suffix);
         temp_file = temp_dir / filename;
 
         if (!fs::exists(temp_file)) {
@@ -250,4 +250,21 @@ fs::path create_temp_file(std::string const& prefix,
 
     return temp_file;
 }
+
+fs::path get_user_cache_dir() {
+    // assume Linux/Unix
+    char const* xdgCacheHome = std::getenv("XDG_CACHE_HOME");
+
+    if (xdgCacheHome) {
+        return {xdgCacheHome};
+    }
+
+    char const* home = std::getenv("HOME");
+    if (home) {
+        return fs::path(home) / ".cache";
+    } else {
+        throw std::runtime_error("Unable to get user HOME directory");
+    }
+}
+
 } // namespace util

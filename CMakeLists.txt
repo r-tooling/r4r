@@ -7,31 +7,9 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 project("r4r")
 
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ignored_file_list.cpp
-    COMMAND ${CMAKE_SOURCE_DIR}/tools/generate_ignored_file_list.sh ${CMAKE_CURRENT_BINARY_DIR}/ignored_file_list.cpp
-    COMMAND clang-format -i ${CMAKE_CURRENT_BINARY_DIR}/ignored_file_list.cpp
-    DEPENDS ${CMAKE_SOURCE_DIR}/tools/generate_ignored_file_list.sh
-    COMMENT "Generating ignored_file_list.cpp"
-    VERBATIM
-)
-
-add_custom_target(generate_ignored_file_list
-    ALL
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ignored_file_list.cpp
-)
-
-set_property(
-    DIRECTORY
-    APPEND
-    PROPERTY ADDITIONAL_CLEAN_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/ignored_file_list.cpp
-)
-
 add_executable(
   ${PROJECT_NAME}
   main.cpp
-  ignored_file_list.cpp
   util.cpp
 )
 

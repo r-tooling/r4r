@@ -1,5 +1,7 @@
 #include "common.hpp"
+#include "default_image_files.hpp"
 #include "dpkg_database.hpp"
+#include "filesystem_trie.hpp"
 #include "logger.hpp"
 #include <csignal>
 #include <fcntl.h>
@@ -15,7 +17,6 @@
 #include <iostream>
 #include <memory>
 #include <pwd.h>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -567,10 +568,23 @@ class DebPackagesManifest : public Manifest {
 
 class IgnoreFilesManifest : public Manifest {
   public:
+    explicit IgnoreFilesManifest(Logger log) : log_{std::move(log)} {}
+
     void load_from_files(std::vector<FileInfo>& files) override {
         std::erase_if(files, [&](FileInfo const& info) {
             auto& path = info.path;
-            if (*ignored.find_last_matching(path)) {
+            if (auto f = kDefaultImageFiles.find(path); f) {
+                // FIXME: check the size, perm, ...
+                LOG_DEBUG(log_)
+                    << "resolving: " << path << " to: ignored - image default";
+                return true;
+            }
+            return false;
+        });
+
+        std::erase_if(files, [&](FileInfo const& info) {
+            auto& path = info.path;
+            if (*kIgnoredFiles.find_last_matching(path)) {
                 LOG_DEBUG(log_) << "resolving: " << path << " to: ignored";
                 return true;
             }
@@ -597,7 +611,48 @@ class IgnoreFilesManifest : public Manifest {
     }
 
   private:
-    static inline util::FileSystemTrie<bool> ignored = [] {
+    static util::FileSystemTrie<ImageFileInfo> load_default_files() {
+        auto default_files = []() {
+            if (fs::exists(kImageFileCache)) {
+                return DefaultImageFiles::from_file(kImageFileCache);
+            } else {
+                // FIXME: log
+                auto files = DefaultImageFiles::from_image(kImageName,
+                                                           kBlacklistPatterns);
+                try {
+                    fs::create_directories(kImageFileCache.parent_path());
+                    std::ofstream out{kImageFileCache};
+                    files.save(out);
+                } catch (std::exception const& e) {
+                    // FIXME: log
+                    std::cerr << "Unable to store default image file list to "
+                              << kImageFileCache << ": " << e.what();
+                }
+                // FIXME: log
+                return files;
+            }
+        }();
+
+        util::FileSystemTrie<ImageFileInfo> trie{nullptr};
+        for (auto& info : default_files.files()) {
+            trie.insert(info.path, info);
+        }
+        return trie;
+    }
+
+    static inline std::string const kImageName = "ubuntu:22.04";
+
+    static inline fs::path const kImageFileCache = []() {
+        return util::get_user_cache_dir() / "r4r" / (kImageName + ".cache");
+    }();
+
+    static inline std::vector<std::string> const kBlacklistPatterns = {
+        "/dev/*", "/sys/*", "/proc/*"};
+
+    static inline util::FileSystemTrie<ImageFileInfo> const kDefaultImageFiles =
+        load_default_files();
+
+    static inline util::FileSystemTrie<bool> kIgnoredFiles = [] {
         util::FileSystemTrie<bool> trie{false};
         trie.insert("/dev", true);
         trie.insert("/etc/ld.so.cache", true);
@@ -629,6 +684,8 @@ class ManifestsTask : public Task<Manifests> {
     Manifests run(Logger& log,
                   [[maybe_unused]] std::ostream& ostream) override {
         Manifests manifests;
+        manifests.push_back(std::make_unique<IgnoreFilesManifest>(
+            Logger{"ignore-manifest", log}));
         manifests.push_back(
             std::make_unique<DebPackagesManifest>(Logger{"deb-manifest", log}));
 

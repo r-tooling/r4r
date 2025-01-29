@@ -24,6 +24,10 @@ class FileSystemTrie {
     std::shared_ptr<Node> root_;
 
   public:
+    explicit FileSystemTrie(T const* default_value)
+        : default_value_{default_value},
+          root_{std::make_shared<Node>(default_value_)} {};
+
     explicit FileSystemTrie(T const& default_value) : default_value_{nullptr} {
         auto it = unique_values_.insert(default_value);
         default_value_ = &*(it.first);
