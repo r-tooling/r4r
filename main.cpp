@@ -168,11 +168,9 @@ class FileTracer : public SyscallListener {
   public:
     using Files = std::unordered_map<fs::path, FileInfo>;
 
-    explicit FileTracer(Logger log) : log_{std::move(log)} {}
-
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override {
-        LOG_DEBUG(log_) << "syscall_entry: " << syscall << " pid: " << pid;
+        LOG_TRACE(log_) << "syscall_entry: " << syscall << " pid: " << pid;
 
         auto it = kHandlers_.find(syscall);
         if (it == kHandlers_.end()) {
@@ -194,7 +192,7 @@ class FileTracer : public SyscallListener {
 
     void on_syscall_exit(pid_t pid, SyscallRet ret_val,
                          bool is_error) override {
-        LOG_DEBUG(log_) << "syscall_exit: pid: " << pid;
+        LOG_TRACE(log_) << "syscall_exit: pid: " << pid;
 
         auto node = state_.extract(pid);
         if (node) {
@@ -332,7 +330,7 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
-    Logger log_;
+    static inline Logger log_ = LogManager::logger("file-tracer");
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
     Warnings warnings_;
@@ -353,7 +351,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
     std::vector<FileInfo> run(Logger& log, std::ostream& output) override {
         LOG_INFO(log) << "Tracing program: " << util::mk_string(cmd_, ' ');
 
-        FileTracer tracer{log};
+        FileTracer tracer;
         SyscallMonitor monitor{cmd_, tracer};
         monitor.redirect_stdout(output);
         monitor.redirect_stderr(output);
@@ -530,9 +528,8 @@ class Manifest {
 class DebPackagesManifest : public Manifest {
   public:
     explicit DebPackagesManifest(
-        Logger log,
         DpkgDatabase dpkg_database = DpkgDatabase::system_database())
-        : log_{std::move(log)}, dpkg_database_(std::move(dpkg_database)) {}
+        : dpkg_database_(std::move(dpkg_database)) {}
 
     void load_from_files(std::vector<FileInfo>& files) override {
         auto resolved = [&](FileInfo const& info) {
@@ -560,7 +557,7 @@ class DebPackagesManifest : public Manifest {
     };
 
   private:
-    Logger log_;
+    static inline Logger log_ = LogManager::logger("manifest.dpkg");
     DpkgDatabase dpkg_database_;
     std::unordered_map<fs::path, DebPackage const*> files_;
     std::unordered_set<DebPackage> packages_;
@@ -568,8 +565,6 @@ class DebPackagesManifest : public Manifest {
 
 class IgnoreFilesManifest : public Manifest {
   public:
-    explicit IgnoreFilesManifest(Logger log) : log_{std::move(log)} {}
-
     void load_from_files(std::vector<FileInfo>& files) override {
         std::erase_if(files, [&](FileInfo const& info) {
             auto& path = info.path;
@@ -670,7 +665,7 @@ class IgnoreFilesManifest : public Manifest {
         return trie;
     }();
 
-    Logger log_;
+    static inline Logger log_ = LogManager::logger("manifest.ignore");
 };
 
 using Manifests = std::vector<std::unique_ptr<Manifest>>;
@@ -684,10 +679,8 @@ class ManifestsTask : public Task<Manifests> {
     Manifests run(Logger& log,
                   [[maybe_unused]] std::ostream& ostream) override {
         Manifests manifests;
-        manifests.push_back(std::make_unique<IgnoreFilesManifest>(
-            Logger{"ignore-manifest", log}));
-        manifests.push_back(
-            std::make_unique<DebPackagesManifest>(Logger{"deb-manifest", log}));
+        manifests.push_back(std::make_unique<IgnoreFilesManifest>());
+        manifests.push_back(std::make_unique<DebPackagesManifest>());
 
         for (auto& m : manifests) {
             LOG_INFO(log) << "Resolving " << files_.size() << " files";
@@ -704,7 +697,7 @@ class ManifestsTask : public Task<Manifests> {
 class Tracer {
   public:
     explicit Tracer(Options options)
-        : options_{std::move(options)}, log_{"r4r"}, runner_{std::cout} {}
+        : options_{std::move(options)}, runner_{std::cout} {}
 
     void trace() {
         auto envir = runner_.run(CaptureEnvironmentTask{});
@@ -726,8 +719,8 @@ class Tracer {
   private:
     void trace_program() {}
 
+    static inline Logger log_ = LogManager::logger("tracer");
     Options options_;
-    Logger log_;
     TaskRunner runner_;
 };
 

@@ -3,11 +3,13 @@
 #include "common.hpp"
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <mutex>
+#include <memory>
 #include <optional>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -16,20 +18,17 @@
 #include <utility>
 #include <vector>
 
-#ifdef USE_STD_FORMAT
-#include <format>
-#endif
-
 using namespace std::string_view_literals;
 using namespace std::string_literals;
 
 typedef std::chrono::steady_clock logger_clock;
 
 #define LOG_LEVELS                                                             \
-    X(Debug, "DEBUG")                                                          \
-    X(Info, "INFO")                                                            \
-    X(Warn, "WARN")                                                            \
-    X(Error, "ERROR")
+    X(Trace, "TRC")                                                            \
+    X(Debug, "DBG")                                                            \
+    X(Info, "INF")                                                             \
+    X(Warn, "WRN")                                                             \
+    X(Error, "ERR")
 
 enum class LogLevel {
 #define X(a, b) a,
@@ -37,11 +36,12 @@ enum class LogLevel {
 #undef X
 };
 
-constexpr size_t LogLevelCount = static_cast<size_t>(LogLevel::Error) + 1;
+constexpr size_t kLogLevels = static_cast<size_t>(LogLevel::Error) + 1;
 
-struct LogEntry {
+struct LogEvent {
+    std::string_view logger_name;
     LogLevel level;
-    logger_clock::time_point time;
+    logger_clock::time_point timestamp;
     std::string message;
 };
 
@@ -191,11 +191,7 @@ class LogPatternParser {
             pos++;
             return *kind;
         } else {
-#ifdef USE_STD_FORMAT
-            throw std::runtime_error(std::format("Unknown keyword: {}", kw));
-#else
             throw std::runtime_error(STR("Unknown keyword: " << kw));
-#endif
         }
     }
 
@@ -205,153 +201,94 @@ class LogPatternParser {
     char const* const end;
 };
 
+class LogFormatter {
+  public:
+    virtual ~LogFormatter() = default;
+    virtual void format(LogEvent const& event, std::ostream& dst) = 0;
+};
+
+class PatternLogFormatter : public LogFormatter {
+  public:
+    explicit PatternLogFormatter(std::string_view const pattern)
+        : pattern_{LogPatternParser(pattern).parse()} {}
+
+    void format(LogEvent const& event, std::ostream& dst) override;
+
+  private:
+    std::vector<LogPatternToken> pattern_;
+};
+
+class LogSink {
+  public:
+    virtual ~LogSink() = default;
+    LogSink(LogSink&&) = default;
+    LogSink() = default;
+    virtual void sink(LogEvent const& event) = 0;
+};
+
+class OutputStreamSink : public LogSink {
+  public:
+    OutputStreamSink(OutputStreamSink&&) = default;
+    OutputStreamSink(std::shared_ptr<LogFormatter> formatter, std::ostream& dst)
+        : formatter_{formatter}, dst_{dst} {}
+
+    void sink(LogEvent const& event) override {
+        formatter_->format(event, dst_);
+    };
+
+  private:
+    std::shared_ptr<LogFormatter> formatter_;
+    std::ostream& dst_;
+};
+
 class Logger {
   public:
-    explicit Logger(std::string name, std::ostream& sink = std::cout,
-                    std::string const& pattern = "{message}")
-        : name_(std::move(name)) {
-        set_pattern(pattern);
-        set_sink(sink);
-    }
-
-    Logger(std::string const& name, std::string const& pattern)
-        : Logger{name, std::cout, pattern} {}
-
-    Logger(std::string name, Logger const& log)
-        : name_{name}, patterns_{log.patterns_}, sinks_{log.sinks_} {}
-
-    void set_sink(LogLevel level, std::ostream& sink) {
-        sinks_[static_cast<int>(level)] = &sink;
-    }
-
-    void set_sink(std::ostream& sink) {
-        for (size_t i = 0; i < LogLevelCount; i++) {
-            set_sink(static_cast<LogLevel>(i), sink);
-        }
-    }
-
-    void set_pattern(LogLevel level, std::string const& pattern) {
-        auto tokens = LogPatternParser(pattern).parse();
-        patterns_[static_cast<int>(level)] = tokens;
-    }
-
-    void set_pattern(std::string const& pattern) {
-        for (size_t i = 0; i < LogLevelCount; i++) {
-            set_pattern(static_cast<LogLevel>(i), pattern);
-        }
-    }
-
     [[nodiscard]] bool is_enabled(LogLevel level) const {
         std::uint8_t n = 1 << static_cast<int>(level);
         return (enabled_levels_ & n) == n;
     }
 
-    void enable(LogLevel level) {
-        enabled_levels_ |= 1 << static_cast<int>(level);
-    }
-
-    void disable(LogLevel level) {
-        enabled_levels_ ^= 1 << static_cast<int>(level);
-    }
-
-#ifdef USE_STD_FORMAT
-    template <typename... Args>
-    void debug(std::format_string<Args...> fmt, Args&&... args) {
-        log(LogLevel::Debug, fmt, std::forward<Args>(args)...);
-    }
-
-    template <typename... Args>
-    void info(std::format_string<Args...> fmt, Args&&... args) {
-        log(LogLevel::Info, fmt, std::forward<Args>(args)...);
-    }
-
-    template <typename... Args>
-    void warn(std::format_string<Args...> fmt, Args&&... args) {
-        log(LogLevel::Warn, fmt, std::forward<Args>(args)...);
-    }
-
-    template <typename... Args>
-    void error(std::format_string<Args...> fmt, Args&&... args) {
-        log(LogLevel::Error, fmt, std::forward<Args>(args)...);
-    }
-#endif
+    [[nodiscard]] std::string_view name() const { return name_; }
 
   private:
-#ifdef USE_STD_FORMAT
-    template <typename... Args>
-    void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
-        if (!is_enabled(level)) {
+    explicit Logger(std::string name) : name_(std::move(name)) {}
+
+    void log(LogEvent const& event) {
+        if (!is_enabled(event.level)) {
             return;
         }
-        auto now = logger_clock::now();
-        std::string message = std::format(fmt, args...);
-
-        LogEntry entry{level, now, message};
-        log(entry);
+        sinks_[static_cast<int>(event.level)]->sink(event);
     }
-#endif
 
-    void log(LogEntry const& entry) {
-        if (!is_enabled(entry.level)) {
-            return;
+    void set_sink(LogLevel level, std::shared_ptr<LogSink> sink) {
+        sinks_[static_cast<int>(level)] = sink;
+    }
+
+    void set_sink(std::shared_ptr<LogSink> sink) {
+        for (size_t i = 0; i < kLogLevels; i++) {
+            sinks_[i] = sink;
         }
-        auto output = sinks_[static_cast<int>(entry.level)];
-
-        static std::array const levels = {
-#define X(a, b) b,
-            LOG_LEVELS
-#undef X
-        };
-
-        auto const& pattern = patterns_[static_cast<int>(entry.level)];
-
-        for (auto const& token : pattern) {
-            switch (token.kind()) {
-            case LogPatternToken::Kind::Text:
-            case LogPatternToken::Kind::Color:
-                *output << token.payload();
-                break;
-            case LogPatternToken::Kind::Logger:
-                *output << name_;
-                break;
-            case LogPatternToken::Kind::Level:
-                *output << levels[static_cast<int>(entry.level)];
-                break;
-            case LogPatternToken::Kind::ElapsedTime: {
-                auto d = entry.time - start_time_;
-                *output
-                    << std::chrono::duration_cast<std::chrono::milliseconds>(d)
-                           .count()
-                    << "ms";
-                break;
-            }
-            case LogPatternToken::Kind::Message:
-                *output << entry.message;
-                break;
-            }
-        }
-
-        *output << "\n";
     }
 
     std::string const name_;
-    std::array<std::vector<LogPatternToken>, LogLevelCount> patterns_;
-    std::array<std::ostream*, LogLevelCount> sinks_{};
-    logger_clock::time_point start_time_ = logger_clock::now();
-    std::uint8_t enabled_levels_{(1 << LogLevelCount) - 1};
+    std::array<std::shared_ptr<LogSink>, kLogLevels> sinks_{};
+    std::uint8_t enabled_levels_{(1 << kLogLevels) - 1};
 
     friend class LogStream;
+    friend class LogManager;
 };
 
 class LogStream {
   public:
     LogStream(Logger& logger, LogLevel level)
-        : logger_{logger}, level_{level}, time_{logger_clock::now()}, stream_{},
-          logged_{false} {}
+        : logger_{logger}, level_{level}, timestamp_{logger_clock::now()},
+          stream_{}, logged_{false} {}
 
     ~LogStream() {
-        LogEntry entry = {
-            .level = level_, .time = time_, .message = stream_.str()};
+        LogEvent entry = {.logger_name = logger_.name(),
+                          .level = level_,
+                          .timestamp = timestamp_,
+                          .message = stream_.str()};
         logger_.log(entry);
     }
 
@@ -367,7 +304,7 @@ class LogStream {
   private:
     Logger& logger_;
     LogLevel level_;
-    logger_clock::time_point time_;
+    logger_clock::time_point timestamp_;
     std::ostringstream stream_;
     bool logged_;
 };
@@ -376,7 +313,132 @@ class LogStream {
     for (auto _log_stream = LogStream((logger), (level)); !_log_stream;)       \
     _log_stream
 
+#define LOG_TRACE(logger) LOG(logger, LogLevel::Trace)
 #define LOG_DEBUG(logger) LOG(logger, LogLevel::Debug)
 #define LOG_INFO(logger) LOG(logger, LogLevel::Info)
 #define LOG_WARN(logger) LOG(logger, LogLevel::Warn)
 #define LOG_ERROR(logger) LOG(logger, LogLevel::Error)
+
+class LogManager {
+  public:
+    static LogManager& instance() {
+        static LogManager instance;
+        return instance;
+    }
+    static Logger logger(std::string const& name) {
+        return instance().get_or_create_logger(name);
+    }
+
+    // void enable(LogLevel level) {
+    //     enabled_levels_ |= 1 << static_cast<int>(level);
+    // }
+    //
+    // void disable(LogLevel level) {
+    //     enabled_levels_ ^= 1 << static_cast<int>(level);
+    // }
+
+    void set_sink(std::string const& name, LogLevel level,
+                  std::shared_ptr<LogSink> sink) {
+        get_or_create_logger(name).sinks_[static_cast<int>(level)] = sink;
+    }
+
+    static std::chrono::steady_clock::time_point logger_start() {
+        return logger_start_;
+    }
+
+  private:
+    LogManager() { configure_root_logger(); }
+
+    void configure_root_logger();
+
+    Logger& get_or_create_logger(std::string const& name);
+
+    void configure_logger(Logger& logger);
+
+    Logger& parent_logger(Logger& logger);
+
+    static inline std::string const kRootLoggerName = "";
+    static inline std::chrono::steady_clock::time_point const logger_start_ =
+        std::chrono::steady_clock::now();
+
+    std::unordered_map<std::string, Logger> loggers_;
+};
+
+inline Logger& LogManager::get_or_create_logger(std::string const& name) {
+    if (auto it = loggers_.find(name); it != loggers_.end()) {
+        return it->second;
+    }
+
+    auto new_logger = Logger{name};
+    configure_logger(new_logger);
+    auto it = loggers_.emplace(name, std::move(new_logger));
+    return it.first->second;
+}
+
+inline void LogManager::configure_logger(Logger& logger) {
+    auto parent = parent_logger(logger);
+    logger.sinks_ = parent.sinks_;
+}
+
+inline Logger& LogManager::parent_logger(Logger& logger) {
+    std::string name = std::string{logger.name()};
+    auto pos = name.rfind('.');
+
+    while (pos != std::string::npos) {
+        auto parent_name = name.substr(0, pos);
+        auto it = loggers_.find(parent_name);
+        if (it != loggers_.end()) {
+            return it->second;
+        }
+        pos = parent_name.rfind('.');
+    }
+
+    return loggers_.at(kRootLoggerName);
+}
+
+inline void LogManager::configure_root_logger() {
+    assert(!loggers_.contains(kRootLoggerName));
+
+    auto log = Logger(kRootLoggerName);
+    auto sink = std::make_shared<OutputStreamSink>(
+        std::make_shared<PatternLogFormatter>("[{level}] {logger}: {message}"),
+        std::cout);
+    log.set_sink(sink);
+    loggers_.emplace(kRootLoggerName, log);
+}
+
+inline void PatternLogFormatter::format(LogEvent const& event,
+                                        std::ostream& dst) {
+    static std::array const levels = {
+#define X(a, b) b,
+        LOG_LEVELS
+#undef X
+    };
+
+    for (auto const& token : pattern_) {
+        switch (token.kind()) {
+        case LogPatternToken::Kind::Text:
+        case LogPatternToken::Kind::Color:
+            dst << token.payload();
+            break;
+        case LogPatternToken::Kind::Logger:
+            dst << event.logger_name;
+            break;
+        case LogPatternToken::Kind::Level:
+            dst << levels[static_cast<int>(event.level)];
+            break;
+        case LogPatternToken::Kind::ElapsedTime: {
+            auto d = event.timestamp - LogManager::logger_start();
+            dst << std::chrono::duration_cast<std::chrono::milliseconds>(d)
+                       .count()
+                << "ms";
+            break;
+        }
+        case LogPatternToken::Kind::Message:
+            dst << event.message;
+            break;
+        }
+    }
+
+    dst << "\n";
+}
