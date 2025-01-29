@@ -17,8 +17,6 @@ namespace util {
 
 bool is_sub_path(fs::path const& path, fs::path const& base);
 
-std::string execute_command(std::string const& command);
-
 std::string escape_env_var_definition(std::string env);
 
 std::string escape_cmd_arg(std::string const& arg);
@@ -48,31 +46,38 @@ std::string mk_string(T const& collection, S const& sep) {
 
 std::vector<std::string> string_split(std::string const& str, char delim);
 
-template <typename FileCollection>
-void create_tar_archive(fs::path const& archive, FileCollection const& files) {
-    FILE* temp_file = std::tmpfile();
-    if (!temp_file) {
-        throw std::runtime_error("Error creating temporary file.");
-    }
-
-    for (auto const& file : files) {
-        std::fprintf(temp_file, "%s\n", file.string().c_str());
-    }
-
-    std::fflush(temp_file);
-    std::string command = "tar --absolute-names --preserve-permissions -cvf " +
-                          archive.string() + " --files-from=/dev/fd/" +
-                          std::to_string(fileno(temp_file));
-
-    try {
-        util::execute_command(command);
-    } catch (std::exception const& e) {
-        std::fclose(temp_file);
-        std::string msg =
-            "Error creating tar archive: " + archive.string() + ": " + e.what();
-        throw std::runtime_error(msg);
-    }
-}
+// template <typename FileCollection>
+// void create_tar_archive(fs::path const& archive, FileCollection const& files)
+// {
+//     FILE* temp_file = std::tmpfile();
+//     if (!temp_file) {
+//         throw std::runtime_error("Error creating temporary file.");
+//     }
+//
+//     for (auto const& file : files) {
+//         std::fprintf(temp_file, "%s\n", file.string().c_str());
+//     }
+//
+//     std::fflush(temp_file);
+//     std::vector<std::string> command = {"tar",
+//                                         "--absolute-names",
+//                                         "--preserve-permissions",
+//                                         "-cvf",
+//                                         archive.string(),
+//                                         "--files-from",
+//                                         "/dev/fd/" +
+//                                             std::to_string(fileno(temp_file))};
+//
+//     auto [tar_out, exit_code] = execute_command(command, true);
+//     if (exit_code != 0) {
+//         std::fclose(temp_file);
+//         std::string msg = STR("Error creating tar archive: "
+//                               << archive.string() << ". tar exit code:  "
+//                               << exit_code << "\nOutput:\n"
+//                               << tar_out);
+//         throw std::runtime_error(msg);
+//     }
+// }
 
 template <typename Collection>
 std::unique_ptr<typename Collection::value_type[]>

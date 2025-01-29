@@ -2,11 +2,13 @@
 
 #include "common.hpp"
 #include "filesystem_trie.hpp"
+#include "process.hpp"
 #include "util.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -62,8 +64,15 @@ inline DebPackageMap parse_installed_packages(std::istream& dpkg_output) {
 }
 
 inline DebPackageMap load_installed_packages() {
-    std::istringstream dpkg_output(util::execute_command("dpkg -l"));
-    return parse_installed_packages(dpkg_output);
+    auto [out, exit_code] = (execute_command({"dpkg", "-l"}));
+    if (exit_code != 0) {
+        // FIXME: create some wrapper over this pattern
+        // FIXME: this is too harsh, let allow run without dpkg ?
+        throw std::runtime_error(STR("Unable to execute dpkg -l, exit code:"
+                                     << exit_code << "\nOutput: " << out));
+    }
+    std::istringstream stream{out};
+    return parse_installed_packages(stream);
 }
 
 inline void process_list_file(util::FileSystemTrie<std::string>& trie,

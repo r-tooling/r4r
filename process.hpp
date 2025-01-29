@@ -5,7 +5,6 @@
 #include "util.hpp"
 #include <array>
 #include <cstdio>
-#include <cstring>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -34,10 +33,12 @@ class ProcessStreambuf : public std::streambuf {
 
   protected:
     int underflow() override {
-        if (pipe_fd_ == -1) return traits_type::eof();
+        if (pipe_fd_ == -1)
+            return traits_type::eof();
 
         ssize_t bytes_read = read(pipe_fd_, buffer_.data(), buffer_.size());
-        if (bytes_read <= 0) return traits_type::eof();
+        if (bytes_read <= 0)
+            return traits_type::eof();
 
         setg(buffer_.data(), buffer_.data(), buffer_.data() + bytes_read);
         return traits_type::to_int_type(*gptr());
@@ -54,7 +55,8 @@ class Process {
     std::istream stream_;
 
   public:
-    explicit Process(const std::vector<std::string>& cmd, bool combine_streams = false)
+    explicit Process(std::vector<std::string> const& cmd,
+                     bool combine_streams = false)
         : pid_(-1), exit_code_(-1), exited_(false), pipe_fd_(-1),
           buffer_(nullptr), stream_(nullptr) {
         start_process(cmd, combine_streams);
@@ -72,10 +74,12 @@ class Process {
     std::istream& output() { return stream_; }
 
     bool is_running() {
-        if (exited_) return false;
+        if (exited_)
+            return false;
         int status;
         pid_t result = waitpid(pid_, &status, WNOHANG);
-        if (result == 0) return true;
+        if (result == 0)
+            return true;
         if (result == pid_) {
             exited_ = true;
             exit_code_ = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -85,7 +89,8 @@ class Process {
     }
 
     int exit_code() {
-        if (!exited_) is_running();
+        if (!exited_)
+            is_running();
         return exit_code_;
     }
 
@@ -100,18 +105,21 @@ class Process {
                 } else if (WIFSIGNALED(status)) {
                     exit_code_ = 128 + WTERMSIG(status);
                 } else {
-                    throw std::runtime_error("Unknown reason for the process termination");
+                    throw std::runtime_error(
+                        "Unknown reason for the process termination");
                 }
                 exited_ = true;
             } else {
-                throw make_system_error(errno, STR("waitpid for: " << pid_ << " failed"));
+                throw make_system_error(
+                    errno, STR("waitpid for: " << pid_ << " failed"));
             }
         }
         return exit_code_;
     }
 
   private:
-    void start_process(const std::vector<std::string>& cmd, bool combine_output) {
+    void start_process(std::vector<std::string> const& cmd,
+                       bool combine_output) {
         int pipe_fds[2];
         if (pipe(pipe_fds) == -1) {
             throw std::runtime_error("pipe() failed");
@@ -149,7 +157,9 @@ class Process {
     }
 };
 
-std::pair<std::string, int> execute_command(const std::vector<std::string>& cmd, bool combine_output = false) {
+inline std::pair<std::string, int>
+execute_command(std::vector<std::string> const& cmd,
+                bool combine_output = false) {
     Process proc(cmd, combine_output);
     std::ostringstream result;
     std::string line;
@@ -162,7 +172,10 @@ std::pair<std::string, int> execute_command(const std::vector<std::string>& cmd,
     return {result.str(), exit_code};
 }
 
-void execute_command(const std::vector<std::string>& cmd, std::function<void(std::variant<std::string, int>)>const& callback, bool combine_output = false) {
+inline void execute_command(
+    std::vector<std::string> const& cmd,
+    std::function<void(std::variant<std::string, int>)> const& callback,
+    bool combine_output = false) {
     Process proc(cmd, combine_output);
     std::string line;
 
