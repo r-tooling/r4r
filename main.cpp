@@ -157,12 +157,12 @@ struct FileInfo {
 
 class FileTracer : public SyscallListener {
     using Warnings = std::vector<std::string>;
-    using SyscallState = std::uint64_t;
+    using SyscallState = std::variant<std::monostate, fs::path>;
     using PidState = std::pair<int, SyscallState>;
 
     struct SyscallHandler {
-        void (FileTracer::*entry)(pid_t, SyscallArgs, SyscallState*);
-        void (FileTracer::*exit)(pid_t, SyscallRet, bool, SyscallState const*);
+        void (FileTracer::*entry)(pid_t, SyscallArgs, SyscallState&);
+        void (FileTracer::*exit)(pid_t, SyscallRet, bool, SyscallState const&);
     };
 
   public:
@@ -178,9 +178,9 @@ class FileTracer : public SyscallListener {
         }
 
         auto handler = it->second;
-        SyscallState state = 0;
+        SyscallState state = std::monostate{};
 
-        (this->*(handler.entry))(pid, args, &state);
+        (this->*(handler.entry))(pid, args, state);
 
         auto [s_it, inserted] = state_.try_emplace(pid, syscall, state);
 
@@ -203,7 +203,7 @@ class FileTracer : public SyscallListener {
                     STR("No exit handler for syscall: " << syscall));
             }
             auto handler = it->second;
-            (this->*(handler.exit))(pid, ret_val, is_error, &state);
+            (this->*(handler.exit))(pid, ret_val, is_error, state);
         }
     }
 
@@ -231,7 +231,7 @@ class FileTracer : public SyscallListener {
     }
 
     void generic_open_entry(pid_t pid, int dirfd, fs::path const& pathname,
-                            SyscallState* state) {
+                            SyscallState& state) {
         fs::path result;
 
         LOG_DEBUG(log_) << "open " << pathname;
@@ -259,40 +259,45 @@ class FileTracer : public SyscallListener {
         }
 
         if (fs::exists(result)) {
-            auto file = new fs::path{result};
-            *state = reinterpret_cast<SyscallState>(file);
+            state = result;
         }
     }
 
     void generic_open_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
-                           bool is_error, SyscallState const* state) {
+                           bool is_error, SyscallState const& state) {
         if (is_error) {
             return;
         }
 
-        auto entry_file = reinterpret_cast<fs::path*>(*state);
-        if (entry_file) {
+        if (std::holds_alternative<fs::path>(state)) {
+            fs::path entry_file = std::get<fs::path>(state);
             if (ret_val >= 0) {
                 auto exit_file =
                     util::resolve_fd_filename(pid, static_cast<int>(ret_val));
 
+                std::error_code ec;
                 if (!exit_file) {
                     LOG_WARN(log_)
                         << "Unable to resolve fd: " << ret_val << " to a path";
-                } else if (!fs::equivalent(*exit_file, *entry_file)) {
-                    LOG_WARN(log_)
-                        << "File entry/exit mismatch: " << *entry_file << " vs "
-                        << *exit_file;
+                } else if (!fs::equivalent(*exit_file, entry_file, ec)) {
+                    if (ec) {
+                        LOG_WARN(log_)
+                            << "File entry/exit not-comparable: " << entry_file
+                            << " vs " << *exit_file << ": " << ec.message();
+                    } else {
+                        LOG_WARN(log_)
+                            << "File entry/exit mismatch: " << entry_file
+                            << " vs " << *exit_file;
+                    }
                 } else {
                     register_file(*exit_file);
                 }
             }
-            delete entry_file;
         }
     }
 
     void syscall_openat_entry(pid_t pid, SyscallArgs args,
-                              SyscallState* state) {
+                              SyscallState& state) {
         auto pathname =
             SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
 
@@ -300,19 +305,39 @@ class FileTracer : public SyscallListener {
     }
 
     void syscall_openat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
-                             SyscallState const* state) {
+                             SyscallState const& state) {
         generic_open_exit(pid, ret_val, is_error, state);
     }
 
-    void syscall_open_entry(pid_t pid, SyscallArgs args, SyscallState* state) {
+    void syscall_open_entry(pid_t pid, SyscallArgs args, SyscallState& state) {
         auto pathname =
             SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
         generic_open_entry(pid, AT_FDCWD, pathname, state);
     }
 
     void syscall_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
-                           SyscallState const* state) {
+                           SyscallState const& state) {
         generic_open_exit(pid, ret_val, is_error, state);
+    }
+
+    void syscall_execve_entry(pid_t pid, SyscallArgs args,
+                              SyscallState& state) {
+        state =
+            SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
+    }
+
+    void syscall_execve_exit(pid_t, SyscallRet, bool is_error,
+                             SyscallState const& state) {
+        if (!is_error) {
+            if (std::holds_alternative<fs::path>(state)) {
+                auto path = std::get<fs::path>(state);
+                LOG_DEBUG(log_) << "execve " << path;
+                register_file(path);
+            } else {
+                throw std::runtime_error(
+                    "execve successful, yet not path stored");
+            }
+        }
     }
 
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
@@ -326,6 +351,7 @@ class FileTracer : public SyscallListener {
 
         REG_SYSCALL_HANDLER(open),
         REG_SYSCALL_HANDLER(openat),
+        REG_SYSCALL_HANDLER(execve),
 
 #undef REG_SYSCALL_HANDLER
     };
@@ -611,7 +637,10 @@ class IgnoreFilesManifest : public Manifest {
             if (fs::exists(kImageFileCache)) {
                 return DefaultImageFiles::from_file(kImageFileCache);
             } else {
-                // FIXME: log
+                LOG_INFO(log_)
+                    << "Default image file cache " << kImageFileCache
+                    << " does not exists, creating from image " << kImageName;
+
                 auto files = DefaultImageFiles::from_image(kImageName,
                                                            kBlacklistPatterns);
                 try {
@@ -619,14 +648,16 @@ class IgnoreFilesManifest : public Manifest {
                     std::ofstream out{kImageFileCache};
                     files.save(out);
                 } catch (std::exception const& e) {
-                    // FIXME: log
-                    std::cerr << "Unable to store default image file list to "
-                              << kImageFileCache << ": " << e.what();
+                    LOG_WARN(log_)
+                        << "Unable to store default image file list to "
+                        << kImageFileCache << ": " << e.what();
                 }
-                // FIXME: log
                 return files;
             }
         }();
+
+        LOG_DEBUG(log_) << "Loaded " << default_files.size()
+                        << " default files";
 
         util::FileSystemTrie<ImageFileInfo> trie{nullptr};
         for (auto& info : default_files.files()) {
@@ -634,6 +665,8 @@ class IgnoreFilesManifest : public Manifest {
         }
         return trie;
     }
+
+    static inline Logger log_ = LogManager::logger("manifest.ignore");
 
     static inline std::string const kImageName = "ubuntu:22.04";
 
@@ -664,8 +697,6 @@ class IgnoreFilesManifest : public Manifest {
         trie.insert("/var/cache", true);
         return trie;
     }();
-
-    static inline Logger log_ = LogManager::logger("manifest.ignore");
 };
 
 using Manifests = std::vector<std::unique_ptr<Manifest>>;
@@ -685,6 +716,10 @@ class ManifestsTask : public Task<Manifests> {
         for (auto& m : manifests) {
             LOG_INFO(log) << "Resolving " << files_.size() << " files";
             m->load_from_files(files_);
+        }
+
+        for (auto& p : files_) {
+            LOG_DEBUG(log) << "Unresolved " << p;
         }
 
         return manifests;
