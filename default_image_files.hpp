@@ -67,6 +67,7 @@ class DefaultImageFiles {
 
         std::string bf_pattern = util::mk_string(blacklist_patterns, '|');
 
+        // clang-format off
         std::vector<std::string> docker_cmd = {
             "docker",
             "run",
@@ -74,14 +75,16 @@ class DefaultImageFiles {
             image_name,
             "bash",
             "-c",
-            "DELIM='" + kDelimUtf8 + "' " + "BF_PATTERN='" + bf_pattern + "' " +
+            STR(
+               "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
                 R""(
                 find / -type f 2>/dev/null | grep -vE "$BF_PATTERN" | while IFS= read -r file; do
                     stat="$(stat -c "%U${DELIM}%G${DELIM}%s${DELIM}%a" "$file" 2>/dev/null || echo "error${DELIM}error${DELIM}error${DELIM}error")"
                     sha1="$((sha1sum "$file" 2>/dev/null | cut -d " " -f1) || echo "error")"
                     echo "$file${DELIM}${stat}${DELIM}${sha1}"
                 done
-            )""};
+            )"")};
+        // clang-format on
 
         Process proc{docker_cmd};
         auto result = from_stream(proc.output());
@@ -177,8 +180,6 @@ class DefaultImageFiles {
     }
 
   private:
-    // bytes for U+00A0 (non-breakable space) in UTF-8
-    static inline std::string const kDelimUtf8 = "\xC2\xA0";
     static inline Logger log_ = LogManager::logger("default-image-files");
     std::vector<ImageFileInfo> files_;
 };

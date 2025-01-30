@@ -247,4 +247,22 @@ fs::path get_user_cache_dir() {
     }
 }
 
+std::string string_trim(std::string const& s) {
+    auto start = s.begin();
+    auto end = s.end();
+
+    while (start != end && std::isspace(*start)) {
+        ++start;
+    }
+
+    while (end > start && std::isspace(*(end - 1))) {
+        --end;
+    }
+
+    if (start < end) {
+        return std::string(start, end);
+    } else {
+        return {};
+    }
+}
 } // namespace util

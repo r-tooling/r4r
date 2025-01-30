@@ -171,3 +171,70 @@ TEST(FormatElapsedTime, HoursMinutesSeconds) {
     EXPECT_EQ(util::format_elapsed_time(1h), "1:00:00");
     EXPECT_EQ(util::format_elapsed_time(1h + 1min + 1s), "1:01:01");
 }
+
+TEST(StringSplitNTest, BasicSplit) {
+    auto result = util::string_split_n<3>("apple,banana,cherry", ",");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "apple");
+    EXPECT_EQ(result->at(1), "banana");
+    EXPECT_EQ(result->at(2), "cherry");
+}
+
+TEST(StringSplitNTest, EmptyString) {
+    auto result = util::string_split_n<1>("", ",");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "");
+}
+
+TEST(StringSplitNTest, SingleElement) {
+    auto result = util::string_split_n<1>("apple", ",");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "apple");
+}
+
+TEST(StringSplitNTest, TooManySplits) {
+    auto result = util::string_split_n<2>("apple,banana,cherry", ",");
+    ASSERT_FALSE(result.has_value());
+}
+
+TEST(StringSplitNTest, NotEnoughSplits) {
+    auto result = util::string_split_n<3>("apple,banana", ",");
+    ASSERT_FALSE(result.has_value());
+}
+
+TEST(StringSplitNTest, EmptyDelimiter) {
+    auto result = util::string_split_n<3>("apple,banana,cherry", "");
+    ASSERT_FALSE(result.has_value());
+}
+
+TEST(StringSplitNTest, DelimiterAtBeginning) {
+    auto result = util::string_split_n<2>(",apple", ",");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "");
+    EXPECT_EQ(result->at(1), "apple");
+}
+
+TEST(StringSplitNTest, DelimiterAtEnd) {
+    auto result = util::string_split_n<3>("apple,banana,", ",");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "apple");
+    EXPECT_EQ(result->at(1), "banana");
+    EXPECT_EQ(result->at(2), "");
+}
+
+TEST(StringSplitNTest, ConsecutiveDelimiters) {
+    auto result = util::string_split_n<3>("apple,,cherry", ",");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "apple");
+    EXPECT_EQ(result->at(1), "");
+    EXPECT_EQ(result->at(2), "cherry");
+}
+
+TEST(StringSplitNTest, NonBreakingSpaceDelimiter) {
+    std::string nonBreakingSpace = "\u00A0"; // UTF-8 for non-breaking space
+    auto result = util::string_split_n<2>("apple" + nonBreakingSpace + "banana",
+                                          nonBreakingSpace);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->at(0), "apple");
+    EXPECT_EQ(result->at(1), "banana");
+}

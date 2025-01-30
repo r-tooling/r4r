@@ -44,8 +44,6 @@ std::string mk_string(T const& collection, S const& sep) {
     return res.str();
 }
 
-std::vector<std::string> string_split(std::string const& str, char delim);
-
 // template <typename FileCollection>
 // void create_tar_archive(fs::path const& archive, FileCollection const& files)
 // {
@@ -155,12 +153,12 @@ std::string format_elapsed_time(Duration elapsed) {
     auto total_ms = duration_cast<milliseconds>(elapsed).count();
 
     if (total_ms < MS_PER_SEC) {
-        return STR(total_ms << " ms");
+        return STR(total_ms << "ms");
     }
 
     auto total_seconds = duration_cast<duration<double>>(elapsed).count();
     if (total_ms < MS_PER_MIN) {
-        return STR(std::fixed << std::setprecision(1) << total_seconds << " s");
+        return STR(std::fixed << std::setprecision(1) << total_seconds << "s");
     }
 
     auto mins = total_ms / MS_PER_MIN;
@@ -185,4 +183,36 @@ fs::path create_temp_file(std::string const& prefix, std::string const& suffix);
 
 fs::path get_user_cache_dir();
 
+std::string string_trim(std::string const& s);
+
+std::vector<std::string> string_split(std::string const& str, char delim);
+
+template <size_t N>
+std::optional<std::array<std::string, N>>
+string_split_n(std::string const& str, std::string const& delim) {
+    std::array<std::string, N> result{};
+    size_t start = 0;
+    size_t end = 0;
+    size_t i = 0;
+
+    while ((end = str.find(delim, start)) != std::string::npos) {
+        if (i < N) {
+            result[i++] = str.substr(start, end - start);
+            start = end + delim.length();
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    if (i < N) {
+        result[i++] = str.substr(start);
+        start = str.size();
+    }
+
+    if (i != N || start != str.size()) {
+        return std::nullopt;
+    }
+
+    return result;
+}
 } // namespace util

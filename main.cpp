@@ -340,6 +340,7 @@ class FileTracer : public SyscallListener {
         }
     }
 
+    // TODO: won't classes be easier? Passing a pointer to this?
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
 #define REG_SYSCALL_HANDLER(nr)                                                \
     {                                                                          \

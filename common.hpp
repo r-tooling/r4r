@@ -26,6 +26,10 @@ inline std::system_error make_system_error(int error_code,
         ::stop("reached unreachable", __FILE__, __LINE__);                     \
     } while (0)
 
-[[noreturn]] inline void stop(const char* msg, const char* file, int line) {
+[[noreturn]] inline void stop(char const* msg, char const* file, int line) {
     throw std::runtime_error(STR(file << ":" << line << " : " << msg));
 }
+
+// bytes for U+00A0 (non-breakable space) in UTF-8
+#define NBSP "\xC2\xA0"
+static inline std::string const kDelimUtf8 = NBSP;
