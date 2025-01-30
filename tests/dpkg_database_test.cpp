@@ -31,7 +31,8 @@ TEST(ParseInstalledPackagesTest, ParsesSingleValidPackage) {
 
     auto packages = parse_installed_packages(dpkg_output);
     ASSERT_EQ(packages.size(), 1);
-    EXPECT_EQ(packages["package1"], (DebPackage{"package1", "1.0.0"}));
+    EXPECT_EQ(packages.at("package1")->name, "package1");
+    EXPECT_EQ(packages.at("package1")->version, "1.0.0");
 }
 
 // Test case: Multiple valid packages
@@ -43,8 +44,10 @@ TEST(ParseInstalledPackagesTest, ParsesMultipleValidPackages) {
 
     auto packages = parse_installed_packages(dpkg_output);
     ASSERT_EQ(packages.size(), 2);
-    EXPECT_EQ(packages["package1"], (DebPackage{"package1", "1.0.0"}));
-    EXPECT_EQ(packages["package2"], (DebPackage{"package2", "2.3.4"}));
+    EXPECT_EQ(packages.at("package1")->name, "package1");
+    EXPECT_EQ(packages.at("package1")->version, "1.0.0");
+    EXPECT_EQ(packages.at("package2")->name, "package2");
+    EXPECT_EQ(packages.at("package2")->version, "2.3.4");
 }
 
 // Test case: Skips non-installed packages
@@ -56,7 +59,8 @@ TEST(ParseInstalledPackagesTest, SkipsNonInstalledPackages) {
 
     auto packages = parse_installed_packages(dpkg_output);
     ASSERT_EQ(packages.size(), 1);
-    EXPECT_EQ(packages["package2"], (DebPackage{"package2", "2.3.4"}));
+    EXPECT_EQ(packages.at("package2")->name, "package2");
+    EXPECT_EQ(packages.at("package2")->version, "2.3.4");
 }
 
 // Test case: Empty input

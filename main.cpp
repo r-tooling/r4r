@@ -702,7 +702,7 @@ class IgnoreFilesManifest : public Manifest {
         LOG_DEBUG(log_) << "Loaded " << default_files.size()
                         << " default files";
 
-        util::FileSystemTrie<ImageFileInfo> trie{nullptr};
+        util::FileSystemTrie<ImageFileInfo> trie;
         for (auto& info : default_files.files()) {
             trie.insert(info.path, info);
         }

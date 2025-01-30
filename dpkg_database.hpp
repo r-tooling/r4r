@@ -3,10 +3,10 @@
 #include "common.hpp"
 #include "filesystem_trie.hpp"
 #include "process.hpp"
-#include "util.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -20,28 +20,33 @@ struct DebPackage {
     bool operator==(DebPackage const& other) const = default;
 };
 
-using DebPackages = std::unordered_map<std::string, DebPackage>;
+using DebPackages =
+    std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
 
 class DpkgDatabase {
   public:
     static DpkgDatabase system_database();
     static DpkgDatabase from_path(fs::path const& path);
 
-    DpkgDatabase(DebPackages packages, util::FileSystemTrie<std::string> files)
-        : packages_{std::move(packages)}, files_{std::move(files)} {}
+    DpkgDatabase(DpkgDatabase const&) = delete;
+    DpkgDatabase(DpkgDatabase&&) = default;
+
+    DpkgDatabase& operator=(DpkgDatabase const&) = delete;
 
     DebPackage const* lookup_by_path(fs::path const& path) const;
     DebPackage const* lookup_by_name(std::string const& name) const;
 
   private:
-    static inline std::string const kNoPkgSentinel{"no-package-found"};
+    DpkgDatabase(DebPackages packages,
+                 util::FileSystemTrie<DebPackage const*> files)
+        : packages_{std::move(packages)}, files_{std::move(files)} {}
 
     DebPackages packages_;
-    util::FileSystemTrie<std::string> files_;
+    util::FileSystemTrie<DebPackage const*> files_;
 };
 
 inline DebPackages parse_installed_packages(std::istream& dpkg_output) {
-    DebPackages package_map;
+    DebPackages packages;
     std::string line;
 
     // skip header lines
@@ -52,14 +57,18 @@ inline DebPackages parse_installed_packages(std::istream& dpkg_output) {
         std::istringstream line_stream(line);
         std::string status, name, version;
 
+        // FIXME: USE THIS FOR PARSING THE TABLES!
         if (line_stream >> status >> std::ws >> name >> std::ws >> version) {
             if (status == "ii") { // only consider installed packages
-                package_map.try_emplace(name, name, version);
+                packages.emplace(name,
+                                 std::make_unique<DebPackage>(name, version));
             }
+        } else {
+            // FIXME: log warning!
         }
     }
 
-    return package_map;
+    return packages;
 }
 
 inline DebPackages load_installed_packages() {
@@ -74,18 +83,17 @@ inline DebPackages load_installed_packages() {
     return parse_installed_packages(stream);
 }
 
-inline void process_list_file(util::FileSystemTrie<std::string>& trie,
-                              fs::path const& file) {
+inline void process_list_file(util::FileSystemTrie<DebPackage const*>& trie,
+                              fs::path const& file, DebPackage const* pkg) {
     std::ifstream infile(file);
     if (!infile.is_open()) {
         throw std::runtime_error("Error opening file: " + file.string());
     }
 
-    std::string package_name = file.stem().string();
     std::string line;
     while (std::getline(infile, line)) {
         if (!line.empty()) {
-            trie.insert(line, package_name);
+            trie.insert(line, pkg);
         }
     }
 }
@@ -95,38 +103,32 @@ inline DpkgDatabase DpkgDatabase::system_database() {
 }
 
 inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
-    util::FileSystemTrie<std::string> trie{kNoPkgSentinel};
+    util::FileSystemTrie<DebPackage const*> trie;
 
     auto packages = load_installed_packages();
-    for (auto& [pkg_name, _] : packages) {
+    for (auto& [pkg_name, pkg] : packages) {
         auto list_file = path / (pkg_name + ".list");
         if (fs::is_regular_file(list_file)) {
-            process_list_file(trie, list_file);
+            process_list_file(trie, list_file, pkg.get());
         } else {
             // FIXME: use some logging
             std::cerr << list_file << ": no such file\n";
         }
     }
 
-    return DpkgDatabase{packages, std::move(trie)};
+    return DpkgDatabase{std::move(packages), std::move(trie)};
 }
 
 inline DebPackage const*
 DpkgDatabase::lookup_by_path(fs::path const& path) const {
-    auto* pkg = files_.find(path);
-    if (pkg && pkg != files_.default_value()) {
-        auto it = packages_.find(*pkg);
-        if (it != packages_.end()) {
-            return &it->second;
-        }
-    }
-    return {};
+    auto r = files_.find(path);
+    return r ? *r : nullptr;
 }
 
 inline DebPackage const*
 DpkgDatabase::lookup_by_name(std::string const& name) const {
     auto it = packages_.find(name);
-    return it == packages_.end() ? nullptr : &it->second;
+    return it == packages_.end() ? nullptr : it->second.get();
 }
 
 namespace std {

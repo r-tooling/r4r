@@ -24,9 +24,8 @@ class FileSystemTrie {
     std::shared_ptr<Node> root_;
 
   public:
-    explicit FileSystemTrie(T const* default_value)
-        : default_value_{default_value},
-          root_{std::make_shared<Node>(default_value_)} {};
+    FileSystemTrie()
+        : default_value_(nullptr), root_(std::make_shared<Node>(nullptr)) {}
 
     explicit FileSystemTrie(T const& default_value) : default_value_{nullptr} {
         auto it = unique_values_.insert(default_value);
@@ -82,7 +81,7 @@ class FileSystemTrie {
     [[nodiscard]] T const* find_last_matching(fs::path const& path) const {
         auto node = root_;
 
-        for (const auto& it : path) {
+        for (auto const& it : path) {
             auto part = it.string();
 
             if (part.empty()) {

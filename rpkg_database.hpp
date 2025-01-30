@@ -42,14 +42,16 @@ struct hash<RPackage> {
 };
 } // namespace std
 
-using RPackages = std::unordered_map<std::string, RPackage>;
+using RPackages = std::unordered_map<std::string, std::unique_ptr<RPackage>>;
 
 class RpkgDatabase {
   public:
     static RpkgDatabase from_R(fs::path const& R_bin) {
-        Process R{
-            {R_bin, "-s", "-q", "-e",
-             R""(write.table(gsub("\n", "", installed.packages()[, c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo")]), sep="\U00A0", quote=FALSE, row.names=FALSE))""}};
+        Process R{{R_bin, "-s", "-q", "-e",
+                   R""(write.table(gsub("\n", "", installed.packages()[,
+             c("Package", "LibPath", "Version", "Depends", "Imports",
+             "LinkingTo")]), sep="\U00A0", quote=FALSE,
+             row.names=FALSE))""}};
         auto result = from_stream(R.output());
         int exit_code = R.wait();
         if (exit_code != 0) {
@@ -63,11 +65,12 @@ class RpkgDatabase {
     static RpkgDatabase from_stream(std::istream& input) {
         RPackages packages;
         parse_r_packages(input, packages);
-        return RpkgDatabase{packages};
+        return RpkgDatabase{std::move(packages)};
     }
 
     RPackage const* lookup_by_path(fs::path const& path) const {
-        return files_.find_last_matching(path);
+        auto r = files_.find_last_matching(path);
+        return r ? *r : nullptr;
     }
 
     // Return all dependencies (recursively) of the given set of packages pkgs
@@ -105,21 +108,25 @@ class RpkgDatabase {
     RPackage const* find(std::string const& name) const {
         auto it = packages_.find(name);
         if (it != packages_.end()) {
-            return &it->second;
+            return it->second.get();
         } else {
             return {};
         }
     }
 
+    RpkgDatabase(RpkgDatabase const&) = delete;
+    RpkgDatabase(RpkgDatabase&&) = default;
+    RpkgDatabase& operator=(RpkgDatabase const&) = delete;
+
   private:
     explicit RpkgDatabase(RPackages packages)
         : packages_{std::move(packages)}, files_{build_files_db(packages_)} {}
 
-    static util::FileSystemTrie<RPackage>
+    static util::FileSystemTrie<RPackage const*>
     build_files_db(RPackages const& packages) {
-        util::FileSystemTrie<RPackage> files{nullptr};
+        util::FileSystemTrie<RPackage const*> files{nullptr};
         for (auto const& [_, pkg] : packages) {
-            files.insert(pkg.lib_path / pkg.name, pkg);
+            files.insert(pkg->lib_path / pkg->name, pkg.get());
         }
         return files;
     }
@@ -143,15 +150,12 @@ class RpkgDatabase {
                 continue;
             }
 
-            RPackage pkg{
-                tokens->at(0),
-                tokens->at(1),
-                tokens->at(2),
+            auto pkg = std::make_unique<RPackage>(
+                tokens->at(0), tokens->at(1), tokens->at(2),
                 parse_dependency_field(tokens->at(3)),
                 parse_dependency_field(tokens->at(4)),
-                parse_dependency_field(tokens->at(5)),
-            };
-            packages.emplace(pkg.name, std::move(pkg));
+                parse_dependency_field(tokens->at(5)));
+            packages.emplace(pkg->name, std::move(pkg));
         }
     }
 
@@ -200,6 +204,7 @@ class RpkgDatabase {
     }
 
     // Helper DFS for topological sort
+    // TODO: use pointers to packages
     void dfs_visit(std::string const& pkg_name,
                    std::unordered_set<std::string>& visited,
                    std::unordered_set<std::string>& in_stack,
@@ -210,9 +215,10 @@ class RpkgDatabase {
         auto it = packages_.find(pkg_name);
         if (it != packages_.end()) {
             // Gather all direct dependencies from depends, imports, linking_to
-            auto const& dep_list = it->second.depends;
-            auto const& imp_list = it->second.imports;
-            auto const& link_list = it->second.linking_to;
+            // TODO: make this a method
+            auto const& dep_list = it->second->depends;
+            auto const& imp_list = it->second->imports;
+            auto const& link_list = it->second->linking_to;
 
             // Combine them
             std::vector<std::string> all_deps;
@@ -241,7 +247,7 @@ class RpkgDatabase {
 
     static inline Logger log_ = LogManager::logger("rpkg-database");
     RPackages packages_;
-    util::FileSystemTrie<RPackage> files_;
+    util::FileSystemTrie<RPackage const*> files_;
 };
 
 #endif // RPKG_DATABASE_
