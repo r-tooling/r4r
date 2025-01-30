@@ -1,7 +1,8 @@
-#pragma once
+#ifndef SYSCALL_MONITOR_H
+#define SYSCALL_MONITOR_H
 
-#include "common.hpp"
-#include "util.hpp"
+#include "common.h"
+#include "util.h"
 
 #include <cstdint>
 #include <cstring>
@@ -50,9 +51,9 @@ class SyscallMonitor {
 
     Result start();
 
-    [[noreturn]] void process_tracee(util::Pipe const& out,
-                                     util::Pipe const& err) const;
-    Result process_tracer(util::Pipe const& out, util::Pipe const& err);
+    [[noreturn]] void process_tracee(Pipe const& out,
+                                     Pipe const& err) const;
+    Result process_tracer(Pipe const& out, Pipe const& err);
 
     static std::string read_string_from_process(pid_t pid, uint64_t remote_addr,
                                                 size_t max_len);
@@ -106,8 +107,8 @@ inline void SyscallMonitor::stop() const {
 }
 
 inline SyscallMonitor::Result SyscallMonitor::start() {
-    auto out = util::create_pipe();
-    auto err = util::create_pipe();
+    auto out = create_pipe();
+    auto err = create_pipe();
 
     tracee_pid_ = fork();
 
@@ -127,8 +128,8 @@ inline SyscallMonitor::Result SyscallMonitor::start() {
     }
 }
 
-inline void SyscallMonitor::process_tracee(util::Pipe const& out,
-                                           util::Pipe const& err) const {
+inline void SyscallMonitor::process_tracee(Pipe const& out,
+                                           Pipe const& err) const {
     if (dup2(out.write_fd, STDOUT_FILENO) == -1) {
         std::cerr << "dup2 stderr: " << strerror(errno) << " (" << errno
                   << ")\n";
@@ -161,7 +162,7 @@ inline void SyscallMonitor::process_tracee(util::Pipe const& out,
     //        (*fun_)();
     //        exit(0);
     //    } else {
-    //        auto c_args = util::collection_to_c_array(cmd_);
+    //        auto c_args = collection_to_c_array(cmd_);
     //        auto program = cmd_.front();
     //        execvp(program.c_str(), c_args.get());
     //
@@ -173,7 +174,7 @@ inline void SyscallMonitor::process_tracee(util::Pipe const& out,
 }
 
 inline SyscallMonitor::Result
-SyscallMonitor::process_tracer(util::Pipe const& out, util::Pipe const& err) {
+SyscallMonitor::process_tracer(Pipe const& out, Pipe const& err) {
 
     close(out.write_fd);
     close(err.write_fd);
@@ -302,17 +303,17 @@ inline void SyscallMonitor::set_ptrace_options(pid_t pid) {
 inline void SyscallMonitor::wait_for_initial_stop() const {
     using namespace std::chrono_literals;
 
-    auto w = util::wait_for_signal(tracee_pid_, SIGSTOP, 10ms);
-    if (w.status == util::WaitForSignalResult::Success) {
+    auto w = wait_for_signal(tracee_pid_, SIGSTOP, 10ms);
+    if (w.status == WaitForSignalResult::Success) {
         return;
     }
 
     std::string message = "Failed to wait for initial stop: ";
-    if (w.status == util::WaitForSignalResult::Timeout) {
+    if (w.status == WaitForSignalResult::Timeout) {
         message += "timeout";
-    } else if (w.status == util::WaitForSignalResult::Exit) {
+    } else if (w.status == WaitForSignalResult::Exit) {
         message += "child exited with " + std::to_string(*w.detail);
-    } else if (w.status == util::WaitForSignalResult::Signal) {
+    } else if (w.status == WaitForSignalResult::Signal) {
         message += "child signalled with " + std::to_string(*w.detail);
     }
 
@@ -429,7 +430,7 @@ inline void SyscallMonitor::forward_output(int read_fd, std::ostream& os,
 inline std::function<int()>
 SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
     return [&cmd]() -> int {
-        auto c_args = util::collection_to_c_array(cmd);
+        auto c_args = collection_to_c_array(cmd);
         auto program = cmd.front();
         execvp(program.c_str(), c_args.get());
 
@@ -438,3 +439,5 @@ SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
         return kSpawnErrorExitCode;
     };
 }
+
+#endif // SYSCALL_MONITOR_H

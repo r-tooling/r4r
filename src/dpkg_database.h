@@ -1,8 +1,9 @@
-#pragma once
+#ifndef DPKG_DATABASE_H
+#define DPKG_DATABASE_H
 
-#include "common.hpp"
-#include "filesystem_trie.hpp"
-#include "process.hpp"
+#include "common.h"
+#include "filesystem_trie.h"
+#include "process.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -19,6 +20,18 @@ struct DebPackage {
 
     bool operator==(DebPackage const& other) const = default;
 };
+
+namespace std {
+
+template <>
+struct hash<DebPackage> {
+    size_t operator()(DebPackage const& pkg) const noexcept {
+        hash<string> string_hasher;
+        return string_hasher(pkg.name) ^ (string_hasher(pkg.version) << 1);
+    }
+};
+
+} // namespace std
 
 using DebPackages =
     std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
@@ -38,11 +51,11 @@ class DpkgDatabase {
 
   private:
     DpkgDatabase(DebPackages packages,
-                 util::FileSystemTrie<DebPackage const*> files)
+                 FileSystemTrie<DebPackage const*> files)
         : packages_{std::move(packages)}, files_{std::move(files)} {}
 
     DebPackages packages_;
-    util::FileSystemTrie<DebPackage const*> files_;
+    FileSystemTrie<DebPackage const*> files_;
 };
 
 inline DebPackages parse_installed_packages(std::istream& dpkg_output) {
@@ -83,7 +96,7 @@ inline DebPackages load_installed_packages() {
     return parse_installed_packages(stream);
 }
 
-inline void process_list_file(util::FileSystemTrie<DebPackage const*>& trie,
+inline void process_list_file(FileSystemTrie<DebPackage const*>& trie,
                               fs::path const& file, DebPackage const* pkg) {
     std::ifstream infile(file);
     if (!infile.is_open()) {
@@ -103,7 +116,7 @@ inline DpkgDatabase DpkgDatabase::system_database() {
 }
 
 inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
-    util::FileSystemTrie<DebPackage const*> trie;
+    FileSystemTrie<DebPackage const*> trie;
 
     auto packages = load_installed_packages();
     for (auto& [pkg_name, pkg] : packages) {
@@ -131,14 +144,4 @@ DpkgDatabase::lookup_by_name(std::string const& name) const {
     return it == packages_.end() ? nullptr : it->second.get();
 }
 
-namespace std {
-
-template <>
-struct hash<DebPackage> {
-    size_t operator()(DebPackage const& pkg) const noexcept {
-        hash<string> string_hasher;
-        return string_hasher(pkg.name) ^ (string_hasher(pkg.version) << 1);
-    }
-};
-
-} // namespace std
+#endif

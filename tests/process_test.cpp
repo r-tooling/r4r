@@ -1,7 +1,7 @@
+#include "process.h"
 #include <gtest/gtest.h>
-#include <variant>
 #include <sstream>
-#include "../process.hpp"
+#include <variant>
 
 // Test launching a process and reading output directly
 TEST(ProcessClassTest, ReadOutput) {

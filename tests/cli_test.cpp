@@ -1,5 +1,5 @@
-#include "../cli.hpp"
-#include "../util.hpp"
+#include "cli.h"
+#include "util.h"
 #include <gtest/gtest.h>
 
 // ---------------------------------------------------------
@@ -15,7 +15,7 @@ TEST(LinePrefixingStreamBufTest, SimpleTransform) {
     os << "Line 2\n";
     os.flush();
 
-    auto r = util::string_split(dest_buf.str(), '\n');
+    auto r = string_split(dest_buf.str(), '\n');
     EXPECT_EQ(r.size(), 3);
     EXPECT_EQ(r[0], "> Line 0");
     EXPECT_EQ(r[1], "> Line 1");

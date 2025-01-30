@@ -1,9 +1,9 @@
-#include "../filesystem_trie.hpp"
+#include "filesystem_trie.h"
 #include <gtest/gtest.h>
 
 class FileSystemTrieTest : public ::testing::Test {
   protected:
-    util::FileSystemTrie<std::string> trie{"default"};
+    FileSystemTrie<std::string> trie{"default"};
 };
 
 TEST_F(FileSystemTrieTest, DefaultInitialization) {
@@ -67,7 +67,7 @@ TEST_F(FileSystemTrieTest, RootNodePersistence) {
 }
 
 TEST_F(FileSystemTrieTest, DefaultValuePropagation) {
-    util::FileSystemTrie trie{42};
+    FileSystemTrie trie{42};
     EXPECT_EQ(*trie.default_value(), 42);
     trie.insert("/a/b/c", 1);
 
@@ -98,7 +98,7 @@ TEST_F(FileSystemTrieTest, UniqueValueStorage) {
 }
 
 TEST_F(FileSystemTrieTest, FindLastMatching) {
-    util::FileSystemTrie<bool> trie{false};
+    FileSystemTrie<bool> trie{false};
 
     trie.insert("/dev", true);
     trie.insert("/dev/null", false);
@@ -113,7 +113,7 @@ TEST_F(FileSystemTrieTest, FindLastMatching) {
 }
 
 TEST_F(FileSystemTrieTest, FindWithNull) {
-    util::FileSystemTrie<std::string> trie{};
+    FileSystemTrie<std::string> trie{};
 
     trie.insert("/dev", "a");
     trie.insert("/dev/null", "b");

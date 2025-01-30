@@ -1,4 +1,4 @@
-#include "../rpkg_database.hpp"
+#include "rpkg_database.h"
 #include <gtest/gtest.h>
 
 TEST(RPackagesTest, BasicParsing) {

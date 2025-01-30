@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "../syscall_monitor.hpp"
+#include "syscall_monitor.h"
 
 // Global test string in the child process.
 //
@@ -98,7 +98,7 @@ class TestSyscallListener : public SyscallListener {
 };
 
 TEST(SyscallMonitorTest, OpenSyscall) {
-    fs::path temp_file = util::create_temp_file("r4r-test", ".delete");
+    fs::path temp_file = create_temp_file("r4r-test", ".delete");
 
     ASSERT_FALSE(fs::exists(temp_file));
 
@@ -129,7 +129,7 @@ TEST(SyscallMonitorTest, CreatSyscall) {
     // but it should have it own syscall number
     // this test just proves that we need to trace all syscalls dealing with
     // files
-    fs::path temp_file = util::create_temp_file("r4r-test", ".delete");
+    fs::path temp_file = create_temp_file("r4r-test", ".delete");
 
     ASSERT_FALSE(fs::exists(temp_file));
 
@@ -155,7 +155,7 @@ TEST(SyscallMonitorTest, CreatSyscall) {
 }
 
 TEST(SyscallMonitorTest, OpenSyscallFromChild) {
-    fs::path temp_file = util::create_temp_file("r4r-test-child", ".delete");
+    fs::path temp_file = create_temp_file("r4r-test-child", ".delete");
 
     ASSERT_FALSE(fs::exists(temp_file));
 

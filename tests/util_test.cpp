@@ -1,4 +1,4 @@
-#include "../util.hpp"
+#include "util.h"
 #include <fstream>
 #include <gtest/gtest.h>
 
@@ -22,7 +22,7 @@
 //
 //     auto archive = temp_dir / "archive.tar";
 //
-//     util::create_tar_archive(archive, files);
+//     create_tar_archive(archive, files);
 //
 //     EXPECT_TRUE(fs::exists(archive));
 //
@@ -36,7 +36,6 @@
 // }
 
 TEST(UtilTest, EscapeCmdArg) {
-    using namespace util;
     // clang-format off
     EXPECT_EQ(escape_cmd_arg("no special chars"), "'no special chars'");
     EXPECT_EQ(escape_cmd_arg("arg with spaces"), "'arg with spaces'");
@@ -63,7 +62,7 @@ TEST(UtilTest, EscapeCmdArg) {
 
 TEST(CollectionToCArrayTest, VectorTest) {
     std::vector<int> col = {1, 2, 3};
-    auto c_arr = util::collection_to_c_array(col);
+    auto c_arr = collection_to_c_array(col);
 
     ASSERT_NE(c_arr, nullptr);
     ASSERT_EQ(c_arr[0], 1);
@@ -74,7 +73,7 @@ TEST(CollectionToCArrayTest, VectorTest) {
 
 TEST(CollectionToCArrayTest, ArrayTest) {
     std::array<double, 2> col = {1.5, 2.7};
-    auto c_arr = util::collection_to_c_array(col);
+    auto c_arr = collection_to_c_array(col);
 
     ASSERT_NE(c_arr, nullptr);
     ASSERT_DOUBLE_EQ(c_arr[0], 1.5);
@@ -84,13 +83,13 @@ TEST(CollectionToCArrayTest, ArrayTest) {
 
 TEST(CollectionToCArrayTest, EmptyContainerTest) {
     std::vector<int> col;
-    auto c_arr = util::collection_to_c_array(col);
+    auto c_arr = collection_to_c_array(col);
     ASSERT_EQ(c_arr, nullptr);
 }
 
 TEST(CollectionToCArrayTest, StringTest) {
     std::vector<std::string> col = {"one", "two", "three"};
-    auto c_arr = util::collection_to_c_array(col);
+    auto c_arr = collection_to_c_array(col);
 
     ASSERT_NE(c_arr, nullptr);
     for (int i = 0; i < col.size(); i++) {
@@ -114,7 +113,7 @@ TEST(ProcessCwdTest, SpawnProcessInTmp) {
         // parent
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-        auto child_cwd = util::get_process_cwd(pid);
+        auto child_cwd = get_process_cwd(pid);
         EXPECT_TRUE(child_cwd.has_value());
         EXPECT_EQ(*child_cwd, "/tmp");
 
@@ -130,7 +129,7 @@ TEST(ResolveFdFilenameTest, Valid) {
 
     write(temp_fd, "test", 4);
 
-    auto resolved_path = util::resolve_fd_filename(getpid(), temp_fd);
+    auto resolved_path = resolve_fd_filename(getpid(), temp_fd);
 
     ASSERT_TRUE(resolved_path.has_value());
     EXPECT_EQ(resolved_path.value(), temp_filename);
@@ -142,7 +141,7 @@ TEST(ResolveFdFilenameTest, Valid) {
 TEST(ResolveFdFilenameTest, Invalid) {
     int invalid_fd = -1;
 
-    auto resolved_path = util::resolve_fd_filename(getpid(), invalid_fd);
+    auto resolved_path = resolve_fd_filename(getpid(), invalid_fd);
 
     EXPECT_FALSE(resolved_path.has_value());
 }
@@ -151,29 +150,29 @@ using namespace std::chrono_literals;
 
 TEST(FormatElapsedTime, Milliseconds) {
     using namespace std::chrono;
-    EXPECT_EQ(util::format_elapsed_time(999ms), "999ms");
+    EXPECT_EQ(format_elapsed_time(999ms), "999ms");
 }
 
 TEST(FormatElapsedTime, SecondsWithPrecision) {
     using namespace std::chrono;
-    EXPECT_EQ(util::format_elapsed_time(1234ms), "1.2s");
-    EXPECT_EQ(util::format_elapsed_time(59999ms), "60.0s");
+    EXPECT_EQ(format_elapsed_time(1234ms), "1.2s");
+    EXPECT_EQ(format_elapsed_time(59999ms), "60.0s");
 }
 
 TEST(FormatElapsedTime, MinutesAndSeconds) {
     using namespace std::chrono;
-    EXPECT_EQ(util::format_elapsed_time(1min), "1:00.0");
-    EXPECT_EQ(util::format_elapsed_time(12min + 34s + 321ms), "12:34.3");
+    EXPECT_EQ(format_elapsed_time(1min), "1:00.0");
+    EXPECT_EQ(format_elapsed_time(12min + 34s + 321ms), "12:34.3");
 }
 
 TEST(FormatElapsedTime, HoursMinutesSeconds) {
     using namespace std::chrono;
-    EXPECT_EQ(util::format_elapsed_time(1h), "1:00:00");
-    EXPECT_EQ(util::format_elapsed_time(1h + 1min + 1s), "1:01:01");
+    EXPECT_EQ(format_elapsed_time(1h), "1:00:00");
+    EXPECT_EQ(format_elapsed_time(1h + 1min + 1s), "1:01:01");
 }
 
 TEST(StringSplitNTest, BasicSplit) {
-    auto result = util::string_split_n<3>("apple,banana,cherry", ",");
+    auto result = string_split_n<3>("apple,banana,cherry", ",");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "apple");
     EXPECT_EQ(result->at(1), "banana");
@@ -181,41 +180,41 @@ TEST(StringSplitNTest, BasicSplit) {
 }
 
 TEST(StringSplitNTest, EmptyString) {
-    auto result = util::string_split_n<1>("", ",");
+    auto result = string_split_n<1>("", ",");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "");
 }
 
 TEST(StringSplitNTest, SingleElement) {
-    auto result = util::string_split_n<1>("apple", ",");
+    auto result = string_split_n<1>("apple", ",");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "apple");
 }
 
 TEST(StringSplitNTest, TooManySplits) {
-    auto result = util::string_split_n<2>("apple,banana,cherry", ",");
+    auto result = string_split_n<2>("apple,banana,cherry", ",");
     ASSERT_FALSE(result.has_value());
 }
 
 TEST(StringSplitNTest, NotEnoughSplits) {
-    auto result = util::string_split_n<3>("apple,banana", ",");
+    auto result = string_split_n<3>("apple,banana", ",");
     ASSERT_FALSE(result.has_value());
 }
 
 TEST(StringSplitNTest, EmptyDelimiter) {
-    auto result = util::string_split_n<3>("apple,banana,cherry", "");
+    auto result = string_split_n<3>("apple,banana,cherry", "");
     ASSERT_FALSE(result.has_value());
 }
 
 TEST(StringSplitNTest, DelimiterAtBeginning) {
-    auto result = util::string_split_n<2>(",apple", ",");
+    auto result = string_split_n<2>(",apple", ",");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "");
     EXPECT_EQ(result->at(1), "apple");
 }
 
 TEST(StringSplitNTest, DelimiterAtEnd) {
-    auto result = util::string_split_n<3>("apple,banana,", ",");
+    auto result = string_split_n<3>("apple,banana,", ",");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "apple");
     EXPECT_EQ(result->at(1), "banana");
@@ -223,7 +222,7 @@ TEST(StringSplitNTest, DelimiterAtEnd) {
 }
 
 TEST(StringSplitNTest, ConsecutiveDelimiters) {
-    auto result = util::string_split_n<3>("apple,,cherry", ",");
+    auto result = string_split_n<3>("apple,,cherry", ",");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "apple");
     EXPECT_EQ(result->at(1), "");
@@ -232,8 +231,8 @@ TEST(StringSplitNTest, ConsecutiveDelimiters) {
 
 TEST(StringSplitNTest, NonBreakingSpaceDelimiter) {
     std::string nonBreakingSpace = "\u00A0"; // UTF-8 for non-breaking space
-    auto result = util::string_split_n<2>("apple" + nonBreakingSpace + "banana",
-                                          nonBreakingSpace);
+    auto result = string_split_n<2>("apple" + nonBreakingSpace + "banana",
+                                    nonBreakingSpace);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result->at(0), "apple");
     EXPECT_EQ(result->at(1), "banana");

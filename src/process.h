@@ -1,8 +1,8 @@
 #ifndef PROCESS_H
 #define PROCESS_H
 
-#include "common.hpp"
-#include "util.hpp"
+#include "common.h"
+#include "util.h"
 #include <array>
 #include <cstdio>
 #include <functional>
@@ -141,7 +141,7 @@ class Process {
             }
             close(pipe_fds[1]);
 
-            auto c_args = util::collection_to_c_array(cmd);
+            auto c_args = collection_to_c_array(cmd);
             execvp(c_args[0], c_args.get());
 
             perror("execvp");

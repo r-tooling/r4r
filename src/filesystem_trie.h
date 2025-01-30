@@ -1,4 +1,5 @@
-#pragma once
+#ifndef FILESYSTEM_TRIE_H
+#define FILESYSTEM_TRIE_H
 
 #include <filesystem>
 #include <memory>
@@ -7,8 +8,6 @@
 #include <unordered_set>
 
 namespace fs = std::filesystem;
-
-namespace util {
 
 template <typename T>
 class FileSystemTrie {
@@ -101,4 +100,4 @@ class FileSystemTrie {
     bool is_empty() { return root_->children.empty(); }
 };
 
-} // namespace util
+#endif // FILESYSTEM_TRIE_H

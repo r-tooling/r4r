@@ -1,6 +1,9 @@
-#include "common.hpp"
-#include "logger.hpp"
-#include "util.hpp"
+#ifndef  CLI_H
+#define CLI_H
+
+#include "common.h"
+#include "logger.h"
+#include "util.h"
 
 #include <chrono>
 #include <fcntl.h>
@@ -104,7 +107,7 @@ class TaskRunner {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = now - before;
         LOG_INFO(log_) << task.name() << " finished in "
-                       << util::format_elapsed_time(elapsed);
+                       << format_elapsed_time(elapsed);
 
         current_task_ = nullptr;
 
@@ -133,3 +136,5 @@ void prefixed_ostream(std::ostream& dst, std::string const& prefix, Fn fn) {
     dst.flush();
     dst.rdbuf(old);
 }
+
+#endif // CLI_H

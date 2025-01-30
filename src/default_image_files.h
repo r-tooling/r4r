@@ -1,9 +1,9 @@
 #ifndef DEFAULT_IMAGE_FILES_H
 #define DEFAULT_IMAGE_FILES_H
 
-#include "common.hpp"
-#include "logger.hpp"
-#include "process.hpp"
+#include "common.h"
+#include "logger.h"
+#include "process.h"
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -65,7 +65,7 @@ class DefaultImageFiles {
         LOG_DEBUG(log_) << "Loading default file list from image: "
                         << image_name;
 
-        std::string bf_pattern = util::mk_string(blacklist_patterns, '|');
+        std::string bf_pattern = mk_string(blacklist_patterns, '|');
 
         // clang-format off
         std::vector<std::string> docker_cmd = {
@@ -93,7 +93,7 @@ class DefaultImageFiles {
             throw std::runtime_error(
                 STR("Unable to initialize default file list for "
                     << image_name
-                    << "\nCommand: " << util::mk_string(docker_cmd, ' ')));
+                    << "\nCommand: " << mk_string(docker_cmd, ' ')));
         }
 
         return result;

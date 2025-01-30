@@ -1,4 +1,4 @@
-#include "../dpkg_database.hpp"
+#include "dpkg_database.h"
 #include <gtest/gtest.h>
 #include <sstream>
 #include <unordered_map>

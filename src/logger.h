@@ -1,6 +1,7 @@
-#pragma once
+#ifndef LOGGER_H
+#define LOGGER_H
 
-#include "common.hpp"
+#include "common.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -442,3 +443,5 @@ inline void PatternLogFormatter::format(LogEvent const& event,
 
     dst << "\n";
 }
+
+#endif // LOGGER_H

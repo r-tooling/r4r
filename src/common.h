@@ -1,4 +1,6 @@
-#pragma once
+#ifndef COMMON_H
+#define COMMON_H
+
 #include <filesystem>
 #include <system_error>
 
@@ -33,3 +35,5 @@ inline std::system_error make_system_error(int error_code,
 // bytes for U+00A0 (non-breakable space) in UTF-8
 #define NBSP "\xC2\xA0"
 static inline std::string const kDelimUtf8 = NBSP;
+
+#endif // COMMON_H

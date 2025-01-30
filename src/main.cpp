@@ -1,16 +1,16 @@
-#include "common.hpp"
-#include "default_image_files.hpp"
-#include "dpkg_database.hpp"
-#include "filesystem_trie.hpp"
-#include "logger.hpp"
+#include "cli.h"
+#include "common.h"
+#include "default_image_files.h"
+#include "dpkg_database.h"
+#include "filesystem_trie.h"
+#include "logger.h"
+#include "rpkg_database.h"
+#include "syscall_monitor.h"
+#include "util.h"
+
 #include <csignal>
 #include <fcntl.h>
 #include <filesystem>
-
-#include "cli.hpp"
-#include "rpkg_database.hpp"
-#include "syscall_monitor.hpp"
-#include "util.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -217,7 +217,7 @@ class FileTracer : public SyscallListener {
     }
 
     void register_file(fs::path const& file) {
-        auto size = util::file_size(file);
+        auto size = file_size(file);
         FileInfo info{file, {}};
 
         if (std::holds_alternative<std::error_code>(size)) {
@@ -242,14 +242,14 @@ class FileTracer : public SyscallListener {
             result = pathname;
         } else {
             if (dirfd == AT_FDCWD) {
-                auto d = util::get_process_cwd(pid);
+                auto d = get_process_cwd(pid);
                 if (!d) {
                     register_warning(STR("failed to resolve cwd of: " << pid));
                     return;
                 }
                 result = *d;
             } else {
-                auto d = util::resolve_fd_filename(pid, dirfd);
+                auto d = resolve_fd_filename(pid, dirfd);
                 if (!d) {
                     register_warning(STR("Failed to resolve dirfd: " << dirfd));
                     return;
@@ -274,7 +274,7 @@ class FileTracer : public SyscallListener {
             fs::path entry_file = std::get<fs::path>(state);
             if (ret_val >= 0) {
                 auto exit_file =
-                    util::resolve_fd_filename(pid, static_cast<int>(ret_val));
+                    resolve_fd_filename(pid, static_cast<int>(ret_val));
 
                 std::error_code ec;
                 if (!exit_file) {
@@ -377,7 +377,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
 
   public:
     std::vector<FileInfo> run(Logger& log, std::ostream& output) override {
-        LOG_INFO(log) << "Tracing program: " << util::mk_string(cmd_, ' ');
+        LOG_INFO(log) << "Tracing program: " << mk_string(cmd_, ' ');
 
         FileTracer tracer;
         SyscallMonitor monitor{cmd_, tracer};
@@ -461,7 +461,7 @@ struct Environment {
             os << "env:\n";
             prefixed_ostream(os, "  ", [&] {
                 for (auto& [k, v] : trace.vars) {
-                    os << "- " << k << ": " << util::remove_ansi(v) << "\n";
+                    os << "- " << k << ": " << remove_ansi(v) << "\n";
                 }
             });
             os << "user: ";
@@ -529,7 +529,7 @@ std::vector<fs::path> get_root_symlink(fs::path const& path) {
     std::vector<fs::path> result = {path};
 
     for (auto const& [symlink, target] : symlinks) {
-        if (util::is_sub_path(path, target)) {
+        if (is_sub_path(path, target)) {
             fs::path candidate = symlink / path.lexically_relative(target);
 
             std::error_code ec;
@@ -662,7 +662,7 @@ class IgnoreFilesManifest : public Manifest {
         std::erase_if(files, [&](FileInfo const& info) {
             auto& path = info.path;
             for (auto const& d : fontconfig_dirs) {
-                if (util::is_sub_path(path, d)) {
+                if (is_sub_path(path, d)) {
                     if (path.filename() == ".uuid") {
                         LOG_DEBUG(log_)
                             << "resolving: " << path << " to: ignored";
@@ -675,7 +675,7 @@ class IgnoreFilesManifest : public Manifest {
     }
 
   private:
-    static util::FileSystemTrie<ImageFileInfo> load_default_files() {
+    static FileSystemTrie<ImageFileInfo> load_default_files() {
         auto default_files = []() {
             if (fs::exists(kImageFileCache)) {
                 return DefaultImageFiles::from_file(kImageFileCache);
@@ -702,7 +702,7 @@ class IgnoreFilesManifest : public Manifest {
         LOG_DEBUG(log_) << "Loaded " << default_files.size()
                         << " default files";
 
-        util::FileSystemTrie<ImageFileInfo> trie;
+        FileSystemTrie<ImageFileInfo> trie;
         for (auto& info : default_files.files()) {
             trie.insert(info.path, info);
         }
@@ -714,17 +714,17 @@ class IgnoreFilesManifest : public Manifest {
     static inline std::string const kImageName = "ubuntu:22.04";
 
     static inline fs::path const kImageFileCache = []() {
-        return util::get_user_cache_dir() / "r4r" / (kImageName + ".cache");
+        return get_user_cache_dir() / "r4r" / (kImageName + ".cache");
     }();
 
     static inline std::vector<std::string> const kBlacklistPatterns = {
         "/dev/*", "/sys/*", "/proc/*"};
 
-    static inline util::FileSystemTrie<ImageFileInfo> const kDefaultImageFiles =
+    static inline FileSystemTrie<ImageFileInfo> const kDefaultImageFiles =
         load_default_files();
 
-    static inline util::FileSystemTrie<bool> kIgnoredFiles = [] {
-        util::FileSystemTrie<bool> trie{false};
+    static inline FileSystemTrie<bool> kIgnoredFiles = [] {
+        FileSystemTrie<bool> trie{false};
         trie.insert("/dev", true);
         trie.insert("/etc/ld.so.cache", true);
         trie.insert("/etc/nsswitch.conf", true);
@@ -793,7 +793,7 @@ class Tracer {
         // diff();
 
         // std::cout << envir;
-        // util::print_collection(std::cout, files, '\n');
+        // print_collection(std::cout, files, '\n');
     }
 
     void stop() { runner_.stop(); }

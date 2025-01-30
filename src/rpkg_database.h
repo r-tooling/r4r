@@ -1,11 +1,11 @@
 #ifndef RPKG_DATABASE_
 #define RPKG_DATABASE_
 
-#include "common.hpp"
-#include "filesystem_trie.hpp"
-#include "logger.hpp"
-#include "process.hpp"
-#include "util.hpp"
+#include "common.h"
+#include "filesystem_trie.h"
+#include "logger.h"
+#include "process.h"
+#include "util.h"
 #include <cctype>
 #include <iostream>
 #include <optional>
@@ -122,9 +122,9 @@ class RpkgDatabase {
     explicit RpkgDatabase(RPackages packages)
         : packages_{std::move(packages)}, files_{build_files_db(packages_)} {}
 
-    static util::FileSystemTrie<RPackage const*>
+    static FileSystemTrie<RPackage const*>
     build_files_db(RPackages const& packages) {
-        util::FileSystemTrie<RPackage const*> files{nullptr};
+        FileSystemTrie<RPackage const*> files{nullptr};
         for (auto const& [_, pkg] : packages) {
             files.insert(pkg->lib_path / pkg->name, pkg.get());
         }
@@ -137,12 +137,12 @@ class RpkgDatabase {
             if (!std::getline(input, line)) {
                 break; // no more lines
             }
-            line = util::string_trim(line);
+            line = string_trim(line);
             if (line.empty()) {
                 continue;
             }
 
-            auto tokens = util::string_split_n<6>(line, NBSP);
+            auto tokens = string_split_n<6>(line, NBSP);
             if (!tokens) {
                 LOG_WARN(log_)
                     << "Unable to parse installed.package() output line: "
@@ -173,7 +173,7 @@ class RpkgDatabase {
         std::string tmp;
         auto dep = [&]() {
             if (!tmp.empty()) {
-                tmp = util::string_trim(tmp);
+                tmp = string_trim(tmp);
                 std::string pkg_name;
                 for (char x : tmp) {
                     if (x == '(' || std::isspace(x)) {
@@ -181,7 +181,7 @@ class RpkgDatabase {
                     }
                     pkg_name.push_back(x);
                 }
-                pkg_name = util::string_trim(pkg_name);
+                pkg_name = string_trim(pkg_name);
                 if (!pkg_name.empty() && pkg_name != "R") {
                     result.push_back(pkg_name);
                 }
@@ -247,7 +247,7 @@ class RpkgDatabase {
 
     static inline Logger log_ = LogManager::logger("rpkg-database");
     RPackages packages_;
-    util::FileSystemTrie<RPackage const*> files_;
+    FileSystemTrie<RPackage const*> files_;
 };
 
 #endif // RPKG_DATABASE_
