@@ -2,11 +2,13 @@
 #define RPKG_DATABASE_
 
 #include "common.hpp"
+#include "filesystem_trie.hpp"
 #include "logger.hpp"
 #include "process.hpp"
 #include "util.hpp"
 #include <cctype>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -15,18 +17,36 @@
 
 struct RPackage {
     std::string name;
-    std::string lib_path;
+    fs::path lib_path;
     std::string version;
     std::vector<std::string> depends;
     std::vector<std::string> imports;
     std::vector<std::string> linking_to;
+
+    bool operator==(RPackage const& other) const {
+        return name == other.name && lib_path == other.lib_path &&
+               version == other.version && depends == other.depends &&
+               imports == other.imports && linking_to == other.linking_to;
+    }
 };
+
+namespace std {
+
+template <>
+struct hash<RPackage> {
+    size_t operator()(RPackage const& pkg) const noexcept {
+        hash<string> string_hasher;
+        return string_hasher(pkg.name) ^ (string_hasher(pkg.version) << 1) ^
+               (string_hasher(pkg.lib_path) << 2);
+    }
+};
+} // namespace std
 
 using RPackages = std::unordered_map<std::string, RPackage>;
 
-class RPackageDatabase {
+class RpkgDatabase {
   public:
-    static RPackageDatabase from_R(fs::path const& R_bin) {
+    static RpkgDatabase from_R(fs::path const& R_bin) {
         Process R{
             {R_bin, "-s", "-q", "-e",
              R""(write.table(gsub("\n", "", installed.packages()[, c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo")]), sep="\U00A0", quote=FALSE, row.names=FALSE))""}};
@@ -40,10 +60,14 @@ class RPackageDatabase {
         return result;
     }
 
-    static RPackageDatabase from_stream(std::istream& input) {
+    static RpkgDatabase from_stream(std::istream& input) {
         RPackages packages;
         parse_r_packages(input, packages);
-        return RPackageDatabase{packages};
+        return RpkgDatabase{packages};
+    }
+
+    RPackage const* lookup_by_path(fs::path const& path) const {
+        return files_.find_last_matching(path);
     }
 
     // Return all dependencies (recursively) of the given set of packages pkgs
@@ -88,8 +112,17 @@ class RPackageDatabase {
     }
 
   private:
-    explicit RPackageDatabase(RPackages packages)
-        : packages_{std::move(packages)} {}
+    explicit RpkgDatabase(RPackages packages)
+        : packages_{std::move(packages)}, files_{build_files_db(packages_)} {}
+
+    static util::FileSystemTrie<RPackage>
+    build_files_db(RPackages const& packages) {
+        util::FileSystemTrie<RPackage> files{nullptr};
+        for (auto const& [_, pkg] : packages) {
+            files.insert(pkg.lib_path / pkg.name, pkg);
+        }
+        return files;
+    }
 
     static void parse_r_packages(std::istream& input, RPackages& packages) {
         while (true) {
@@ -208,6 +241,7 @@ class RPackageDatabase {
 
     static inline Logger log_ = LogManager::logger("rpkg-database");
     RPackages packages_;
+    util::FileSystemTrie<RPackage> files_;
 };
 
 #endif // RPKG_DATABASE_

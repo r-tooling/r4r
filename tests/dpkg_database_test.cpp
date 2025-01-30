@@ -13,7 +13,7 @@ const std::string kDpkgHeader = R"(Desired=Unknown/Install/Remove/Purge/Hold
 )";
 // clang-format on
 
-inline DebPackageMap parse_installed_packages(std::string const& dpkg_output) {
+inline DebPackages parse_installed_packages(std::string const& dpkg_output) {
     std::istringstream stream(dpkg_output);
     return parse_installed_packages(stream);
 }

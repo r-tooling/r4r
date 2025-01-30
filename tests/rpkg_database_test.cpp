@@ -12,7 +12,7 @@ TEST(RPackagesTest, BasicParsing) {
     // clang-format on
 
     std::istringstream iss(data);
-    auto packages = RPackageDatabase::from_stream(iss);
+    auto packages = RpkgDatabase::from_stream(iss);
 
     ASSERT_EQ(packages.size(), 3u);
 
@@ -69,7 +69,7 @@ TEST(RPackagesTest, TopologicalSorting) {
     // clang-format on
 
     std::istringstream iss(data);
-    auto db = RPackageDatabase::from_stream(iss);
+    auto db = RpkgDatabase::from_stream(iss);
 
     {
         // If we request A, we get A plus B plus C

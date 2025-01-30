@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include "cli.hpp"
+#include "rpkg_database.hpp"
 #include "syscall_monitor.hpp"
 #include "util.hpp"
 
@@ -434,6 +435,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
 };
 
 struct Options {
+    fs::path R_bin = "R";
     std::vector<std::string> cmd;
 };
 
@@ -442,7 +444,7 @@ Options parse_cmd_args(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         args.emplace_back(argv[i]);
     }
-    return {args};
+    return {.cmd = args};
 }
 
 struct Environment {
@@ -585,9 +587,49 @@ class DebPackagesManifest : public Manifest {
 
   private:
     static inline Logger log_ = LogManager::logger("manifest.dpkg");
+
     DpkgDatabase dpkg_database_;
     std::unordered_map<fs::path, DebPackage const*> files_;
     std::unordered_set<DebPackage> packages_;
+};
+
+class CRANPackagesManifest : public Manifest {
+  public:
+    explicit CRANPackagesManifest(RpkgDatabase rpkg_database)
+        : rpkg_database_(std::move(rpkg_database)) {}
+
+    explicit CRANPackagesManifest(fs::path const& R_bin)
+        : CRANPackagesManifest(RpkgDatabase::from_R(R_bin)) {}
+
+    void load_from_files(std::vector<FileInfo>& files) override {
+        auto resolved = [&](FileInfo const& info) {
+            auto path = info.path;
+            for (auto& p : get_root_symlink(path)) {
+                if (auto* pkg = rpkg_database_.lookup_by_path(p); pkg) {
+
+                    LOG_DEBUG(log_)
+                        << "resolved: " << path << " to: " << pkg->name;
+
+                    auto it = packages_.insert(pkg);
+                    files_.insert_or_assign(p, *it.first);
+
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        std::erase_if(files, resolved);
+        LOG_INFO(log_) << "Resolved " << files_.size() << " files to "
+                       << packages_.size() << " R packages";
+    };
+
+  private:
+    static inline Logger log_ = LogManager::logger("manifest.rpkg");
+
+    RpkgDatabase rpkg_database_;
+    std::unordered_map<fs::path, RPackage const*> files_;
+    std::unordered_set<RPackage const*> packages_;
 };
 
 class IgnoreFilesManifest : public Manifest {
@@ -595,10 +637,8 @@ class IgnoreFilesManifest : public Manifest {
     void load_from_files(std::vector<FileInfo>& files) override {
         std::erase_if(files, [&](FileInfo const& info) {
             auto& path = info.path;
-            if (auto f = kDefaultImageFiles.find(path); f) {
-                // FIXME: check the size, perm, ...
-                LOG_DEBUG(log_)
-                    << "resolving: " << path << " to: ignored - image default";
+            if (*kIgnoredFiles.find_last_matching(path)) {
+                LOG_DEBUG(log_) << "resolving: " << path << " to: ignored";
                 return true;
             }
             return false;
@@ -606,8 +646,10 @@ class IgnoreFilesManifest : public Manifest {
 
         std::erase_if(files, [&](FileInfo const& info) {
             auto& path = info.path;
-            if (*kIgnoredFiles.find_last_matching(path)) {
-                LOG_DEBUG(log_) << "resolving: " << path << " to: ignored";
+            if (auto f = kDefaultImageFiles.find(path); f) {
+                // TODO: check the size, perm, ...
+                LOG_DEBUG(log_)
+                    << "resolving: " << path << " to: ignored - image default";
                 return true;
             }
             return false;
@@ -704,15 +746,18 @@ using Manifests = std::vector<std::unique_ptr<Manifest>>;
 
 class ManifestsTask : public Task<Manifests> {
   public:
-    explicit ManifestsTask(std::vector<FileInfo>& files)
-        : Task{"manifest"}, files_{files} {}
+    explicit ManifestsTask(Options const& options, std::vector<FileInfo>& files)
+        : Task{"manifest"}, options_{options}, files_{files} {}
 
   private:
     Manifests run(Logger& log,
                   [[maybe_unused]] std::ostream& ostream) override {
+
         Manifests manifests;
         manifests.push_back(std::make_unique<IgnoreFilesManifest>());
         manifests.push_back(std::make_unique<DebPackagesManifest>());
+        manifests.push_back(
+            std::make_unique<CRANPackagesManifest>(options_.R_bin));
 
         for (auto& m : manifests) {
             LOG_INFO(log) << "Resolving " << files_.size() << " files";
@@ -727,6 +772,7 @@ class ManifestsTask : public Task<Manifests> {
     }
 
   private:
+    Options const& options_;
     std::vector<FileInfo>& files_;
 };
 
@@ -738,7 +784,7 @@ class Tracer {
     void trace() {
         auto envir = runner_.run(CaptureEnvironmentTask{});
         auto files = runner_.run(TracingTask{options_.cmd});
-        auto manifests = runner_.run(ManifestsTask{files});
+        auto manifests = runner_.run(ManifestsTask{options_, files});
 
         // resolve_files();
         // create_dockerfile();

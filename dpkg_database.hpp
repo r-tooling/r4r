@@ -20,15 +20,14 @@ struct DebPackage {
     bool operator==(DebPackage const& other) const = default;
 };
 
-using DebPackageMap = std::unordered_map<std::string, DebPackage>;
+using DebPackages = std::unordered_map<std::string, DebPackage>;
 
 class DpkgDatabase {
   public:
     static DpkgDatabase system_database();
     static DpkgDatabase from_path(fs::path const& path);
 
-    DpkgDatabase(DebPackageMap packages,
-                 util::FileSystemTrie<std::string> files)
+    DpkgDatabase(DebPackages packages, util::FileSystemTrie<std::string> files)
         : packages_{std::move(packages)}, files_{std::move(files)} {}
 
     DebPackage const* lookup_by_path(fs::path const& path) const;
@@ -37,12 +36,12 @@ class DpkgDatabase {
   private:
     static inline std::string const kNoPkgSentinel{"no-package-found"};
 
-    DebPackageMap packages_;
+    DebPackages packages_;
     util::FileSystemTrie<std::string> files_;
 };
 
-inline DebPackageMap parse_installed_packages(std::istream& dpkg_output) {
-    DebPackageMap package_map;
+inline DebPackages parse_installed_packages(std::istream& dpkg_output) {
+    DebPackages package_map;
     std::string line;
 
     // skip header lines
@@ -63,7 +62,7 @@ inline DebPackageMap parse_installed_packages(std::istream& dpkg_output) {
     return package_map;
 }
 
-inline DebPackageMap load_installed_packages() {
+inline DebPackages load_installed_packages() {
     auto [out, exit_code] = (execute_command({"dpkg", "-l"}));
     if (exit_code != 0) {
         // FIXME: create some wrapper over this pattern
