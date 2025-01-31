@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "filesystem_trie.h"
+#include "logger.h"
 #include "process.h"
 #include <filesystem>
 #include <fstream>
@@ -36,6 +37,45 @@ struct hash<DebPackage> {
 using DebPackages =
     std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
 
+class DpkgParser {
+  public:
+    DpkgParser(std::istream& dpkg_output) : dpkg_output_{dpkg_output} {}
+
+    DebPackages parse();
+
+  private:
+    static inline Logger log_{LogManager::logger("dpkg-parser")};
+    std::istream& dpkg_output_;
+};
+
+inline DebPackages DpkgParser::parse() {
+    DebPackages packages;
+    std::string line;
+
+    // skip header lines
+    while (std::getline(dpkg_output_, line)) {
+        if (line.starts_with("+++-")) {
+            break;
+        }
+    }
+
+    while (std::getline(dpkg_output_, line)) {
+        std::istringstream line_stream(line);
+        std::string status, name, version;
+
+        if (line_stream >> status >> std::ws >> name >> std::ws >> version) {
+            if (status == "ii") { // only consider installed packages
+                packages.emplace(name,
+                                 std::make_unique<DebPackage>(name, version));
+            }
+        } else {
+            LOG_WARN(log_) << "Unexpected line from dpkg: " << line;
+        }
+    }
+
+    return packages;
+}
+
 class DpkgDatabase {
   public:
     static DpkgDatabase system_database();
@@ -50,54 +90,34 @@ class DpkgDatabase {
     DebPackage const* lookup_by_name(std::string const& name) const;
 
   private:
-    DpkgDatabase(DebPackages packages,
-                 FileSystemTrie<DebPackage const*> files)
+    DpkgDatabase(DebPackages packages, FileSystemTrie<DebPackage const*> files)
         : packages_{std::move(packages)}, files_{std::move(files)} {}
 
+    static DebPackages load_installed_packages();
+    static void
+    process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
+                              fs::path const& file, DebPackage const* pkg);
+
+    static inline Logger log_ = LogManager::logger("dpkg-database");
     DebPackages packages_;
     FileSystemTrie<DebPackage const*> files_;
 };
 
-inline DebPackages parse_installed_packages(std::istream& dpkg_output) {
-    DebPackages packages;
-    std::string line;
-
-    // skip header lines
-    for (int i = 0; i < 5 && std::getline(dpkg_output, line); ++i)
-        ;
-
-    while (std::getline(dpkg_output, line)) {
-        std::istringstream line_stream(line);
-        std::string status, name, version;
-
-        // FIXME: USE THIS FOR PARSING THE TABLES!
-        if (line_stream >> status >> std::ws >> name >> std::ws >> version) {
-            if (status == "ii") { // only consider installed packages
-                packages.emplace(name,
-                                 std::make_unique<DebPackage>(name, version));
-            }
-        } else {
-            // FIXME: log warning!
-        }
-    }
-
-    return packages;
-}
-
-inline DebPackages load_installed_packages() {
+inline DebPackages DpkgDatabase::load_installed_packages() {
     auto [out, exit_code] = (execute_command({"dpkg", "-l"}));
     if (exit_code != 0) {
-        // FIXME: create some wrapper over this pattern
-        // FIXME: this is too harsh, let allow run without dpkg ?
         throw std::runtime_error(STR("Unable to execute dpkg -l, exit code:"
                                      << exit_code << "\nOutput: " << out));
     }
     std::istringstream stream{out};
-    return parse_installed_packages(stream);
+    DpkgParser parser{stream};
+    return parser.parse();
 }
 
-inline void process_list_file(FileSystemTrie<DebPackage const*>& trie,
-                              fs::path const& file, DebPackage const* pkg) {
+inline void
+DpkgDatabase::process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
+                                        fs::path const& file,
+                                        DebPackage const* pkg) {
     std::ifstream infile(file);
     if (!infile.is_open()) {
         throw std::runtime_error("Error opening file: " + file.string());
@@ -122,10 +142,10 @@ inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
     for (auto& [pkg_name, pkg] : packages) {
         auto list_file = path / (pkg_name + ".list");
         if (fs::is_regular_file(list_file)) {
-            process_list_file(trie, list_file, pkg.get());
+            process_package_list_file(trie, list_file, pkg.get());
         } else {
-            // FIXME: use some logging
-            std::cerr << list_file << ": no such file\n";
+            LOG_WARN(log_) << "Package " << pkg_name << " list file "
+                           << list_file << " does not exist";
         }
     }
 

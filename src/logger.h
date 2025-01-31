@@ -330,13 +330,15 @@ class LogManager {
         return instance().get_or_create_logger(name);
     }
 
-    // void enable(LogLevel level) {
-    //     enabled_levels_ |= 1 << static_cast<int>(level);
-    // }
-    //
-    // void disable(LogLevel level) {
-    //     enabled_levels_ ^= 1 << static_cast<int>(level);
-    // }
+    void enable(std::string const& name, LogLevel level) {
+        get_or_create_logger(name).enabled_levels_ |=
+            1 << static_cast<int>(level);
+    }
+
+    void disable(std::string const& name, LogLevel level) {
+        get_or_create_logger(name).enabled_levels_ ^=
+            1 << static_cast<int>(level);
+    }
 
     void set_sink(std::string const& name, LogLevel level,
                   std::shared_ptr<LogSink> sink) {
@@ -358,6 +360,7 @@ class LogManager {
 
     Logger& parent_logger(Logger& logger);
 
+    // the root logger has empty name
     static inline std::string const kRootLoggerName = "";
     static inline std::chrono::steady_clock::time_point const logger_start_ =
         std::chrono::steady_clock::now();

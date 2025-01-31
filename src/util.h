@@ -10,12 +10,12 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <sys/wait.h>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
-#include <sys/wait.h>
-#include <thread>
 
 inline std::string escape_cmd_arg(std::string const& arg) {
     if (arg.empty()) {
@@ -120,7 +120,8 @@ inline std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
     return {std::string(resolved_path)};
 }
 
-inline std::vector<std::string> string_split(std::string const& str, char delim) {
+inline std::vector<std::string> string_split(std::string const& str,
+                                             char delim) {
     std::vector<std::string> lines;
     std::istringstream iss(str);
     std::string line;
@@ -132,7 +133,8 @@ inline std::vector<std::string> string_split(std::string const& str, char delim)
     return lines;
 }
 
-inline std::variant<std::uintmax_t, std::error_code> file_size(fs::path const& path) {
+inline std::variant<std::uintmax_t, std::error_code>
+file_size(fs::path const& path) {
     std::error_code ec;
     std::uintmax_t size = fs::file_size(path, ec);
 
@@ -165,7 +167,7 @@ inline std::string remove_ansi(std::string const& input) {
 }
 
 inline fs::path create_temp_file(std::string const& prefix,
-                          std::string const& suffix) {
+                                 std::string const& suffix) {
     static std::random_device rd;
     static std::mt19937_64 engine(rd());
     static std::uniform_int_distribution<unsigned long long> dist;
@@ -222,7 +224,8 @@ inline std::string string_trim(std::string const& s) {
 }
 
 template <typename T, typename S>
-inline void print_collection(std::ostream& os, T const& collection, S const& sep) {
+inline void print_collection(std::ostream& os, T const& collection,
+                             S const& sep) {
     if (std::empty(collection)) {
         return;
     }
@@ -278,8 +281,8 @@ inline std::string mk_string(T const& collection, S const& sep) {
 // }
 
 template <typename Collection>
-std::unique_ptr<typename Collection::value_type[]>
-inline collection_to_c_array(Collection const& container) {
+std::unique_ptr<typename Collection::value_type[]> inline collection_to_c_array(
+    Collection const& container) {
     using T = typename Collection::value_type;
     static_assert(std::ranges::sized_range<Collection>);
 
@@ -320,7 +323,7 @@ struct WaitForSignalResult {
 };
 
 inline WaitForSignalResult wait_for_signal(pid_t pid, int sig,
-                                    std::chrono::milliseconds timeout) {
+                                           std::chrono::milliseconds timeout) {
     using clock = std::chrono::steady_clock;
     auto start_time = clock::now();
 
@@ -370,7 +373,6 @@ inline Pipe create_pipe() {
     return {fds[0], fds[1]};
 }
 
-
 template <typename Duration>
 inline std::string format_elapsed_time(Duration elapsed) {
     using namespace std::chrono;
@@ -410,8 +412,8 @@ inline std::string format_elapsed_time(Duration elapsed) {
 }
 
 template <size_t N>
-std::optional<std::array<std::string, N>>
-inline string_split_n(std::string const& str, std::string const& delim) {
+std::optional<std::array<std::string, N>> inline string_split_n(
+    std::string const& str, std::string const& delim) {
     std::array<std::string, N> result{};
     size_t start = 0;
     size_t end = 0;

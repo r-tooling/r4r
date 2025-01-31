@@ -217,7 +217,9 @@ class FileTracer : public SyscallListener {
     }
 
     void register_file(fs::path const& file) {
-        auto size = file_size(file);
+        // FIXME: why do I need the global namespace here? Why is it being
+        // resolved to fs::file_size?
+        auto size = ::file_size(file);
         FileInfo info{file, {}};
 
         if (std::holds_alternative<std::error_code>(size)) {
