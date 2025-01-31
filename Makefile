@@ -1,45 +1,68 @@
-BUILD_DIR ?= build
-DEVCONTAINER_NAME ?= r-tooling/r4r-dev
-DOCKER_IMAGE_NAME ?= r-tooling/r4r
+.DEFAULT_GOAL := all
+.PHONY: all configure build test install format lint clean help
 
-.PHONY: all
-all: build
+# configuration
+BUILD_DIR        ?= build
+GENERATOR        ?= Ninja
+BUILD_TYPE       ?= Debug
+INSTALL_PREFIX   ?= /usr/local
+CLANG_FORMAT     ?= clang-format
+CLANG_TIDY       ?= clang-tidy
+CMAKE            ?= cmake
+CTEST            ?= ctest
 
-.PHONY: build
-build: setup compile
+# cmake configuration arguments
+CMAKE_ARGS += -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+CMAKE_ARGS += -GNinja
 
-.PHONY: setup
-setup:
+# project structure
+SOURCE_DIR       = src
+TEST_DIR         = tests
+
+# file patterns
+FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
+FORMAT_EXCLUDE  = 
+
+#-------------------------------------------------------------------------------
+# Targets
+#-------------------------------------------------------------------------------
+
+all: build test ## Build and test the project (default)
+
+configure: ## Configure CMake project
 	mkdir -p $(BUILD_DIR)
-	cmake -DCMAKE_BUILD_TYPE=Debug -B $(BUILD_DIR) -G Ninja .
+	cd $(BUILD_DIR) && $(CMAKE) $(CMAKE_ARGS) -DCMAKE_INSTALL_PREFIX=$(INSTALL_PREFIX) ..
 
-.PHONY: compile
-compile: setup
-	ninja -C $(BUILD_DIR)
+build: configure ## Build the project
+	$(CMAKE) --build $(BUILD_DIR)
 
-.PHONY: clean
-clean:
-	rm -fr $(BUILD_DIR)
+test: build ## Run tests
+	cd $(BUILD_DIR) && $(CTEST) --test-dir $(TEST_DIR) --output-on-failure
 
-.PHONY: test
-test: compile
-	cd $(BUILD_DIR) && ctest --output-on-failure
+install: build ## Install the project
+	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
 
-.PHONY: check
-check:
-	cppcheck --enable=all --suppress=missingIncludeSystem r4r
+format: ## Format source code
+	@find $(SOURCE_DIR) $(TEST_DIR) \
+		-type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \) \
+		-not -path "$(FORMAT_EXCLUDE)" \
+		-exec $(CLANG_FORMAT) -i {} +
 
-.PHONY: devcontainer
-devcontainer:
-	devcontainer build --workspace-folder . --image-name $(DEVCONTAINER_NAME)
+lint: build ## Run static analysis
+	@find $(SOURCE_DIR) $(TEST_DIR) \
+		-type f \( -name "*.cpp" -o -name "*.hpp" \) \
+		-not -path "$(FORMAT_EXCLUDE)" \
+		-exec $(CLANG_TIDY) -p $(BUILD_DIR) --warnings-as-errors='*' {} +
 
-.PHONY: docker-image
-docker-image: devcontainer
-	docker build --rm -t $(DOCKER_IMAGE_NAME) .
+clean: ## Clean build artifacts
+	@rm -rf $(BUILD_DIR)
 
-.PHONY: install
-install: clean
-	mkdir -p $(BUILD_DIR)
-	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug .
-	cmake --build $(BUILD_DIR) --target r4r -j
-	cmake --install $(BUILD_DIR)
+help: ## Show this help message
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# enable build ccache by default (if available)
+ifneq ($(shell command -v ccache),)
+  CMAKE_ARGS += -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+endif
+
+# TODO: Enable address sanitizer in debug builds
