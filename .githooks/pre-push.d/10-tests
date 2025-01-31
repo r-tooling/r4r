@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v make >/dev/null 2>&1; then
+	echo "Error: 'make' command not found" >&2
+	exit 1
+fi
+
+if ! make test; then
+	cat <<EOF
+
+------------------------------------------------------------------
+Tests failed - push rejected.
+Fix the test failures before pushing your changes.
+Use 'make test' to run the tests locally.
+------------------------------------------------------------------
+EOF
+	exit 1
+fi
+
+exit 0
+
+# vim: set filetype=sh:
