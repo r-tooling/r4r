@@ -65,7 +65,7 @@ class DefaultImageFiles {
         LOG_DEBUG(log_) << "Loading default file list from image: "
                         << image_name;
 
-        std::string bf_pattern = mk_string(blacklist_patterns, '|');
+        std::string bf_pattern = string_join(blacklist_patterns, '|');
 
         // clang-format off
         std::vector<std::string> docker_cmd = {
@@ -93,7 +93,7 @@ class DefaultImageFiles {
             throw std::runtime_error(
                 STR("Unable to initialize default file list for "
                     << image_name
-                    << "\nCommand: " << mk_string(docker_cmd, ' ')));
+                    << "\nCommand: " << string_join(docker_cmd, ' ')));
         }
 
         return result;
@@ -180,7 +180,7 @@ class DefaultImageFiles {
     }
 
   private:
-    static inline Logger log_ = LogManager::logger("default-image-files");
+    static inline Logger& log_ = LogManager::logger("default-image-files");
     std::vector<ImageFileInfo> files_;
 };
 

@@ -245,7 +245,7 @@ class RpkgDatabase {
         sorted.push_back(pkg_name);
     }
 
-    static inline Logger log_ = LogManager::logger("rpkg-database");
+    static inline Logger& log_ = LogManager::logger("rpkg-database");
     RPackages packages_;
     FileSystemTrie<RPackage const*> files_;
 };

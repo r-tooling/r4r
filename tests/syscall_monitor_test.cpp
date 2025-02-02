@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "fs.h"
 #include "syscall_monitor.h"
 
 // Global test string in the child process.
@@ -98,11 +99,11 @@ class TestSyscallListener : public SyscallListener {
 };
 
 TEST(SyscallMonitorTest, OpenSyscall) {
-    fs::path temp_file = create_temp_file("r4r-test", ".delete");
+    TempFile temp_file{"r4r-test", ".delete"};
 
-    ASSERT_FALSE(fs::exists(temp_file));
+    ASSERT_FALSE(fs::exists(*temp_file));
 
-    auto tracee = [file = temp_file.c_str()]() {
+    auto tracee = [file = temp_file->c_str()]() {
         int fd = ::open(file, O_CREAT | O_WRONLY, 0644);
         return fd > 0 ? 0 : fd;
     };
@@ -119,8 +120,7 @@ TEST(SyscallMonitorTest, OpenSyscall) {
     ASSERT_EQ(listener.entries[0].syscall, SYS_openat);
     ASSERT_EQ(listener.exits[0].syscall, SYS_openat);
 
-    ASSERT_TRUE(fs::exists(temp_file));
-    ASSERT_TRUE(fs::remove(temp_file));
+    ASSERT_TRUE(fs::exists(*temp_file));
 }
 
 TEST(SyscallMonitorTest, CreatSyscall) {
@@ -129,11 +129,11 @@ TEST(SyscallMonitorTest, CreatSyscall) {
     // but it should have it own syscall number
     // this test just proves that we need to trace all syscalls dealing with
     // files
-    fs::path temp_file = create_temp_file("r4r-test", ".delete");
+    TempFile temp_file{"r4r-test", ".delete"};
 
-    ASSERT_FALSE(fs::exists(temp_file));
+    ASSERT_FALSE(fs::exists(*temp_file));
 
-    auto tracee = [file = temp_file.c_str()]() {
+    auto tracee = [file = temp_file->c_str()]() {
         int fd = ::creat(file, 0644);
         return fd > 0 ? 0 : fd;
     };
@@ -150,16 +150,15 @@ TEST(SyscallMonitorTest, CreatSyscall) {
     ASSERT_EQ(listener.entries[0].syscall, SYS_creat);
     ASSERT_EQ(listener.exits[0].syscall, SYS_creat);
 
-    ASSERT_TRUE(fs::exists(temp_file));
-    ASSERT_TRUE(fs::remove(temp_file));
+    ASSERT_TRUE(fs::exists(*temp_file));
 }
 
 TEST(SyscallMonitorTest, OpenSyscallFromChild) {
-    fs::path temp_file = create_temp_file("r4r-test-child", ".delete");
+    TempFile temp_file{"r4r-test-child", ".delete"};
 
-    ASSERT_FALSE(fs::exists(temp_file));
+    ASSERT_FALSE(fs::exists(*temp_file));
 
-    auto tracee = [file = temp_file.c_str()]() -> int {
+    auto tracee = [file = temp_file->c_str()]() -> int {
         pid_t pid = ::fork();
         EXPECT_GE(pid, 0);
 
@@ -198,6 +197,5 @@ TEST(SyscallMonitorTest, OpenSyscallFromChild) {
     }
     ASSERT_EQ(open_at_calls, 1);
 
-    ASSERT_TRUE(fs::exists(temp_file));
-    ASSERT_TRUE(fs::remove(temp_file));
+    ASSERT_TRUE(fs::exists(*temp_file));
 }

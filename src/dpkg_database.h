@@ -44,7 +44,7 @@ class DpkgParser {
     DebPackages parse();
 
   private:
-    static inline Logger log_{LogManager::logger("dpkg-parser")};
+    static inline Logger& log_{LogManager::logger("dpkg-parser")};
     std::istream& dpkg_output_;
 };
 
@@ -98,13 +98,14 @@ class DpkgDatabase {
     process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
                               fs::path const& file, DebPackage const* pkg);
 
-    static inline Logger log_ = LogManager::logger("dpkg-database");
+    static inline Logger& log_ = LogManager::logger("dpkg-database");
     DebPackages packages_;
     FileSystemTrie<DebPackage const*> files_;
 };
 
 inline DebPackages DpkgDatabase::load_installed_packages() {
     auto [out, exit_code] = (execute_command({"dpkg", "-l"}));
+    // FIXME: there should be a method for this
     if (exit_code != 0) {
         throw std::runtime_error(STR("Unable to execute dpkg -l, exit code:"
                                      << exit_code << "\nOutput: " << out));

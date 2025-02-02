@@ -51,8 +51,7 @@ class SyscallMonitor {
 
     Result start();
 
-    [[noreturn]] void process_tracee(Pipe const& out,
-                                     Pipe const& err) const;
+    [[noreturn]] void process_tracee(Pipe const& out, Pipe const& err) const;
     Result process_tracer(Pipe const& out, Pipe const& err);
 
     static std::string read_string_from_process(pid_t pid, uint64_t remote_addr,
@@ -173,8 +172,8 @@ inline void SyscallMonitor::process_tracee(Pipe const& out,
     //    }
 }
 
-inline SyscallMonitor::Result
-SyscallMonitor::process_tracer(Pipe const& out, Pipe const& err) {
+inline SyscallMonitor::Result SyscallMonitor::process_tracer(Pipe const& out,
+                                                             Pipe const& err) {
 
     close(out.write_fd);
     close(err.write_fd);

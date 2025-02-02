@@ -1,4 +1,4 @@
-#ifndef  CLI_H
+#ifndef CLI_H
 #define CLI_H
 
 #include "common.h"
@@ -121,7 +121,7 @@ class TaskRunner {
     }
 
   private:
-    static inline Logger log_ = LogManager::logger("task-runner");
+    static inline Logger& log_ = LogManager::logger("task-runner");
     std::ostream& output_;
     std::ostringstream warnings_;
     TaskBase* current_task_{};

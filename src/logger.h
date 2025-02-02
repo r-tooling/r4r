@@ -271,6 +271,14 @@ class Logger {
         }
     }
 
+    void enable(LogLevel level) {
+        enabled_levels_ |= 1 << static_cast<int>(level);
+    }
+
+    void disable(LogLevel level) {
+        enabled_levels_ ^= 1 << static_cast<int>(level);
+    }
+
     std::string const name_;
     std::array<std::shared_ptr<LogSink>, kLogLevels> sinks_{};
     std::uint8_t enabled_levels_{(1 << kLogLevels) - 1};
@@ -326,18 +334,17 @@ class LogManager {
         static LogManager instance;
         return instance;
     }
-    static Logger logger(std::string const& name) {
+
+    static Logger& logger(std::string const& name) {
         return instance().get_or_create_logger(name);
     }
 
     void enable(std::string const& name, LogLevel level) {
-        get_or_create_logger(name).enabled_levels_ |=
-            1 << static_cast<int>(level);
+        get_or_create_logger(name).enable(level);
     }
 
     void disable(std::string const& name, LogLevel level) {
-        get_or_create_logger(name).enabled_levels_ ^=
-            1 << static_cast<int>(level);
+        get_or_create_logger(name).disable(level);
     }
 
     void set_sink(std::string const& name, LogLevel level,
@@ -408,6 +415,7 @@ inline void LogManager::configure_root_logger() {
         std::make_shared<PatternLogFormatter>("[{level}] {logger}: {message}"),
         std::cout);
     log.set_sink(sink);
+    log.disable(LogLevel::Trace);
     loggers_.emplace(kRootLoggerName, log);
 }
 

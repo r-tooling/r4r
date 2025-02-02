@@ -1,8 +1,10 @@
 #include "cli.h"
 #include "common.h"
 #include "default_image_files.h"
+#include "dockerfile.h"
 #include "dpkg_database.h"
 #include "filesystem_trie.h"
+#include "fs.h"
 #include "logger.h"
 #include "rpkg_database.h"
 #include "syscall_monitor.h"
@@ -14,10 +16,12 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <grp.h>
 #include <iostream>
 #include <memory>
 #include <pwd.h>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -28,8 +32,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-// FIXME: use assert instead of runtime_exception
 
 std::function<void(int)> global_signal_handler;
 
@@ -142,7 +144,8 @@ UserInfo get_user_info() {
 
 struct FileInfo {
     fs::path path;
-    std::optional<std::uintmax_t> size;
+    std::optional<std::uintmax_t> size{};
+    bool existed_before{};
 
     friend std::ostream& operator<<(std::ostream& os, FileInfo const& info) {
         os << "FileInfo { " << info.path << ", size: ";
@@ -151,6 +154,7 @@ struct FileInfo {
         } else {
             os << "N/A";
         }
+        os << ", existed_before: " << info.existed_before;
         os << "}";
         return os;
     }
@@ -158,7 +162,7 @@ struct FileInfo {
 
 class FileTracer : public SyscallListener {
     using Warnings = std::vector<std::string>;
-    using SyscallState = std::variant<std::monostate, fs::path>;
+    using SyscallState = std::variant<std::monostate, FileInfo>;
     using PidState = std::pair<int, SyscallState>;
 
     struct SyscallHandler {
@@ -216,21 +220,22 @@ class FileTracer : public SyscallListener {
         warnings_.push_back(message);
     }
 
-    void register_file(fs::path const& file) {
-        // FIXME: why do I need the global namespace here? Why is it being
-        // resolved to fs::file_size?
-        auto size = ::file_size(file);
-        FileInfo info{file, {}};
+    void register_file(FileInfo info) {
+        auto& path = info.path;
 
-        if (std::holds_alternative<std::error_code>(size)) {
-            register_warning(STR("Failed to get file size of:  "
-                                 << file << ": "
-                                 << std::get<std::error_code>(size).message()));
-        } else {
-            info.size = std::get<std::uintmax_t>(size);
+        if (info.existed_before) {
+            std::error_code ec;
+            auto size = fs::file_size(path, ec);
+
+            if (ec) {
+                register_warning(STR("Failed to get file size of:  "
+                                     << path << ": " << ec.message()));
+            } else {
+                info.size = size;
+            }
         }
 
-        files_.try_emplace(file, info);
+        files_.try_emplace(path, info);
     }
 
     void generic_open_entry(pid_t pid, int dirfd, fs::path const& pathname,
@@ -261,9 +266,14 @@ class FileTracer : public SyscallListener {
             result /= pathname;
         }
 
-        if (fs::exists(result)) {
-            state = result;
+        std::error_code ec;
+        bool exists = fs::exists(result, ec);
+        if (ec) {
+            LOG_WARN(log_) << "Failed to check if file exists: " << result
+                           << ": " << ec.message();
+            return;
         }
+        state = FileInfo{.path = result, .existed_before = exists};
     }
 
     void generic_open_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
@@ -272,8 +282,10 @@ class FileTracer : public SyscallListener {
             return;
         }
 
-        if (std::holds_alternative<fs::path>(state)) {
-            fs::path entry_file = std::get<fs::path>(state);
+        if (std::holds_alternative<FileInfo>(state)) {
+            auto& info = std::get<FileInfo>(state);
+            auto& entry_file = info.path;
+
             if (ret_val >= 0) {
                 auto exit_file =
                     resolve_fd_filename(pid, static_cast<int>(ret_val));
@@ -293,7 +305,7 @@ class FileTracer : public SyscallListener {
                             << " vs " << *exit_file;
                     }
                 } else {
-                    register_file(*exit_file);
+                    register_file(info);
                 }
             }
         }
@@ -303,7 +315,6 @@ class FileTracer : public SyscallListener {
                               SyscallState& state) {
         auto pathname =
             SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
-
         generic_open_entry(pid, static_cast<int>(args[0]), pathname, state);
     }
 
@@ -325,17 +336,22 @@ class FileTracer : public SyscallListener {
 
     void syscall_execve_entry(pid_t pid, SyscallArgs args,
                               SyscallState& state) {
-        state =
+        auto path =
             SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
+        state = FileInfo{.path = path};
     }
 
     void syscall_execve_exit(pid_t, SyscallRet, bool is_error,
                              SyscallState const& state) {
         if (!is_error) {
-            if (std::holds_alternative<fs::path>(state)) {
-                auto path = std::get<fs::path>(state);
-                LOG_DEBUG(log_) << "execve " << path;
-                register_file(path);
+            if (std::holds_alternative<FileInfo>(state)) {
+                auto info = std::get<FileInfo>(state);
+                // it succeeded
+                info.existed_before = true;
+
+                LOG_DEBUG(log_) << "execve " << info.path;
+
+                register_file(info);
             } else {
                 throw std::runtime_error(
                     "execve successful, yet not path stored");
@@ -360,7 +376,7 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
-    static inline Logger log_ = LogManager::logger("file-tracer");
+    static inline Logger& log_ = LogManager::logger("file-tracer");
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
     Warnings warnings_;
@@ -379,7 +395,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
 
   public:
     std::vector<FileInfo> run(Logger& log, std::ostream& output) override {
-        LOG_INFO(log) << "Tracing program: " << mk_string(cmd_, ' ');
+        LOG_INFO(log) << "Tracing program: " << string_join(cmd_, ' ');
 
         FileTracer tracer;
         SyscallMonitor monitor{cmd_, tracer};
@@ -437,8 +453,10 @@ class TracingTask : public Task<std::vector<FileInfo>> {
 };
 
 struct Options {
-    fs::path R_bin = "R";
+    fs::path R_bin{"R"};
     std::vector<std::string> cmd;
+    std::string docker_base_image{"ubuntu:22.04"};
+    fs::path output_dir{"."};
 };
 
 Options parse_cmd_args(int argc, char* argv[]) {
@@ -506,73 +524,45 @@ class CaptureEnvironmentTask : public Task<Environment> {
     }
 };
 
-void populate_root_symlinks(std::unordered_map<fs::path, fs::path>& symlinks) {
-    fs::path root = "/";
-    for (auto const& entry : fs::directory_iterator(root)) {
-        if (entry.is_symlink()) {
-            std::error_code ec;
-            fs::path target = fs::read_symlink(entry.path(), ec);
-            if (!target.is_absolute()) {
-                target = fs::canonical(root / target);
-            }
-            if (!ec && fs::is_directory(target)) {
-                symlinks[entry.path()] = target;
-            }
-        }
-    }
-}
-
-std::vector<fs::path> get_root_symlink(fs::path const& path) {
-    static std::unordered_map<fs::path, fs::path> symlinks;
-    if (symlinks.empty()) {
-        populate_root_symlinks(symlinks);
-    }
-
-    std::vector<fs::path> result = {path};
-
-    for (auto const& [symlink, target] : symlinks) {
-        if (is_sub_path(path, target)) {
-            fs::path candidate = symlink / path.lexically_relative(target);
-
-            std::error_code ec;
-            if (fs::exists(candidate, ec) &&
-                fs::equivalent(candidate, path, ec)) {
-                result.push_back(candidate);
-                break;
-            }
-        }
-    }
-
-    return result;
-}
-
-class Manifest {
+class ManifestPart {
   public:
-    virtual ~Manifest() = default;
+    virtual ~ManifestPart() = default;
 
-    virtual void load_from_files(std::vector<FileInfo>& files) = 0;
+    virtual void load_from_files(std::vector<FileInfo>&) = 0;
+    virtual void load_from_manifest(std::istream&){};
+    virtual void write_to_manifest(std::ostream&) = 0;
+    virtual void write_to_docker(DockerFileBuilder&){};
 
-    // virtual void load_from_string(const std::string& text) = 0;
-    // virtual std::string to_text() const = 0;
+  protected:
+    static bool is_section_header(std::string const& line) {
+        static std::regex const section_regex(R"(^\w+:$)");
+        return std::regex_match(line, section_regex);
+    }
 };
 
-class DebPackagesManifest : public Manifest {
+class DebPackagesManifest : public ManifestPart {
   public:
     explicit DebPackagesManifest(
         DpkgDatabase dpkg_database = DpkgDatabase::system_database())
         : dpkg_database_(std::move(dpkg_database)) {}
 
     void load_from_files(std::vector<FileInfo>& files) override {
+        SymlinkResolver symlink_resolver{};
+
+        packages_.clear();
+        files_.clear();
+
         auto resolved = [&](FileInfo const& info) {
             auto path = info.path;
-            for (auto& p : get_root_symlink(path)) {
+            for (auto& p : symlink_resolver.get_root_symlink(path)) {
+                std::cerr << "**********" << p << "\n";
                 if (auto* pkg = dpkg_database_.lookup_by_path(p); pkg) {
 
                     LOG_DEBUG(log_)
                         << "resolved: " << path << " to: " << pkg->name;
 
-                    auto it = packages_.insert(*pkg);
-                    files_.insert_or_assign(p, &(*it.first));
+                    auto it = packages_.insert(pkg);
+                    files_.insert_or_assign(p, *it.first);
 
                     // TODO: check that the size is the same
 
@@ -587,15 +577,89 @@ class DebPackagesManifest : public Manifest {
                        << packages_.size() << " debian packages";
     };
 
+    void load_from_manifest(std::istream& input) override {
+        packages_.clear();
+        files_.clear();
+
+        std::string line;
+        bool inside_section = false;
+
+        while (std::getline(input, line)) {
+            line = string_trim(line);
+
+            if (line.empty())
+                continue;
+
+            if (!inside_section) {
+                if (line == "ubuntu:") {
+                    inside_section = true;
+                }
+                continue;
+            }
+
+            if (is_section_header(line)) {
+                break;
+            }
+
+            if (line.starts_with("-")) {
+                std::istringstream lineStream(line.substr(1)); // Skip '-'
+                std::string package_name, version;
+                lineStream >> package_name >> version;
+
+                package_name = string_trim(package_name);
+                version = string_trim(version);
+
+                if (package_name.empty() || version.empty()) {
+                    throw std::runtime_error("Invalid package format: " + line);
+                }
+
+                auto* pkg = dpkg_database_.lookup_by_name(package_name);
+                if (pkg) {
+                    if (pkg->version != version) {
+                        LOG_WARN(log_)
+                            << "Package version mismatch: " << package_name
+                            << " manifest: " << version
+                            << " installed: " << pkg->version;
+                    } else {
+                        packages_.insert(pkg);
+                    }
+                } else {
+                    LOG_WARN(log_) << "Package not found: " << package_name;
+                }
+            } else {
+                throw std::runtime_error(
+                    "Invalid format: Expected lines starting with '-' or '- '");
+            }
+        }
+
+        LOG_INFO(log_) << "Loaded " << packages_.size()
+                       << " packages from manifest";
+    }
+
+    void write_to_manifest(std::ostream& dst) override {
+        if (packages_.empty()) {
+            dst << "# No ubuntu packages will be installed\n";
+            return;
+        }
+
+        dst << "# The following " << packages_.size()
+            << " ubuntu packages will be installed:\n";
+        dst << "#\n";
+        dst << "ubuntu:\n";
+        for (auto const& pkg : packages_) {
+            dst << "- " << pkg->name << " " << pkg->version << "\n";
+        }
+    }
+
   private:
-    static inline Logger log_ = LogManager::logger("manifest.dpkg");
+    static inline Logger& log_ = LogManager::logger("manifest.dpkg");
 
     DpkgDatabase dpkg_database_;
     std::unordered_map<fs::path, DebPackage const*> files_;
-    std::unordered_set<DebPackage> packages_;
+    std::unordered_set<DebPackage const*> packages_;
 };
 
-class CRANPackagesManifest : public Manifest {
+class CRANPackagesManifest : public ManifestPart {
   public:
     explicit CRANPackagesManifest(RpkgDatabase rpkg_database)
         : rpkg_database_(std::move(rpkg_database)) {}
@@ -604,9 +668,11 @@ class CRANPackagesManifest : public Manifest {
         : CRANPackagesManifest(RpkgDatabase::from_R(R_bin)) {}
 
     void load_from_files(std::vector<FileInfo>& files) override {
+        SymlinkResolver symlink_resolved{};
+
         auto resolved = [&](FileInfo const& info) {
             auto path = info.path;
-            for (auto& p : get_root_symlink(path)) {
+            for (auto& p : symlink_resolved.get_root_symlink(path)) {
                 if (auto* pkg = rpkg_database_.lookup_by_path(p); pkg) {
 
                     LOG_DEBUG(log_)
@@ -626,15 +692,30 @@ class CRANPackagesManifest : public Manifest {
                        << packages_.size() << " R packages";
     };
 
+    void write_to_manifest(std::ostream& dst) override {
+        if (packages_.empty()) {
+            dst << "# No CRAN packages will be installed\n";
+            return;
+        }
+
+        dst << "# The following " << packages_.size()
+            << " CRAN packages will be installed:\n";
+        dst << "#\n";
+        dst << "cran:\n";
+        for (auto const& pkg : packages_) {
+            dst << "- " << pkg->name << " " << pkg->version << "\n";
+        }
+    }
+
   private:
-    static inline Logger log_ = LogManager::logger("manifest.rpkg");
+    static inline Logger& log_ = LogManager::logger("manifest.rpkg");
 
     RpkgDatabase rpkg_database_;
     std::unordered_map<fs::path, RPackage const*> files_;
     std::unordered_set<RPackage const*> packages_;
 };
 
-class IgnoreFilesManifest : public Manifest {
+class IgnoreFilesManifest : public ManifestPart {
   public:
     void load_from_files(std::vector<FileInfo>& files) override {
         std::erase_if(files, [&](FileInfo const& info) {
@@ -676,6 +757,8 @@ class IgnoreFilesManifest : public Manifest {
         });
     }
 
+    void write_to_manifest(std::ostream&) override {}
+
   private:
     static FileSystemTrie<ImageFileInfo> load_default_files() {
         auto default_files = []() {
@@ -711,7 +794,7 @@ class IgnoreFilesManifest : public Manifest {
         return trie;
     }
 
-    static inline Logger log_ = LogManager::logger("manifest.ignore");
+    static inline Logger& log_ = LogManager::logger("manifest.ignore");
 
     static inline std::string const kImageName = "ubuntu:22.04";
 
@@ -744,38 +827,258 @@ class IgnoreFilesManifest : public Manifest {
     }();
 };
 
-using Manifests = std::vector<std::unique_ptr<Manifest>>;
+class CopyFileManifest : public ManifestPart {
+    void load_from_files(std::vector<FileInfo>& files) override {
+        for (auto& f : files) {
+            auto& path = f.path;
+            std::string msg = STR("resolved: " << path << " to: ");
 
-class ManifestsTask : public Task<Manifests> {
+            if (!f.existed_before) {
+                LOG_DEBUG(log_) << msg << "ignore - did not exist before";
+                continue;
+            }
+
+            if (!fs::exists(path)) {
+                LOG_DEBUG(log_) << msg << "ignore - no longer exists";
+                continue;
+            }
+
+            if (fs::is_regular_file(path)) {
+                std::ifstream i{path, std::ios::in};
+                if (!i) {
+                    LOG_DEBUG(log_) << msg << "ignore - cannot by opened";
+                    continue;
+                }
+            }
+
+            // TODO: if is a directory check if it can be read from
+            // TODO: check size / sha1
+
+            LOG_DEBUG(log_) << msg << "copy";
+
+            files_.push_back(path);
+        }
+
+        // if (!unmatched_files.empty()) {
+        //     util::create_tar_archive(archive, unmatched_files);
+        //     df << "COPY [" << archive << ", " << archive << "]\n";
+        //     df << "RUN tar -x --file " << archive
+        //        << " --absolute-names && rm -f " << archive << "\n";
+        //     df << "\n";
+        // }
+    }
+
+    void write_to_manifest(std::ostream& dst) override {
+        if (files_.empty()) {
+            dst << "# No files will ne copies\n";
+            return;
+        }
+
+        dst << "# The following " << files_.size() << " will be copied:\n";
+        dst << "#\n";
+        dst << "copy:\n";
+        for (auto const& file : files_) {
+            dst << "- " << file << "\n";
+        }
+    }
+
+  private:
+    fs::path archive_;
+    std::vector<fs::path> files_;
+    static inline Logger& log_ = LogManager::logger("manifest.copy");
+};
+
+using Manifest = std::vector<std::unique_ptr<ManifestPart>>;
+
+class ManifestTask : public Task<Manifest> {
   public:
-    explicit ManifestsTask(Options const& options, std::vector<FileInfo>& files)
+    explicit ManifestTask(Options const& options, std::vector<FileInfo>& files)
         : Task{"manifest"}, options_{options}, files_{files} {}
 
   private:
-    Manifests run(Logger& log,
-                  [[maybe_unused]] std::ostream& ostream) override {
+    Manifest run(Logger& log, [[maybe_unused]] std::ostream& ostream) override {
 
-        Manifests manifests;
+        Manifest manifests;
         manifests.push_back(std::make_unique<IgnoreFilesManifest>());
         manifests.push_back(std::make_unique<DebPackagesManifest>());
         manifests.push_back(
             std::make_unique<CRANPackagesManifest>(options_.R_bin));
+        manifests.push_back(std::make_unique<CopyFileManifest>());
 
         for (auto& m : manifests) {
             LOG_INFO(log) << "Resolving " << files_.size() << " files";
             m->load_from_files(files_);
         }
 
-        for (auto& p : files_) {
-            LOG_DEBUG(log) << "Unresolved " << p;
+        auto manifest_file = TempFile{"r4r-manifest", ".conf"};
+        {
+            std::ofstream manifest_content{*manifest_file};
+
+            manifest_content
+                << "# This is the manifest file generated by r4r\n"
+                << "# You can update its content by either adding or "
+                   "removing lines in the corresponding parts\n";
+
+            for (auto& m : manifests) {
+                m->write_to_manifest(manifest_content);
+            }
+        }
+
+        LOG_DEBUG(log) << "Writing manifest to: " << *manifest_file;
+        auto ts = fs::last_write_time(*manifest_file);
+
+        if (open_manifest(*manifest_file) &&
+            fs::last_write_time(*manifest_file) != ts) {
+
+            LOG_DEBUG(log) << "Rereading manifest from: " << *manifest_file;
+            auto updated_manifest_content = read_manifest(*manifest_file);
+
+            std::istringstream iss(updated_manifest_content);
+            for (auto& m : manifests) {
+                m->load_from_manifest(iss);
+            }
         }
 
         return manifests;
     }
 
   private:
+    static std::string read_manifest(fs::path const& path) {
+        std::string input = read_from_file(path);
+        std::istringstream iss(input);
+        std::ostringstream oss;
+        std::string line;
+        bool first = true;
+
+        while (std::getline(iss, line)) {
+            line = string_trim(line);
+            if (line.empty() || line.starts_with('#')) {
+                continue;
+            }
+
+            if (!first) {
+                oss << '\n';
+            }
+            oss << line;
+            first = false;
+        }
+
+        return oss.str();
+    }
+
+    bool open_manifest(fs::path const& path) {
+        char const* editor = std::getenv("VISUAL");
+        if (!editor) {
+            editor = std::getenv("EDITOR");
+        }
+        if (!editor) {
+            LOG_ERROR(log_) << "No editor found. Set VISUAL or EDITOR "
+                               "environment variable.";
+            return false;
+        }
+
+        std::string command = STR(editor << " " << path.string());
+
+        LOG_DEBUG(log_) << "Opening the manifest file: " << command;
+        int status = std::system(command.c_str());
+        if (status == -1) {
+            LOG_ERROR(log_) << "Failed to open the manifest file: " << command;
+            return false;
+        }
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            int exit_code = WEXITSTATUS(status);
+            LOG_DEBUG(log_)
+                << "Editor: " << command << " exit code: " << exit_code;
+            return false;
+        }
+
+        if (WIFSIGNALED(status)) {
+            int signal = WTERMSIG(status);
+            LOG_DEBUG(log_)
+                << "Editor: " << command << " terminated by signal: " << signal;
+            return false;
+        }
+
+        return true;
+    }
+
+    static inline Logger& log_ = LogManager::logger("manifest");
     Options const& options_;
     std::vector<FileInfo>& files_;
+};
+
+class DockerFileBuilderTask : public Task<DockerFile> {
+  public:
+    DockerFileBuilderTask(Options const& options, Environment const& envir,
+                          Manifest const& manifest)
+        : Task{"dockerfile-builder"}, options_{options}, envir_{envir},
+          manifest_{manifest} {}
+
+    DockerFile run([[maybe_unused]] Logger& log,
+                   [[maybe_unused]] std::ostream& ostream) override {
+
+        DockerFileBuilder builder{options_.docker_base_image,
+                                  options_.output_dir};
+
+        builder.env("DEBIAN_FRONTEND", "noninteractive");
+        set_locale(builder);
+        // create_user(builder);
+        //
+        for (auto& m : manifest_) {
+            m->write_to_docker(builder);
+        }
+
+        // TODO: remove LANG
+        // set_environment(builder);
+
+        return builder.build();
+    }
+
+  private:
+    void set_locale(DockerFileBuilder& builder) {
+        std::optional<std::string> lang = "C"s;
+        if (auto it = envir_.vars.find("LANG"); it != envir_.vars.end()) {
+            lang = it->second;
+        }
+
+        if (lang) {
+            builder.env("LANG", *lang);
+            builder.nl();
+
+            builder.run(
+                R"(apt-get update -y && \
+                   apt-get install -y --no-install-recommend locales && \
+                   locale-gen $LANG && \
+                   update-locale LANG=$LANG)");
+        }
+    }
+
+    Options const& options_;
+    Environment const& envir_;
+    Manifest const& manifest_;
+};
+
+class DockerImage {};
+
+class DockerImageBuilder : public Task<DockerImage> {
+  public:
+    DockerImageBuilder(Options const& options, DockerFile const& docker_file)
+        : Task{"docker-image-builder"}, options_{options},
+          docker_file_{docker_file} {}
+
+    DockerImage run([[maybe_unused]] Logger& log,
+                    [[maybe_unused]] std::ostream& ostream) override {
+        (void)options_;
+
+        std::cout << docker_file_.dockerfile << std::endl;
+
+        return DockerImage{};
+    }
+
+  private:
+    Options const& options_;
+    DockerFile const& docker_file_;
 };
 
 class Tracer {
@@ -786,16 +1089,16 @@ class Tracer {
     void trace() {
         auto envir = runner_.run(CaptureEnvironmentTask{});
         auto files = runner_.run(TracingTask{options_.cmd});
-        auto manifests = runner_.run(ManifestsTask{options_, files});
+        auto manifest = runner_.run(ManifestTask{options_, files});
+        auto docker_file =
+            runner_.run(DockerFileBuilderTask{options_, envir, manifest});
+        auto docker_image =
+            runner_.run(DockerImageBuilder{options_, docker_file});
 
-        // resolve_files();
-        // create_dockerfile();
-        // build_docker_image();
+        (void)docker_image;
+
         // rerun();
         // diff();
-
-        // std::cout << envir;
-        // print_collection(std::cout, files, '\n');
     }
 
     void stop() { runner_.stop(); }
@@ -803,7 +1106,7 @@ class Tracer {
   private:
     void trace_program() {}
 
-    static inline Logger log_ = LogManager::logger("tracer");
+    static inline Logger& log_ = LogManager::logger("tracer");
     Options options_;
     TaskRunner runner_;
 };

@@ -4,6 +4,7 @@
 #include "common.h"
 
 #include <cstdint>
+#include <fstream>
 #include <memory>
 #include <random>
 #include <ranges>
@@ -14,7 +15,6 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <variant>
 #include <vector>
 
 inline std::string escape_cmd_arg(std::string const& arg) {
@@ -133,18 +133,6 @@ inline std::vector<std::string> string_split(std::string const& str,
     return lines;
 }
 
-inline std::variant<std::uintmax_t, std::error_code>
-file_size(fs::path const& path) {
-    std::error_code ec;
-    std::uintmax_t size = fs::file_size(path, ec);
-
-    if (ec) {
-        return ec;
-    } else {
-        return size;
-    }
-}
-
 inline std::string remove_ansi(std::string const& input) {
     // Regular expression to match ANSI escape codes.
     // This regex covers most common ANSI escape sequences:
@@ -164,28 +152,6 @@ inline std::string remove_ansi(std::string const& input) {
 
     // Replace all matches with an empty string.
     return std::regex_replace(input, ansi_regex, "");
-}
-
-inline fs::path create_temp_file(std::string const& prefix,
-                                 std::string const& suffix) {
-    static std::random_device rd;
-    static std::mt19937_64 engine(rd());
-    static std::uniform_int_distribution<unsigned long long> dist;
-
-    fs::path temp_dir = fs::temp_directory_path();
-    fs::path temp_file;
-
-    while (true) {
-        unsigned long long random_num = dist(engine);
-        std::string filename = STR(prefix << random_num << suffix);
-        temp_file = temp_dir / filename;
-
-        if (!fs::exists(temp_file)) {
-            break;
-        }
-    }
-
-    return temp_file;
 }
 
 inline fs::path get_user_cache_dir() {
@@ -241,7 +207,7 @@ inline void print_collection(std::ostream& os, T const& collection,
 }
 
 template <typename T, typename S>
-inline std::string mk_string(T const& collection, S const& sep) {
+inline std::string string_join(T const& collection, S const& sep) {
     std::ostringstream res;
     print_collection(res, collection, sep);
     return res.str();
@@ -438,6 +404,39 @@ std::optional<std::array<std::string, N>> inline string_split_n(
     }
 
     return result;
+}
+
+template <typename T>
+inline void write_to_file(fs::path const& path, T const& data) {
+    std::ofstream outfile(path, std::ios::trunc);
+
+    if (!outfile) {
+        throw make_system_error(
+            errno, STR("Failed to open file for writing: " << path));
+    }
+
+    if (!(outfile << data)) {
+        auto e =
+            make_system_error(errno, STR("Failed to write to file: " << path));
+        outfile.close();
+        throw e;
+    }
+}
+
+inline std::string read_from_file(fs::path const& path) {
+    std::ifstream infile(path);
+    if (!infile) {
+        throw make_system_error(
+            errno, STR("Failed to open file for reading: " << path));
+    }
+
+    std::ostringstream buffer;
+    buffer << infile.rdbuf();
+    if (infile.fail() && !infile.eof()) {
+        throw make_system_error(errno,
+                                STR("Failed to read from file: " << path));
+    }
+    return buffer.str();
 }
 
 #endif // UTIL_H

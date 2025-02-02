@@ -36,27 +36,30 @@ TEST(ProcessClassTest, InvalidCommand) {
     std::string output;
     std::getline(proc.output(), output);
     EXPECT_TRUE(output.empty());
-    while (proc.is_running());
+    while (proc.is_running())
+        ;
     EXPECT_NE(proc.exit_code(), 0);
 }
 
 // Test execute_command returning a string
 TEST(ExecuteCommandTest, OutputAsString) {
-    auto [output, exit_code] = execute_command({"echo","Hello"});
+    auto [output, exit_code] = execute_command({"echo", "Hello"});
     EXPECT_EQ(exit_code, 0);
     EXPECT_EQ(output, "Hello\n");
 }
 
 // Test execute_command merging stderr
 TEST(ExecuteCommandTest, OutputWithStderr) {
-    auto [output, exit_code] = execute_command({"sh", "-c", "echo out; echo err >&2"}, true);
+    auto [output, exit_code] =
+        execute_command({"sh", "-c", "echo out; echo err >&2"}, true);
     EXPECT_EQ(exit_code, 0);
     EXPECT_NE(output.find("out"), std::string::npos);
     EXPECT_NE(output.find("err"), std::string::npos);
 }
 
 TEST(ExecuteCommandTest, OutputWithNonZeroOutput) {
-    auto [output, exit_code] = execute_command({"sh","-c", "echo out; exit 42"});
+    auto [output, exit_code] =
+        execute_command({"sh", "-c", "echo out; exit 42"});
     EXPECT_EQ(exit_code, 42);
     EXPECT_NE(output.find("out"), std::string::npos);
 }
@@ -66,13 +69,14 @@ TEST(ExecuteCommandTest, LambdaCallback) {
     std::vector<std::string> lines;
     int exit_code = -1;
 
-    execute_command({"sh", "-c", "echo Line1; echo Line2; exit 7"}, [&](std::variant<std::string, int> v) {
-        if (std::holds_alternative<std::string>(v)) {
-            lines.push_back(std::get<std::string>(v));
-        } else {
-            exit_code = std::get<int>(v);
-        }
-    });
+    execute_command({"sh", "-c", "echo Line1; echo Line2; exit 7"},
+                    [&](std::variant<std::string, int> v) {
+                        if (std::holds_alternative<std::string>(v)) {
+                            lines.push_back(std::get<std::string>(v));
+                        } else {
+                            exit_code = std::get<int>(v);
+                        }
+                    });
 
     EXPECT_EQ(lines.size(), 2);
     EXPECT_EQ(lines[0], "Line1");
@@ -82,16 +86,18 @@ TEST(ExecuteCommandTest, LambdaCallback) {
 
 // Test execute_command handling an invalid command
 TEST(ExecuteCommandTest, InvalidCommand) {
-    auto [output, exit_code] = execute_command({"invalid_command_which_does_not_exist"});
+    auto [output, exit_code] =
+        execute_command({"invalid_command_which_does_not_exist"});
     EXPECT_NE(exit_code, 0);
     EXPECT_TRUE(output.empty());
 
     exit_code = -1;
-    execute_command({"invalid_command_which_does_not_exist"}, [&](std::variant<std::string, int> v) {
-        if (std::holds_alternative<int>(v)) {
-            exit_code = std::get<int>(v);
-        }
-    });
+    execute_command({"invalid_command_which_does_not_exist"},
+                    [&](std::variant<std::string, int> v) {
+                        if (std::holds_alternative<int>(v)) {
+                            exit_code = std::get<int>(v);
+                        }
+                    });
 
     EXPECT_NE(exit_code, 0);
 }
@@ -110,7 +116,7 @@ TEST(ProcessClassTest, WaitForProcessAndReturnExitCode) {
 // Test wait() correctly handles processes terminated by a signal
 TEST(ProcessClassTest, SignalExitCode) {
     Process proc({"sh", "-c", "kill -15 $$"});
-    int exit_code = proc.wait(); // Wait and get exit code
+    int exit_code = proc.wait();         // Wait and get exit code
     EXPECT_EQ(exit_code, 128 + SIGTERM); // Expected: 128 + 15 (SIGTERM)
 }
 
