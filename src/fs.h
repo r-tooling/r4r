@@ -10,12 +10,10 @@ namespace fs = std::filesystem;
 
 class SymlinkResolver {
   public:
-    SymlinkResolver(std::unordered_map<fs::path, fs::path> root_symlinks)
-        : root_symlinks_{std::move(root_symlinks)} {}
+    SymlinkResolver(fs::path const& path = "/")
+        : symlinks_{populate_symlinks(path)} {}
 
-    SymlinkResolver() { populate_root_symlinks(root_symlinks_); }
-
-    std::vector<fs::path> get_root_symlink(fs::path const& path) {
+    std::vector<fs::path> resolve_symlinks(fs::path const& path) {
         std::vector<fs::path> result = {path};
 
         // checks wither path is a subpath of b and if it is, tries to see if
@@ -34,7 +32,7 @@ class SymlinkResolver {
             return false;
         };
 
-        for (auto& [symlink, target] : root_symlinks_) {
+        for (auto& [symlink, target] : symlinks_) {
             if (test(symlink, target)) {
                 break;
             }
@@ -47,9 +45,10 @@ class SymlinkResolver {
     }
 
   private:
-    static void
-    populate_root_symlinks(std::unordered_map<fs::path, fs::path>& symlinks) {
-        fs::path root = "/";
+    static std::unordered_map<fs::path, fs::path>
+    populate_symlinks(fs::path const& root) {
+        std::unordered_map<fs::path, fs::path> symlinks;
+
         for (auto& entry : fs::directory_iterator(root)) {
             if (entry.is_symlink()) {
                 std::error_code ec;
@@ -62,13 +61,14 @@ class SymlinkResolver {
                 }
             }
         }
+        return symlinks;
     }
 
     // a map of the root symlinks:
     // - /lib => /usr/lib
     // - /bin => /usr/bin
     // ...
-    std::unordered_map<fs::path, fs::path> root_symlinks_;
+    std::unordered_map<fs::path, fs::path> symlinks_;
 };
 
 class TempFile {
@@ -123,4 +123,36 @@ inline fs::path TempFile::create_temp_file(std::string const& prefix,
     throw make_system_error(
         errno, STR("Failed to create a unique temporary file in " << temp_dir));
 }
+
+enum class AccessStatus { Accessible, DoesNotExist, InsufficientPermission };
+
+inline AccessStatus check_accessibility(fs::path const& p) {
+    try {
+        if (!fs::exists(p)) {
+            return AccessStatus::DoesNotExist;
+        }
+
+        if (fs::is_directory(p)) {
+            try {
+                for (auto const& entry : fs::directory_iterator(p)) {
+                    // just try if it can list files
+                    (void)entry;
+                    break;
+                }
+            } catch (std::exception const&) {
+                return AccessStatus::InsufficientPermission;
+            }
+        } else {
+            std::ifstream f(p);
+            if (!f) {
+                return AccessStatus::InsufficientPermission;
+            }
+        }
+
+        return AccessStatus::Accessible;
+    } catch (fs::filesystem_error const&) {
+        return AccessStatus::InsufficientPermission;
+    }
+}
+
 #endif // FS_H

@@ -35,6 +35,12 @@ class DockerFileBuilder {
         return *this;
     }
 
+    DockerFileBuilder& env(std::vector<std::string> const& envs) {
+        std::string cmd = string_join(envs, " \\\n  ");
+        commands_.emplace_back("ENV " + cmd);
+        return *this;
+    }
+
     DockerFileBuilder& add(std::string const& src, std::string const& dest) {
         commands_.emplace_back("ADD " + src + " " + dest);
         return *this;

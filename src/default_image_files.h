@@ -78,7 +78,7 @@ class DefaultImageFiles {
             STR(
                "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
                 R""(
-                find / -type f 2>/dev/null | grep -vE "$BF_PATTERN" | while IFS= read -r file; do
+                find / \( -type f -or -type l \) 2>/dev/null | grep -vE "$BF_PATTERN" | while IFS= read -r file; do
                     stat="$(stat -c "%U${DELIM}%G${DELIM}%s${DELIM}%a" "$file" 2>/dev/null || echo "error${DELIM}error${DELIM}error${DELIM}error")"
                     sha1="$((sha1sum "$file" 2>/dev/null | cut -d " " -f1) || echo "error")"
                     echo "$file${DELIM}${stat}${DELIM}${sha1}"

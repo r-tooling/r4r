@@ -19,14 +19,11 @@ struct RPackage {
     std::string name;
     fs::path lib_path;
     std::string version;
-    std::vector<std::string> depends;
-    std::vector<std::string> imports;
-    std::vector<std::string> linking_to;
+    std::unordered_set<std::string> dependencies;
 
     bool operator==(RPackage const& other) const {
         return name == other.name && lib_path == other.lib_path &&
-               version == other.version && depends == other.depends &&
-               imports == other.imports && linking_to == other.linking_to;
+               version == other.version && dependencies == other.dependencies;
     }
 };
 
@@ -40,6 +37,7 @@ struct hash<RPackage> {
                (string_hasher(pkg.lib_path) << 2);
     }
 };
+
 } // namespace std
 
 using RPackages = std::unordered_map<std::string, std::unique_ptr<RPackage>>;
@@ -68,6 +66,10 @@ class RpkgDatabase {
         return RpkgDatabase{std::move(packages)};
     }
 
+    RpkgDatabase(RpkgDatabase const&) = delete;
+    RpkgDatabase(RpkgDatabase&&) = default;
+    RpkgDatabase& operator=(RpkgDatabase const&) = delete;
+
     RPackage const* lookup_by_path(fs::path const& path) const {
         auto r = files_.find_last_matching(path);
         return r ? *r : nullptr;
@@ -75,16 +77,16 @@ class RpkgDatabase {
 
     // Return all dependencies (recursively) of the given set of packages pkgs
     // in a topologically sorted order. The packages themselves are included.
-    std::vector<std::string>
+    std::vector<RPackage const*>
     get_dependencies(std::unordered_set<std::string> const& pkgs) {
-        std::vector<std::string> result;
+        std::vector<std::string> deps;
         std::unordered_set<std::string> visited;
         std::unordered_set<std::string> in_stack;
 
         // Perform DFS from each of the requested packages
         for (auto const& p : pkgs) {
             if (!visited.count(p)) {
-                dfs_visit(p, visited, in_stack, result);
+                dfs_visit(p, visited, in_stack, deps);
             }
         }
 
@@ -92,15 +94,16 @@ class RpkgDatabase {
         // package. We want unique in final order (respect the first
         // occurrence).
         std::unordered_set<std::string> seen;
-        std::vector<std::string> unique_order;
-        unique_order.reserve(result.size());
-        for (auto& r : result) {
+        std::vector<RPackage const*> result;
+        result.reserve(deps.size());
+        for (auto& r : deps) {
             if (!seen.count(r)) {
                 seen.insert(r);
-                unique_order.push_back(r);
+                auto& pkg = packages_.at(r);
+                result.push_back(pkg.get());
             }
         }
-        return unique_order;
+        return result;
     }
 
     size_t size() const { return packages_.size(); }
@@ -113,10 +116,6 @@ class RpkgDatabase {
             return {};
         }
     }
-
-    RpkgDatabase(RpkgDatabase const&) = delete;
-    RpkgDatabase(RpkgDatabase&&) = default;
-    RpkgDatabase& operator=(RpkgDatabase const&) = delete;
 
   private:
     explicit RpkgDatabase(RPackages packages)
@@ -150,11 +149,16 @@ class RpkgDatabase {
                 continue;
             }
 
-            auto pkg = std::make_unique<RPackage>(
-                tokens->at(0), tokens->at(1), tokens->at(2),
-                parse_dependency_field(tokens->at(3)),
-                parse_dependency_field(tokens->at(4)),
-                parse_dependency_field(tokens->at(5)));
+            std::unordered_set<std::string> dependencies;
+            // Depends
+            parse_dependency_field(tokens->at(3), dependencies);
+            // Imports
+            parse_dependency_field(tokens->at(4), dependencies);
+            // LinkingTo
+            parse_dependency_field(tokens->at(5), dependencies);
+
+            auto pkg = std::make_unique<RPackage>(tokens->at(0), tokens->at(1),
+                                                  tokens->at(2), dependencies);
             packages.emplace(pkg->name, std::move(pkg));
         }
     }
@@ -162,28 +166,28 @@ class RpkgDatabase {
     // Given a single field from the line that might contain multiple
     // dependencies separated by commas, parse out the package names ignoring
     // version constraints (like "sys (>= 2.1)") and ignoring "R".
-    static std::vector<std::string>
-    parse_dependency_field(std::string const& field) {
+    static void
+    parse_dependency_field(std::string const& field,
+                           std::unordered_set<std::string>& target) {
         // If "NA", return empty
         if (field == "NA") {
-            return {};
+            return;
         }
 
-        std::vector<std::string> result;
         std::string tmp;
         auto dep = [&]() {
             if (!tmp.empty()) {
                 tmp = string_trim(tmp);
-                std::string pkg_name;
+                std::string name;
                 for (char x : tmp) {
                     if (x == '(' || std::isspace(x)) {
                         break;
                     }
-                    pkg_name.push_back(x);
+                    name.push_back(x);
                 }
-                pkg_name = string_trim(pkg_name);
-                if (!pkg_name.empty() && pkg_name != "R") {
-                    result.push_back(pkg_name);
+                name = string_trim(name);
+                if (!name.empty() && name != "R") {
+                    target.insert(name);
                 }
                 tmp.clear();
             }
@@ -199,34 +203,22 @@ class RpkgDatabase {
 
         // handle the last one if any
         dep();
-
-        return result;
     }
 
     // Helper DFS for topological sort
     // TODO: use pointers to packages
-    void dfs_visit(std::string const& pkg_name,
+    void dfs_visit(std::string const& name,
                    std::unordered_set<std::string>& visited,
                    std::unordered_set<std::string>& in_stack,
                    std::vector<std::string>& sorted) {
-        visited.insert(pkg_name);
-        in_stack.insert(pkg_name);
+        visited.insert(name);
+        in_stack.insert(name);
 
-        auto it = packages_.find(pkg_name);
+        auto it = packages_.find(name);
         if (it != packages_.end()) {
-            // Gather all direct dependencies from depends, imports, linking_to
-            // TODO: make this a method
-            auto const& dep_list = it->second->depends;
-            auto const& imp_list = it->second->imports;
-            auto const& link_list = it->second->linking_to;
+            auto& pkg = it->second;
 
-            // Combine them
-            std::vector<std::string> all_deps;
-            all_deps.insert(all_deps.end(), dep_list.begin(), dep_list.end());
-            all_deps.insert(all_deps.end(), imp_list.begin(), imp_list.end());
-            all_deps.insert(all_deps.end(), link_list.begin(), link_list.end());
-
-            for (auto const& d : all_deps) {
+            for (auto& d : pkg->dependencies) {
                 // If not visited, DFS
                 if (!visited.count(d)) {
                     dfs_visit(d, visited, in_stack, sorted);
@@ -240,9 +232,9 @@ class RpkgDatabase {
             }
         }
 
-        in_stack.erase(pkg_name);
+        in_stack.erase(name);
         // Post-order insertion
-        sorted.push_back(pkg_name);
+        sorted.push_back(name);
     }
 
     static inline Logger& log_ = LogManager::logger("rpkg-database");
