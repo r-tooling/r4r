@@ -6,15 +6,16 @@ TEST(RPackagesTest, BasicParsing) {
     // note: beaware of the field separator being non-breaking-line
     // clang-format off
     char const* data =
-        "askpass"   NBSP "/home/user/R/library/4.1" NBSP"1.1"   NBSP "NA"           NBSP "sys (>= 2.1)"                                                         NBSP "NA\n"
-        "backports" NBSP "/home/user/R/library/4.1" NBSP"1.4.1" NBSP "R (>= 3.0.0)" NBSP "NA"                                                                   NBSP "NA\n"
-        "bslib"     NBSP "/home/user/R/library/4.1" NBSP"0.4.2" NBSP "R (>= 2.10)"  NBSP "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>= 0.1.3)" NBSP "NA\n";
+        "askpass"   NBSP "/home/user/R/library/4.1" NBSP "1.1"   NBSP "NA"           NBSP "sys (>= 2.1)"                                                         NBSP "NA" NBSP "NA\n"
+        "backports" NBSP "/home/user/R/library/4.1" NBSP "1.4.1" NBSP "R (>= 3.0.0)" NBSP "NA"                                                                   NBSP "NA" NBSP "NA\n"
+        "bslib"     NBSP "/home/user/R/library/4.1" NBSP "0.4.2" NBSP "R (>= 2.10)"  NBSP "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>= 0.1.3)" NBSP "NA" NBSP "NA\n"
+        "tools"     NBSP "/usr/lib/R/library"       NBSP "4.1.2" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "base\n";
     // clang-format on
 
     std::istringstream iss(data);
     auto packages = RpkgDatabase::from_stream(iss);
 
-    ASSERT_EQ(packages.size(), 3u);
+    ASSERT_EQ(packages.size(), 4u);
 
     // check askpass
     {
@@ -25,6 +26,7 @@ TEST(RPackagesTest, BasicParsing) {
         EXPECT_EQ(pkg->version, "1.1");
         ASSERT_EQ(pkg->dependencies.size(), 1u);
         EXPECT_TRUE(pkg->dependencies.contains("sys"));
+        EXPECT_FALSE(pkg->is_base);
     }
 
     // check backports
@@ -33,6 +35,7 @@ TEST(RPackagesTest, BasicParsing) {
         ASSERT_NE(pkg, nullptr);
         // "R (>= 3.0.0)" => ignore "R"
         EXPECT_EQ(pkg->dependencies.size(), 0u);
+        EXPECT_FALSE(pkg->is_base);
     }
 
     // check bslib
@@ -48,6 +51,15 @@ TEST(RPackagesTest, BasicParsing) {
         EXPECT_TRUE(pkg->dependencies.contains("jsonlite"));
         EXPECT_TRUE(pkg->dependencies.contains("sass"));
         EXPECT_TRUE(pkg->dependencies.contains("jquerylib"));
+        EXPECT_FALSE(pkg->is_base);
+    }
+
+    // check base
+    {
+        auto pkg = packages.find("tools");
+        ASSERT_NE(pkg, nullptr);
+        EXPECT_EQ(pkg->dependencies.size(), 0u);
+        EXPECT_TRUE(pkg->is_base);
     }
 }
 
@@ -58,10 +70,10 @@ TEST(RPackagesTest, TopologicalSorting) {
     // So topological ordering for A is [C, B, A], for D alone is [D].
     // clang-format off
     char const* data = 
-        "A" NBSP "/home/user/R/library/4.1" NBSP "1.0" NBSP "B " NBSP "NA" NBSP "NA\n"
-        "B" NBSP "/home/user/R/library/4.1" NBSP "1.1" NBSP "C " NBSP "NA" NBSP "NA\n"
-        "C" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA\n"
-        "D" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA\n";
+        "A" NBSP "/home/user/R/library/4.1" NBSP "1.0" NBSP "B " NBSP "NA" NBSP "NA" NBSP "NA\n"
+        "B" NBSP "/home/user/R/library/4.1" NBSP "1.1" NBSP "C " NBSP "NA" NBSP "NA" NBSP "NA\n"
+        "C" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n"
+        "D" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n";
     // clang-format on
 
     std::istringstream iss(data);
@@ -69,7 +81,7 @@ TEST(RPackagesTest, TopologicalSorting) {
 
     {
         // If we request A, we get A plus B plus C
-        std::unordered_set<std::string> pkgs = {"A"};
+        std::unordered_set<RPackage const*> pkgs = {db.find("A")};
         auto deps = db.get_dependencies(pkgs);
         // One valid topological order is [C, B, A]
         ASSERT_EQ(deps.size(), 3u);
@@ -80,7 +92,7 @@ TEST(RPackagesTest, TopologicalSorting) {
 
     {
         // If we request D, we get just D
-        std::unordered_set<std::string> pkgs = {"D"};
+        std::unordered_set<RPackage const*> pkgs = {db.find("D")};
         auto deps = db.get_dependencies(pkgs);
         ASSERT_EQ(deps.size(), 1u);
         EXPECT_EQ(deps[0]->name, "D");
@@ -89,7 +101,7 @@ TEST(RPackagesTest, TopologicalSorting) {
     {
         // If we request A and D at once, a valid topological order is:
         // [C, B, A, D] or [D, C, B, A] as long as dependencies are satisfied
-        std::unordered_set<std::string> pkgs = {"A", "D"};
+        std::unordered_set<RPackage const*> pkgs = {db.find("A"), db.find("D")};
         auto deps = db.get_dependencies(pkgs);
         ASSERT_EQ(deps.size(), 4u);
 

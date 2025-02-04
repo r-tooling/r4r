@@ -3,6 +3,8 @@
 
 #include "util.h"
 #include <filesystem>
+#include <queue>
+#include <random>
 #include <unordered_map>
 #include <vector>
 
@@ -10,34 +12,55 @@ namespace fs = std::filesystem;
 
 class SymlinkResolver {
   public:
-    SymlinkResolver(fs::path const& path = "/")
+    explicit SymlinkResolver(fs::path const& path = "/")
         : symlinks_{populate_symlinks(path)} {}
 
-    std::vector<fs::path> resolve_symlinks(fs::path const& path) {
-        std::vector<fs::path> result = {path};
+    std::unordered_set<fs::path> resolve_symlinks(fs::path const& path) {
+        // TODO: check the error code and generate warnings
+        std::error_code ec;
+        std::unordered_set<fs::path> result;
+        std::queue<fs::path> wl;
 
-        // checks wither path is a subpath of b and if it is, tries to see if
-        // the same file could be find by using a instead of b
-        auto test = [&](fs::path const& a, fs::path const& b) {
-            if (is_sub_path(path, b)) {
-                fs::path candidate = a / path.lexically_relative(b);
+        // checks whether `p` is a sub path of `b` and if it is, tries to see
+        // if the same file could be found using `a` instead of `b`
+        // if the result is a symlink, it additionally pushed the link as well
+        auto test = [&](fs::path const& p, fs::path const& a,
+                        fs::path const& b) {
+            if (is_sub_path(p, b)) {
+                fs::path candidate = a / p.lexically_relative(b);
 
-                std::error_code ec;
                 if (fs::exists(candidate, ec) &&
-                    fs::equivalent(candidate, path, ec)) {
-                    result.push_back(candidate);
+                    fs::equivalent(candidate, p, ec)) {
+                    wl.push(candidate);
                     return true;
                 }
             }
             return false;
         };
 
-        for (auto& [symlink, target] : symlinks_) {
-            if (test(symlink, target)) {
-                break;
+        wl.push(path);
+
+        while (!wl.empty()) {
+            auto p = wl.front();
+            wl.pop();
+
+            if (result.contains(p)) {
+                continue;
             }
-            if (test(target, symlink)) {
-                break;
+
+            result.insert(p);
+
+            for (auto& [symlink, target] : symlinks_) {
+                if (test(p, symlink, target)) {
+                    break;
+                }
+                if (test(p, target, symlink)) {
+                    break;
+                }
+            }
+
+            if (fs::is_symlink(p)) {
+                wl.push(fs::read_symlink(p));
             }
         }
 

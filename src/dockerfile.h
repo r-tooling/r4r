@@ -25,6 +25,12 @@ class DockerFileBuilder {
         return *this;
     }
 
+    DockerFileBuilder& run(std::vector<std::string> const& commands) {
+        std::string cmds = string_join(commands, " \\\n  ");
+        commands_.emplace_back("RUN " + cmds);
+        return *this;
+    }
+
     DockerFileBuilder& cmd(std::string const& command) {
         commands_.emplace_back("CMD " + command);
         return *this;

@@ -3,10 +3,8 @@
 
 #include "common.h"
 
-#include <cstdint>
 #include <fstream>
 #include <memory>
-#include <random>
 #include <ranges>
 #include <regex>
 #include <sstream>
@@ -212,39 +210,6 @@ inline std::string string_join(T const& collection, S const& sep) {
     print_collection(res, collection, sep);
     return res.str();
 }
-
-// template <typename FileCollection>
-// void create_tar_archive(fs::path const& archive, FileCollection const& files)
-// {
-//     FILE* temp_file = std::tmpfile();
-//     if (!temp_file) {
-//         throw std::runtime_error("Error creating temporary file.");
-//     }
-//
-//     for (auto const& file : files) {
-//         std::fprintf(temp_file, "%s\n", file.string().c_str());
-//     }
-//
-//     std::fflush(temp_file);
-//     std::vector<std::string> command = {"tar",
-//                                         "--absolute-names",
-//                                         "--preserve-permissions",
-//                                         "-cvf",
-//                                         archive.string(),
-//                                         "--files-from",
-//                                         "/dev/fd/" +
-//                                             std::to_string(fileno(temp_file))};
-//
-//     auto [tar_out, exit_code] = execute_command(command, true);
-//     if (exit_code != 0) {
-//         std::fclose(temp_file);
-//         std::string msg = STR("Error creating tar archive: "
-//                               << archive.string() << ". tar exit code:  "
-//                               << exit_code << "\nOutput:\n"
-//                               << tar_out);
-//         throw std::runtime_error(msg);
-//     }
-// }
 
 template <typename Collection>
 std::unique_ptr<typename Collection::value_type[]> inline collection_to_c_array(

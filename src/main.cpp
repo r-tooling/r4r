@@ -290,8 +290,9 @@ class ManifestTask : public Task<Manifest> {
         Manifest manifest;
         manifest.add<IgnoreFilesManifest>("ignore");
         manifest.add<DebPackagesManifest>("deb");
-        manifest.add<CRANPackagesManifest>("cran", options_.R_bin);
-        manifest.add<CopyFileManifest>("copy", cwd_);
+        manifest.add<CRANPackagesManifest>("cran", options_.R_bin,
+                                           options_.output_dir);
+        manifest.add<CopyFileManifest>("copy", cwd_, options_.output_dir);
 
         LOG_INFO(log) << "Resolving " << files_.size() << " files";
         manifest.load_from_files(files_);
@@ -474,8 +475,7 @@ class DockerFileBuilderTask : public Task<DockerFile> {
                                        << user.group.name << " "
                                        << user.home_directory));
 
-        std::string cmd = string_join(cmds, " && \\\n    ");
-        builder.run(cmd);
+        builder.run(cmds);
     }
 
     void set_environment(DockerFileBuilder& builder) {

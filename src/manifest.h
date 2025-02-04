@@ -1,6 +1,7 @@
 #ifndef MANIFEST_H
 #define MANIFEST_H
 
+#include "archive.h"
 #include "cli.h"
 #include "default_image_files.h"
 #include "dockerfile.h"
@@ -11,6 +12,8 @@
 #include "rpkg_database.h"
 #include <algorithm>
 #include <bits/types/struct_sched_param.h>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -174,8 +177,9 @@ class DebPackagesManifest : public ManifestPart {
         auto resolved = [&](FileInfo const& info) {
             auto path = info.path;
             for (auto& p : symlink_resolver.resolve_symlinks(path)) {
-                if (auto* pkg = dpkg_database_.lookup_by_path(p); pkg) {
+                LOG_TRACE(log_) << "resolving " << path;
 
+                if (auto* pkg = dpkg_database_.lookup_by_path(p); pkg) {
                     LOG_DEBUG(log_)
                         << "resolved: " << path << " to: " << pkg->name;
 
@@ -252,6 +256,33 @@ class DebPackagesManifest : public ManifestPart {
         section.content = content.str();
     }
 
+    void write_to_docker(DockerFileBuilder& builder) const override {
+
+        // FIXME: the main problem with this implementation is that
+        // it ignores the fact a package can come from multiple repos
+        // and that these repos need to be installed.
+
+        if (packages_.empty()) {
+            return;
+        }
+
+        std::vector<std::string> pkgs;
+        pkgs.reserve(packages_.size());
+        for (auto pkg : packages_) {
+            pkgs.push_back(pkg->name + "=" + pkg->version);
+        }
+        std::sort(pkgs.begin(), pkgs.end());
+
+        std::string pkgs_line = string_join(pkgs, " \\\n      ");
+
+        std::vector<std::string> cmds;
+        cmds.push_back("apt-get update -y");
+        cmds.push_back("apt-get install -y --no-install-recommend " +
+                       pkgs_line);
+
+        builder.run(cmds);
+    };
+
   private:
     static inline Logger& log_ = LogManager::logger("manifest.dpkg");
 
@@ -262,53 +293,18 @@ class DebPackagesManifest : public ManifestPart {
 
 class CRANPackagesManifest : public ManifestPart {
   public:
-    explicit CRANPackagesManifest(RpkgDatabase rpkg_database)
-        : rpkg_database_(std::move(rpkg_database)) {}
+    explicit CRANPackagesManifest(RpkgDatabase rpkg_database,
+                                  fs::path const& output_dir)
+        : rpkg_database_(std::move(rpkg_database)),
+          script_{output_dir / "install_r_packages.R"} {}
 
-    explicit CRANPackagesManifest(fs::path const& R_bin)
-        : CRANPackagesManifest(RpkgDatabase::from_R(R_bin)) {}
+    explicit CRANPackagesManifest(fs::path const& R_bin,
+                                  fs::path const& output_dir)
+        : CRANPackagesManifest(RpkgDatabase::from_R(R_bin), output_dir) {}
 
-    void load_from_files(std::vector<FileInfo>& files) override {
-        SymlinkResolver symlink_resolved{};
-
-        auto resolved = [&](FileInfo const& info) {
-            auto path = info.path;
-            for (auto& p : symlink_resolved.resolve_symlinks(path)) {
-                if (auto* pkg = rpkg_database_.lookup_by_path(p); pkg) {
-
-                    LOG_DEBUG(log_)
-                        << "resolved: " << path << " to: " << pkg->name;
-
-                    auto it = packages_.insert(pkg);
-                    files_.insert_or_assign(p, *it.first);
-
-                    return true;
-                }
-            }
-            return false;
-        };
-
-        std::erase_if(files, resolved);
-        LOG_INFO(log_) << "Resolved " << files_.size() << " files to "
-                       << packages_.size() << " R packages";
-    };
-
-    void write_to_manifest(ManifestFormat::Section& section) const override {
-        if (packages_.empty()) {
-            section.preamble = "# No CRAN packages will be installed";
-            return;
-        }
-
-        section.preamble =
-            STR("# The following " << packages_.size()
-                                   << " CRAN packages will be installed:");
-        std::ostringstream content;
-        for (auto const& pkg : packages_) {
-            content << "- " << pkg->name << " " << pkg->version << "\n";
-        }
-
-        section.content = content.str();
-    }
+    void load_from_files(std::vector<FileInfo>& files) override;
+    void write_to_manifest(ManifestFormat::Section& section) const override;
+    void write_to_docker(DockerFileBuilder& builder) const override;
 
   private:
     static inline Logger& log_ = LogManager::logger("manifest.rpkg");
@@ -316,8 +312,88 @@ class CRANPackagesManifest : public ManifestPart {
     RpkgDatabase rpkg_database_;
     std::unordered_map<fs::path, RPackage const*> files_;
     std::unordered_set<RPackage const*> packages_;
+    fs::path script_;
 };
 
+inline void
+CRANPackagesManifest::write_to_docker(DockerFileBuilder& builder) const {
+    if (packages_.empty()) {
+        return;
+    }
+
+    std::ofstream script(script_);
+    // TODO: parameterize the max cores
+    script << "cores <- min(parallel::detectCores(), 4)\n"
+           << "tmp_dir <- tempdir()\n"
+           << "install.packages('remotes', lib = c(tmp_dir))\n"
+           << "require('remotes', lib.loc = c(tmp_dir))\n"
+           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
+           << "\n"
+           << "# installing packages\n\n";
+
+    // we have to install the dependencies ourselves otherwise we cannot get
+    // pin the package versions. R default is to install the latest version.
+    for (auto* pkg : rpkg_database_.get_dependencies(packages_)) {
+        if (pkg->is_base) {
+            continue;
+        }
+
+        // https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
+        // https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
+        script << "install_version('" << pkg->name << "', '" << pkg->version
+               << "', upgrade = 'never', dependencies = FALSE, Ncpus = cores"
+               << ")" << std::endl;
+    }
+
+    builder.copy({script_}, "/");
+    builder.run({STR("Rscript /" << script_.filename()),
+                 STR("rm -f /" << script_.filename())});
+}
+
+inline void
+CRANPackagesManifest::load_from_files(std::vector<FileInfo>& files) {
+    SymlinkResolver symlink_resolved{};
+
+    auto resolved = [&](FileInfo const& info) {
+        auto path = info.path;
+        for (auto& p : symlink_resolved.resolve_symlinks(path)) {
+            if (auto* pkg = rpkg_database_.lookup_by_path(p); pkg) {
+
+                LOG_DEBUG(log_) << "resolved: " << path << " to: " << pkg->name;
+
+                auto it = packages_.insert(pkg);
+                files_.insert_or_assign(p, *it.first);
+
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::erase_if(files, resolved);
+    LOG_INFO(log_) << "Resolved " << files_.size() << " files to "
+                   << packages_.size() << " R packages";
+};
+inline void CRANPackagesManifest::write_to_manifest(
+    ManifestFormat::Section& section) const {
+    if (packages_.empty()) {
+        section.preamble = "# No CRAN packages will be installed";
+        return;
+    }
+
+    section.preamble =
+        STR("# The following " << packages_.size()
+                               << " CRAN packages will be installed:");
+    std::ostringstream content;
+    for (auto const& pkg : packages_) {
+        content << "- " << pkg->name << " " << pkg->version << "\n";
+    }
+
+    section.content = content.str();
+}
+
+// FIXME: rename to DefaultFilesManifest and move the other logic to
+// CopyFileManifest
 class IgnoreFilesManifest : public ManifestPart {
   public:
     void load_from_files(std::vector<FileInfo>& files) override {
@@ -435,9 +511,11 @@ class IgnoreFilesManifest : public ManifestPart {
 
 class CopyFileManifest : public ManifestPart {
   public:
-    CopyFileManifest(fs::path const& cwd) : cwd_{cwd} {}
+    CopyFileManifest(fs::path const& cwd, fs::path const& output_dir)
+        : cwd_{cwd}, archive_{output_dir / "archive.tar"} {}
 
     void load_from_files(std::vector<FileInfo>& files) override;
+    void load_from_manifest(std::istream& stream) override;
     void write_to_manifest(ManifestFormat::Section& section) const override;
     void write_to_docker(DockerFileBuilder& builder) const override;
 
@@ -484,6 +562,30 @@ inline std::ostream& operator<<(std::ostream& os,
 }
 
 }; // namespace std
+
+inline void CopyFileManifest::load_from_manifest(std::istream& stream) {
+    files_.clear();
+
+    std::string line;
+    while (std::getline(stream, line)) {
+        line = string_trim(line);
+        auto status = Status::Copy;
+        if (line.starts_with("-")) {
+            line = line.substr(1);
+            line = string_trim(line);
+            if (line.starts_with('"')) {
+                if (line.ends_with('"')) {
+                    line = line.substr(1, line.size() - 2);
+                } else {
+                    throw std::runtime_error("Invalid file path: " + line);
+                }
+            }
+            files_.emplace(line, status);
+        }
+    }
+
+    LOG_INFO(log_) << "Loaded " << files_.size() << " files from manifest";
+}
 
 inline void
 CopyFileManifest::write_to_manifest(ManifestFormat::Section& section) const {
@@ -538,14 +640,33 @@ inline void CopyFileManifest::load_from_files(std::vector<FileInfo>& files) {
     }
 }
 
-inline void CopyFileManifest::write_to_docker(DockerFileBuilder&) const {
-    // if (!unmatched_files.empty()) {
-    //     util::create_tar_archive(archive, unmatched_files);
-    //     df << "COPY [" << archive << ", " << archive << "]\n";
-    //     df << "RUN tar -x --file " << archive
-    //        << " --absolute-names && rm -f " << archive << "\n";
-    //     df << "\n";
-    // }
+inline void
+CopyFileManifest::write_to_docker(DockerFileBuilder& builder) const {
+    std::vector<fs::path> copy_files;
+    for (auto& [path, status] : files_) {
+        if (status == Status::Copy) {
+            copy_files.push_back(path);
+            if (fs::is_symlink(path)) {
+                copy_files.push_back(fs::read_symlink(path));
+            }
+        }
+    }
+
+    std::sort(copy_files.begin(), copy_files.end());
+
+    if (copy_files.empty()) {
+        return;
+    }
+    create_tar_archive(archive_, copy_files);
+
+    // FIXME: this is broken - better API for copy
+    builder.copy({archive_}, archive_);
+
+    std::vector<std::string> cmds{
+        STR("tar -x --file " << archive_ << " --absolute-names"),
+        STR("rm -f " << archive_)};
+
+    builder.run(cmds);
 }
 
 class Manifest {
@@ -579,12 +700,15 @@ class Manifest {
         for (auto& name : index_) {
             ManifestFormat::Section section{name};
             parts_.at(name)->write_to_manifest(section);
-            format.add_section(section);
+            if (!section.content.empty()) {
+                format.add_section(section);
+            }
         }
     };
 
     void write_to_docker(DockerFileBuilder& builder) const {
         for (auto& name : index_) {
+            builder.nl();
             parts_.at(name)->write_to_docker(builder);
         }
     };
