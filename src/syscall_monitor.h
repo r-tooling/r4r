@@ -2,6 +2,8 @@
 #define SYSCALL_MONITOR_H
 
 #include "common.h"
+#include "logger.h"
+#include "process.h"
 #include "util.h"
 
 #include <cstdint>
@@ -12,7 +14,6 @@
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -51,8 +52,8 @@ class SyscallMonitor {
 
     Result start();
 
-    [[noreturn]] void process_tracee(Pipe const& out, Pipe const& err) const;
-    Result process_tracer(Pipe const& out, Pipe const& err);
+    [[noreturn]] void process_tracee(Pipe& out, Pipe& err) const;
+    Result process_tracer(Pipe& out, Pipe& err);
 
     static std::string read_string_from_process(pid_t pid, uint64_t remote_addr,
                                                 size_t max_len);
@@ -92,6 +93,7 @@ class SyscallMonitor {
     static std::function<int()>
     spawn_process(std::vector<std::string> const& cmd);
 
+    static inline Logger log_ = LogManager::logger("syscall-monitor");
     std::function<int()> tracee_;
     SyscallListener& listener_;
     std::ostream* stdout_{&std::cout};
@@ -106,17 +108,12 @@ inline void SyscallMonitor::stop() const {
 }
 
 inline SyscallMonitor::Result SyscallMonitor::start() {
-    auto out = create_pipe();
-    auto err = create_pipe();
+    Pipe out;
+    Pipe err;
 
     tracee_pid_ = fork();
 
     if (tracee_pid_ == -1) {
-        close(out.read_fd);
-        close(out.write_fd);
-        close(err.read_fd);
-        close(err.write_fd);
-
         throw make_system_error(errno, "Error forking the tracee process");
     }
 
@@ -127,24 +124,21 @@ inline SyscallMonitor::Result SyscallMonitor::start() {
     }
 }
 
-inline void SyscallMonitor::process_tracee(Pipe const& out,
-                                           Pipe const& err) const {
-    if (dup2(out.write_fd, STDOUT_FILENO) == -1) {
+inline void SyscallMonitor::process_tracee(Pipe& out, Pipe& err) const {
+    if (dup2(out.write(), STDOUT_FILENO) == -1) {
         std::cerr << "dup2 stderr: " << strerror(errno) << " (" << errno
                   << ")\n";
         exit(kSpawnErrorExitCode);
     }
 
-    if (dup2(err.write_fd, STDERR_FILENO) == -1) {
+    if (dup2(err.write(), STDERR_FILENO) == -1) {
         std::cerr << "dup2 stderr: " << strerror(errno) << " (" << errno
                   << ")\n";
         exit(kSpawnErrorExitCode);
     }
 
-    close(out.read_fd);
-    close(out.write_fd);
-    close(err.read_fd);
-    close(err.write_fd);
+    out.close();
+    err.close();
 
     if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
         std::cerr << "ptrace: " << strerror(errno) << " (" << errno << ")\n";
@@ -157,32 +151,19 @@ inline void SyscallMonitor::process_tracee(Pipe const& out,
 
     int exit_code = tracee_();
     exit(exit_code);
-    //    if (fun_) {
-    //        (*fun_)();
-    //        exit(0);
-    //    } else {
-    //        auto c_args = collection_to_c_array(cmd_);
-    //        auto program = cmd_.front();
-    //        execvp(program.c_str(), c_args.get());
-    //
-    //        std::cerr << "execvp: " << strerror(errno) << " (" << errno <<
-    //        ")\n";
-    //
-    //        exit(kSpawnErrorExitCode);
-    //    }
 }
 
-inline SyscallMonitor::Result SyscallMonitor::process_tracer(Pipe const& out,
-                                                             Pipe const& err) {
+inline SyscallMonitor::Result SyscallMonitor::process_tracer(Pipe& out,
+                                                             Pipe& err) {
 
-    close(out.write_fd);
-    close(err.write_fd);
+    out.close_write();
+    err.close_write();
 
     auto stdout_thread_ =
-        std::thread([&] { forward_output(out.read_fd, *stdout_, "STDOUT"); });
+        std::thread([&] { forward_output(out.read(), *stdout_, "STDOUT"); });
 
     auto stderr_thread_ =
-        std::thread([&] { forward_output(err.read_fd, *stderr_, "STDERR"); });
+        std::thread([&] { forward_output(err.read(), *stderr_, "STDERR"); });
 
     wait_for_initial_stop();
 
@@ -200,8 +181,8 @@ inline SyscallMonitor::Result SyscallMonitor::process_tracer(Pipe const& out,
         stderr_thread_.join();
     }
 
-    close(out.read_fd);
-    close(err.read_fd);
+    out.close_read();
+    err.close_read();
 
     return exit_code;
 }
@@ -371,9 +352,8 @@ inline void SyscallMonitor::handle_stop(pid_t pid, int status) {
         // try to set up tracing
         pid_t child_pid = 0;
         if (ptrace(PTRACE_GETEVENTMSG, pid, nullptr, &child_pid) == -1) {
-            // FIXME: logging
-            std::cerr << "Failed to get pid of the new child: "
-                      << strerror(errno) << std::endl;
+            LOG_WARN(log_) << "Failed to get pid of the new child: "
+                           << strerror(errno);
         } else {
             set_ptrace_options(child_pid);
         }
@@ -430,8 +410,8 @@ inline std::function<int()>
 SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
     return [&cmd]() -> int {
         auto c_args = collection_to_c_array(cmd);
-        auto program = cmd.front();
-        execvp(program.c_str(), c_args.get());
+        auto& program = cmd.front();
+        execvp(program.c_str(), c_args.data());
 
         std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";
 

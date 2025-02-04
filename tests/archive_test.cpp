@@ -25,11 +25,15 @@ TEST(UtilTest, CreateTarArchiveTest) {
 
     EXPECT_TRUE(fs::exists(archive));
 
-    auto [out, exit_code] =
-        execute_command({"tar", "tf", archive.string(), "--absolute-names"});
+    auto out = Command("tar")
+                   .arg("tf")
+                   .arg(archive.string())
+                   .arg("--absolute-names")
+                   .output();
 
-    EXPECT_EQ(exit_code, 0);
-    EXPECT_EQ(out, files_str);
+    EXPECT_EQ(out.exit_code, 0);
+    EXPECT_EQ(out.stdout_data, files_str);
+    EXPECT_EQ(out.stderr_data, "");
 
     fs::remove_all(temp_dir);
 }

@@ -62,32 +62,6 @@ inline bool is_executable(fs::path const& p) {
     return false;
 }
 
-inline std::string read_from_pipe(int pipe_fd) {
-    std::string result;
-    constexpr std::size_t buffer_size = 4096;
-    char buffer[buffer_size];
-
-    while (true) {
-        ssize_t bytes_read = ::read(pipe_fd, buffer, buffer_size);
-        if (bytes_read < 0) {
-            // retry if interrupted by signal; otherwise throw.
-            if (errno == EINTR) {
-                continue;
-            }
-
-            throw make_system_error(
-                errno, STR("Failed to read from pipe: " << pipe_fd));
-        }
-        if (bytes_read == 0) {
-            // EOF
-            break;
-        }
-        result.append(buffer, static_cast<std::size_t>(bytes_read));
-    }
-
-    return result;
-}
-
 inline std::optional<fs::path> get_process_cwd(pid_t pid) {
     if (pid <= 0) {
         throw std::invalid_argument("Invalid PID.");
@@ -212,38 +186,22 @@ inline std::string string_join(T const& collection, S const& sep) {
 }
 
 template <typename Collection>
-std::unique_ptr<typename Collection::value_type[]> inline collection_to_c_array(
-    Collection const& container) {
-    using T = typename Collection::value_type;
-    static_assert(std::ranges::sized_range<Collection>);
-
-    size_t const size = std::ranges::size(container);
-    if (size == 0) {
-        return nullptr;
-    }
-
-    std::unique_ptr<T[]> xs(new T[size + 1]); // +1 for NULL terminator
-    std::ranges::copy(container, xs.get());
-    xs[size] = T{};
-
-    return xs;
-}
-
-template <typename Collection>
     requires std::is_same_v<typename Collection::value_type, std::string>
-inline std::unique_ptr<char* const[]>
-collection_to_c_array(Collection const& container) {
-    size_t const size = std::ranges::size(container);
+inline std::vector<char*> collection_to_c_array(Collection const& container) {
+    std::vector<char*> xs;
+
+    size_t size = std::ranges::size(container);
     if (size == 0) {
-        return nullptr;
+        return xs;
     }
 
-    std::unique_ptr<char*[]> xs(new char*[size + 1]); // +1 for NULL terminator
+    xs.reserve(size + 1);
 
-    for (size_t i = 0; i < size; ++i) {
-        xs[i] = const_cast<char*>(container[i].c_str());
+    for (auto& x : container) {
+        xs.push_back(const_cast<char*>(x.c_str()));
     }
-    xs[size] = nullptr;
+
+    xs.push_back(nullptr);
 
     return xs;
 }
@@ -289,19 +247,6 @@ inline WaitForSignalResult wait_for_signal(pid_t pid, int sig,
 
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-}
-
-struct Pipe {
-    int read_fd;
-    int write_fd;
-};
-
-inline Pipe create_pipe() {
-    int fds[2];
-    if (pipe(fds) < 0) {
-        throw make_system_error(errno, "pipe");
-    }
-    return {fds[0], fds[1]};
 }
 
 template <typename Duration>

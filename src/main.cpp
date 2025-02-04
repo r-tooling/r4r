@@ -5,6 +5,7 @@
 #include "fs.h"
 #include "logger.h"
 #include "manifest.h"
+#include "process.h"
 #include "syscall_monitor.h"
 #include "util.h"
 
@@ -210,6 +211,7 @@ struct Options {
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
     std::string docker_base_image{"ubuntu:22.04"};
+    std::string docker_image_tag{"r4r/test"};
     fs::path output_dir{"."};
 };
 
@@ -429,11 +431,9 @@ class DockerFileBuilderTask : public Task<DockerFile> {
             builder.env("LANG", *lang);
             builder.nl();
 
-            builder.run(
-                R"(apt-get update -y && \
-                   apt-get install -y --no-install-recommend locales && \
-                   locale-gen $LANG && \
-                   update-locale LANG=$LANG)");
+            builder.run({"apt-get update -y",
+                         "apt-get install -y --no-install-recommend locales",
+                         "locale-gen $LANG", "update-locale LANG=$LANG)"});
         }
     }
 
@@ -442,15 +442,15 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         auto& user = envir_.user;
 
         // create the primary group
-        cmds.emplace_back(
+        cmds.push_back(
             STR("groupadd -g " << user.group.gid << " " << user.group.name));
 
         // create groups
         for (auto const& group : user.groups) {
-            cmds.emplace_back(STR("(groupadd -g "
-                                  << group.gid << " " << group.name
-                                  << " || groupmod -g " << group.gid << " "
-                                  << group.name << ")"));
+            cmds.push_back(STR("(groupadd -g " << group.gid << " " << group.name
+                                               << " || groupmod -g "
+                                               << group.gid << " " << group.name
+                                               << ")"));
         }
 
         // prepare additional groups for `-G`
@@ -463,17 +463,16 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         std::string group_list = string_join(groups, ',');
 
         // add user
-        cmds.emplace_back(STR("useradd -u "
-                              << user.uid << " -g " << user.group.gid
-                              << (group_list.empty() ? "" : " -G " + group_list)
-                              << " -d " << user.home_directory << " -s "
-                              << user.shell << " " << user.username));
+        cmds.push_back(STR("useradd -u "
+                           << user.uid << " -g " << user.group.gid
+                           << (group_list.empty() ? "" : " -G " + group_list)
+                           << " -d " << user.home_directory << " -s "
+                           << user.shell << " " << user.username));
 
         // ensure home directory exists
-        cmds.emplace_back(STR("mkdir -p " << user.home_directory));
-        cmds.emplace_back(STR("chown " << user.username << ":"
-                                       << user.group.name << " "
-                                       << user.home_directory));
+        cmds.push_back(STR("mkdir -p " << user.home_directory));
+        cmds.push_back(STR("chown " << user.username << ":" << user.group.name
+                                    << " " << user.home_directory));
 
         builder.run(cmds);
     }
@@ -546,7 +545,19 @@ class DockerImageBuilder : public Task<DockerImage> {
                     [[maybe_unused]] std::ostream& ostream) override {
         (void)options_;
 
-        std::cout << docker_file_.dockerfile << std::endl;
+        docker_file_.save();
+        auto process = Command("docker")
+                           .arg("build")
+                           .arg("--rm")
+                           .arg("-t")
+                           .arg(options_.docker_image_tag)
+                           .arg(".")
+                           .current_dir(docker_file_.context_dir())
+                           .spawn();
+
+        if (process.wait() != 0) {
+            throw TaskException("Failed to build the Docker image");
+        }
 
         return DockerImage{};
     }

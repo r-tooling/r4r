@@ -67,36 +67,32 @@ class DefaultImageFiles {
 
         std::string bf_pattern = string_join(blacklist_patterns, '|');
 
-        // clang-format off
-        std::vector<std::string> docker_cmd = {
-            "docker",
-            "run",
-            "--rm",
-            image_name,
-            "bash",
-            "-c",
-            STR(
-               "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
-                R""(
-                find / \( -type f -or -type l \) 2>/dev/null | grep -vE "$BF_PATTERN" | while IFS= read -r file; do
-                    stat="$(stat -c "%U${DELIM}%G${DELIM}%s${DELIM}%a" "$file" 2>/dev/null || echo "error${DELIM}error${DELIM}error${DELIM}error")"
-                    sha1="$((sha1sum "$file" 2>/dev/null | cut -d " " -f1) || echo "error")"
-                    echo "$file${DELIM}${stat}${DELIM}${sha1}"
-                done
-            )"")};
-        // clang-format on
+        auto out =
+            Command("docker")
+                .arg("docker")
+                .arg("run")
+                .arg("--rm")
+                .arg(image_name)
+                .arg("bash")
+                .arg("-c")
+                // clang-format off
+                .arg(STR(
+                   "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
+                    R""(
+                    find / \( -type f -or -type l \) 2>/dev/null | grep -vE "$BF_PATTERN" | while IFS= read -r file; do
+                        stat="$(stat -c "%U${DELIM}%G${DELIM}%s${DELIM}%a" "$file" 2>/dev/null || echo "error${DELIM}error${DELIM}error${DELIM}error")"
+                        sha1="$((sha1sum "$file" 2>/dev/null | cut -d " " -f1) || echo "error")"
+                        echo "$file${DELIM}${stat}${DELIM}${sha1}"
+                    done
+                )""))
+                // clang-format on
+                .output();
 
-        Process proc{docker_cmd};
-        auto result = from_stream(proc.output());
+        out.check_success("Unable to initialize default file list for " +
+                          image_name);
 
-        if (proc.wait() != 0) {
-            throw std::runtime_error(
-                STR("Unable to initialize default file list for "
-                    << image_name
-                    << "\nCommand: " << string_join(docker_cmd, ' ')));
-        }
-
-        return result;
+        std::istringstream stream{out.stdout_data};
+        return from_stream(stream);
     }
 
     static DefaultImageFiles from_stream(std::istream& stream) {

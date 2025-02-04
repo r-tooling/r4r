@@ -15,20 +15,16 @@ void create_tar_archive(fs::path const& archive, FileCollection const& files) {
         }
     }
 
-    std::vector<std::string> command = {
-        "tar",     "--absolute-names", "--preserve-permissions",
-        "-cvf",    archive.string(),   "--files-from",
-        *temp_file};
+    auto out = Command("tar")
+                   .arg("--absolute-names")
+                   .arg("--preserve-permissions")
+                   .arg("-cvf")
+                   .arg(archive.string())
+                   .arg("--files-from")
+                   .arg(*temp_file)
+                   .output(true);
 
-    auto [tar_out, exit_code] = execute_command(command, true);
-    // FIXME: this should be included in the execute_command
-    if (exit_code != 0) {
-        std::string msg = STR("Error creating tar archive: "
-                              << archive.string() << ". tar exit code:  "
-                              << exit_code << "\nOutput:\n"
-                              << tar_out);
-        throw std::runtime_error(msg);
-    }
+    out.check_success(STR("Error creating tar archive: " << archive));
 }
 
 #endif // ARCHIVE_H

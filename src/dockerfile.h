@@ -3,16 +3,36 @@
 
 #include "common.h"
 #include "util.h"
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
-struct DockerFile {
-    fs::path context_dir;
-    std::string dockerfile;
-    std::vector<fs::path> copied_files;
+class DockerFile {
+  public:
+    DockerFile(fs::path context_dir, std::string dockerfile,
+               std::vector<fs::path> copied_files)
+        : context_dir_{std::move(context_dir)},
+          dockerfile_{std::move(dockerfile)},
+          copied_files_{std::move(copied_files)} {}
+
+    std::string const& dockerfile() const { return dockerfile_; }
+
+    std::vector<fs::path> const& copied_files() const { return copied_files_; }
+
+    fs::path const& context_dir() const { return context_dir_; }
+
+    void save(fs::path const& path) const {
+        std::ofstream file{path};
+        file << dockerfile_;
+    }
+
+    void save() const { save(context_dir_ / "Dockerfile"); }
+
+  private:
+    fs::path context_dir_;
+    std::string dockerfile_;
+    std::vector<fs::path> copied_files_;
 };
 
 class DockerFileBuilder {

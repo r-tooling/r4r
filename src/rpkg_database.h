@@ -47,19 +47,28 @@ using RPackages = std::unordered_map<std::string, std::unique_ptr<RPackage>>;
 class RpkgDatabase {
   public:
     static RpkgDatabase from_R(fs::path const& R_bin) {
-        Process R{{R_bin, "-s", "-q", "-e",
-                   R""(write.table(gsub("\n", "", installed.packages()[,
-             c("Package", "LibPath", "Version", "Depends", "Imports",
-             "LinkingTo", "Priority")]), sep="\U00A0", quote=FALSE,
-             row.names=FALSE))""}};
-        auto result = from_stream(R.output());
-        int exit_code = R.wait();
-        if (exit_code != 0) {
-            throw std::runtime_error(
-                STR("Unable to load R package database: R exit_code: "
-                    << exit_code));
-        }
-        return result;
+        auto out = Command(R_bin)
+                       .arg("-s")
+                       .arg("-q")
+                       .arg("-e")
+                       .arg(
+                           // clang-format off
+                           R""(write.table(
+                                     gsub(
+                                       "\n",
+                                       "",
+                                       installed.packages()[c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo", "Priority")]
+                                     ),
+                                     sep="\U00A0",
+                                     quote=FALSE,
+                                     row.names=FALSE))"")
+                       // clang-format on
+                       .output();
+
+        out.check_success("Unable to load R package database");
+
+        std::istringstream stream{out.stdout_data};
+        return from_stream(stream);
     }
 
     static RpkgDatabase from_stream(std::istream& input) {
@@ -77,7 +86,7 @@ class RpkgDatabase {
         return r ? *r : nullptr;
     }
 
-    // Return all dependencies (recursively) of the given set of packages pkgs
+    // Return all dependencies (recursively) of the given set of packages
     // in a topologically sorted order. The packages themselves are included.
     std::vector<RPackage const*>
     get_dependencies(std::unordered_set<RPackage const*> const& pkgs) const {

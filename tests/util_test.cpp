@@ -26,38 +26,18 @@ TEST(UtilTest, EscapeCmdArg) {
     // clang-format on
 }
 
-TEST(CollectionToCArrayTest, VectorTest) {
-    std::vector<int> col = {1, 2, 3};
+TEST(CollectionToCArrayTest, EmptyTest) {
+    std::vector<std::string> col;
     auto c_arr = collection_to_c_array(col);
 
-    ASSERT_NE(c_arr, nullptr);
-    ASSERT_EQ(c_arr[0], 1);
-    ASSERT_EQ(c_arr[1], 2);
-    ASSERT_EQ(c_arr[2], 3);
-    ASSERT_EQ(c_arr[3], 0); // Null terminator
+    ASSERT_EQ(c_arr.size(), 0);
 }
 
-TEST(CollectionToCArrayTest, ArrayTest) {
-    std::array<double, 2> col = {1.5, 2.7};
-    auto c_arr = collection_to_c_array(col);
-
-    ASSERT_NE(c_arr, nullptr);
-    ASSERT_DOUBLE_EQ(c_arr[0], 1.5);
-    ASSERT_DOUBLE_EQ(c_arr[1], 2.7);
-    ASSERT_DOUBLE_EQ(c_arr[2], 0.0);
-}
-
-TEST(CollectionToCArrayTest, EmptyContainerTest) {
-    std::vector<int> col;
-    auto c_arr = collection_to_c_array(col);
-    ASSERT_EQ(c_arr, nullptr);
-}
-
-TEST(CollectionToCArrayTest, StringTest) {
+TEST(CollectionToCArrayTest, NonEmptyTest) {
     std::vector<std::string> col = {"one", "two", "three"};
     auto c_arr = collection_to_c_array(col);
 
-    ASSERT_NE(c_arr, nullptr);
+    ASSERT_EQ(c_arr.size(), 4);
     for (int i = 0; i < col.size(); i++) {
         ASSERT_EQ(c_arr[i], col[i].c_str());
     }

@@ -104,13 +104,10 @@ class DpkgDatabase {
 };
 
 inline DebPackages DpkgDatabase::load_installed_packages() {
-    auto [out, exit_code] = (execute_command({"dpkg", "-l"}));
-    // FIXME: there should be a method for this
-    if (exit_code != 0) {
-        throw std::runtime_error(STR("Unable to execute dpkg -l, exit code:"
-                                     << exit_code << "\nOutput: " << out));
-    }
-    std::istringstream stream{out};
+    auto out = Command("dpkg").arg("-l").output();
+    out.check_success("Unable to execute 'dpkg -l'");
+
+    std::istringstream stream{out.stdout_data};
     DpkgParser parser{stream};
     return parser.parse();
 }
