@@ -659,14 +659,10 @@ CopyFileManifest::write_to_docker(DockerFileBuilder& builder) const {
     }
     create_tar_archive(archive_, copy_files);
 
-    // FIXME: this is broken - better API for copy
     builder.copy({archive_}, archive_);
 
-    std::vector<std::string> cmds{
-        STR("tar -x --file " << archive_ << " --absolute-names"),
-        STR("rm -f " << archive_)};
-
-    builder.run(cmds);
+    builder.run({STR("tar -x --file " << archive_ << " --absolute-names"),
+                 STR("rm -f " << archive_)});
 }
 
 class Manifest {
@@ -714,7 +710,7 @@ class Manifest {
     };
 
   private:
-    static inline Logger log_ = LogManager::logger("composed-manifest");
+    static inline Logger& log_ = LogManager::logger("composed-manifest");
     std::unordered_map<std::string, std::unique_ptr<ManifestPart>> parts_;
     std::vector<std::string> index_;
 };

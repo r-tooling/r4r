@@ -1,5 +1,7 @@
+#include "argparser.h"
 #include "cli.h"
 #include "common.h"
+#include "config.h"
 #include "dockerfile.h"
 #include "file_tracer.h"
 #include "fs.h"
@@ -208,20 +210,13 @@ class TracingTask : public Task<std::vector<FileInfo>> {
 };
 
 struct Options {
+    LogLevel log_level = LogLevel::Info;
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
     std::string docker_base_image{"ubuntu:22.04"};
-    std::string docker_image_tag{"r4r/test"};
+    std::string docker_image_tag{STR(kBinaryName << "/test")};
     fs::path output_dir{"."};
 };
-
-Options parse_cmd_args(int argc, char* argv[]) {
-    std::vector<std::string> args;
-    for (int i = 1; i < argc; i++) {
-        args.emplace_back(argv[i]);
-    }
-    return {.cmd = args};
-}
 
 struct Environment {
     fs::path cwd;
@@ -432,8 +427,8 @@ class DockerFileBuilderTask : public Task<DockerFile> {
             builder.nl();
 
             builder.run({"apt-get update -y",
-                         "apt-get install -y --no-install-recommend locales",
-                         "locale-gen $LANG", "update-locale LANG=$LANG)"});
+                         "apt-get install -y --no-install-recommends locales",
+                         "locale-gen $LANG", "update-locale LANG=$LANG"});
         }
     }
 
@@ -519,13 +514,7 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         builder.run(STR("mkdir -p " << envir_.cwd));
         builder.workdir(envir_.cwd);
         builder.user(envir_.user.username);
-
-        std::vector<std::string> args;
-        for (auto const& arg : options_.cmd) {
-            args.push_back(escape_cmd_arg(arg));
-        }
-
-        builder.cmd(string_join(args, ' '));
+        builder.cmd(options_.cmd);
     }
 
     Options const& options_;
@@ -569,10 +558,18 @@ class DockerImageBuilder : public Task<DockerImage> {
 
 class Tracer {
   public:
-    explicit Tracer(Options options)
-        : options_{std::move(options)}, runner_{std::cout} {}
+    explicit Tracer(Options const& options)
+        : options_{options}, runner_{std::cout} {}
 
-    void trace() {
+    void execute() {
+        configure();
+        run_pipeline();
+    }
+
+    void stop() { runner_.stop(); }
+
+  private:
+    void run_pipeline() {
         auto envir = runner_.run(CaptureEnvironmentTask{});
         auto files = runner_.run(TracingTask{options_.cmd});
         auto manifest = runner_.run(ManifestTask{options_, envir.cwd, files});
@@ -586,16 +583,60 @@ class Tracer {
         // rerun();
         // diff();
     }
-
-    void stop() { runner_.stop(); }
-
-  private:
-    void trace_program() {}
+    void configure() const {
+        Logger& log = LogManager::root_logger();
+        for (LogLevel level = LogLevel::Error; level != LogLevel::Trace;
+             --level) {
+            log.disable(level);
+        }
+        for (LogLevel level = LogLevel::Error; level != options_.log_level;
+             --level) {
+            log.enable(level);
+        }
+    }
 
     static inline Logger& log_ = LogManager::logger("tracer");
     Options options_;
     TaskRunner runner_;
 };
+
+Options parse_cmd_args(int argc, char* argv[]) {
+    Options opts;
+    ArgumentParser parser{std::string(kBinaryName)};
+
+    parser.add_option('v', "verbose")
+        .with_help("Make the tool more talkative (allow multiple)")
+        .with_callback([&](auto) { --opts.log_level; });
+    parser.add_option("docker-image-tag")
+        .with_help("The docker image tag")
+        .with_default(opts.docker_image_tag)
+        .has_argument()
+        .with_metavar("NAME")
+        .with_callback([&](auto& arg) { opts.docker_image_tag = arg; });
+    parser.add_option("help")
+        .with_help("Print this message")
+        .with_callback([&](auto) {
+            std::cout << parser.help();
+            exit(0);
+        });
+    parser.add_positional("command")
+        .required()
+        .multiple()
+        .with_help("The program to trace")
+        .with_callback([&](auto& arg) { opts.cmd.push_back(arg); });
+
+    try {
+        parser.parse(argc, argv);
+        return opts;
+    } catch (ArgumentParserException const& e) {
+        std::cerr << kBinaryName << ": " << e.what() << std::endl;
+        std::cerr << kBinaryName << ": "
+                  << "try '" << kBinaryName << " --help' for more information"
+                  << std::endl;
+
+        exit(1);
+    }
+}
 
 int main(int argc, char* argv[]) {
     Options options = parse_cmd_args(argc, argv);
@@ -630,7 +671,7 @@ int main(int argc, char* argv[]) {
     });
 
     try {
-        tracer.trace();
+        tracer.execute();
         return 0;
     } catch (TaskException& e) {
         std::cerr << e.what() << "\n";

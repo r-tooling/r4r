@@ -46,13 +46,21 @@ class DockerFileBuilder {
     }
 
     DockerFileBuilder& run(std::vector<std::string> const& commands) {
-        std::string cmds = string_join(commands, " \\\n  ");
+        std::string cmds = string_join(commands, " && \\\n  ");
         commands_.emplace_back("RUN " + cmds);
         return *this;
     }
 
-    DockerFileBuilder& cmd(std::string const& command) {
-        commands_.emplace_back("CMD " + command);
+    DockerFileBuilder& cmd(std::vector<std::string> const& commands) {
+        std::string cmd;
+        for (size_t i = 0; auto& c : commands) {
+            cmd += escape_cmd_arg(c, false, true);
+            if (++i < commands.size()) {
+                cmd += ", ";
+            }
+        }
+
+        commands_.emplace_back("CMD [" + cmd + "]");
         return *this;
     }
 

@@ -4,7 +4,6 @@
 #include "common.h"
 
 #include <fstream>
-#include <memory>
 #include <ranges>
 #include <regex>
 #include <sstream>
@@ -15,9 +14,14 @@
 #include <unordered_set>
 #include <vector>
 
-inline std::string escape_cmd_arg(std::string const& arg) {
+inline std::string escape_cmd_arg(std::string const& arg,
+                                  bool single_quote = true,
+                                  bool force = false) {
+    std::string quoted = single_quote ? "\\\'" : "\\\"";
+    char quoted_chr = single_quote ? '\'' : '"';
+
     if (arg.empty()) {
-        return "''"; // Handle empty strings
+        return std::string(2, quoted_chr);
     }
 
     bool needs_quoting = false;
@@ -30,15 +34,15 @@ inline std::string escape_cmd_arg(std::string const& arg) {
             needs_quoting = true;
         }
 
-        if (c == '\'') {
-            quoted_arg += "'\\''";
+        if (c == quoted_chr) {
+            quoted_arg += quoted;
         } else {
             quoted_arg += c;
         }
     }
 
-    if (needs_quoting) {
-        quoted_arg = "'" + quoted_arg + "'";
+    if (needs_quoting || force) {
+        quoted_arg = quoted_chr + quoted_arg + quoted_chr;
     }
 
     return quoted_arg;

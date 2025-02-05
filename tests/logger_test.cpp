@@ -1,14 +1,18 @@
 #include "logger.h"
 #include <gtest/gtest.h>
+#include <memory>
 #include <regex>
 #include <sstream>
 
-// TEST(LoggerTest, BasicLogging) {
-//     std::stringstream s;
-//     Logger log("TestLogger", s, "{logger} {level}: {message}");gg
-//     LOG_INFO(log) << "Test message";
-//     ASSERT_EQ(s.str(), "TestLogger INFO: Test message\n");
-// }
+TEST(LoggerTest, BasicLogging) {
+    std::stringstream s;
+    auto& log = LogManager::logger("TestLogger");
+    log.set_sink(std::make_shared<OutputStreamSink>(
+        std::make_shared<PatternLogFormatter>("{logger} {level}: {message}"),
+        s));
+    LOG_INFO(log) << "Test message";
+    ASSERT_EQ(s.str(), "TestLogger INF: Test message\n");
+}
 //
 // TEST(LoggerTest, LevelSpecificSink) {
 //     std::stringstream s1;

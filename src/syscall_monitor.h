@@ -93,7 +93,7 @@ class SyscallMonitor {
     static std::function<int()>
     spawn_process(std::vector<std::string> const& cmd);
 
-    static inline Logger log_ = LogManager::logger("syscall-monitor");
+    static inline Logger& log_ = LogManager::logger("syscall-monitor");
     std::function<int()> tracee_;
     SyscallListener& listener_;
     std::ostream* stdout_{&std::cout};

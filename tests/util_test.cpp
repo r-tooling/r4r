@@ -20,11 +20,16 @@ TEST(UtilTest, EscapeCmdArg) {
     EXPECT_EQ(escape_cmd_arg("arg with >greater"), "'arg with >greater'");
     EXPECT_EQ(escape_cmd_arg("arg with #hash"), "'arg with #hash'");
     EXPECT_EQ(escape_cmd_arg("arg with !exclamation"), "'arg with !exclamation'");
-    EXPECT_EQ(escape_cmd_arg("arg with 'single quote'"), "'arg with '\\''single quote'\\'''");
+    EXPECT_EQ(escape_cmd_arg("arg with 'single quote'"), "'arg with \\'single quote\\''");
     EXPECT_EQ(escape_cmd_arg(""), "''");
-    EXPECT_EQ(escape_cmd_arg("'already quoted'"), "''\\''already quoted'\\'''");
+    EXPECT_EQ(escape_cmd_arg("'already quoted'"), "'\\'already quoted\\''");
+
+    EXPECT_EQ(escape_cmd_arg("arg with \"quotes\"", false), "\"arg with \\\"quotes\\\"\"");
     // clang-format on
 }
+
+// 'a'
+// '\'a\''
 
 TEST(CollectionToCArrayTest, EmptyTest) {
     std::vector<std::string> col;

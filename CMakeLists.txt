@@ -7,15 +7,27 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 
 project(r4r VERSION 0.1)
 
-file(GLOB BIN_SOURCES "src/*.cpp" "src/*.h")
+set(R4R_BIN "r4r")
 
-add_executable(
-        ${PROJECT_NAME}
-        ${BIN_SOURCES}
+configure_file(
+    src/config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/config.h
+    @ONLY
 )
 
-target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+file(GLOB R4R_BIN_SOURCES "src/*.cpp" "src/*.h")
 
-install(TARGETS ${PROJECT_NAME})
+add_executable(
+    ${R4R_BIN}
+    ${R4R_BIN_SOURCES}
+)
+
+target_compile_options(${R4R_BIN} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_include_directories(${R4R_BIN}
+    PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+install(TARGETS ${R4R_BIN})
 
 add_subdirectory(tests)
