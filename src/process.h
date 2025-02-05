@@ -2,6 +2,7 @@
 #define PROCESS_H
 
 #include "common.h"
+#include "logger.h"
 #include "util.h"
 #include <optional>
 #include <sys/wait.h>
@@ -211,6 +212,7 @@ class Command {
     Output output(bool redirect_stderr_to_stdout = false);
 
   private:
+    static inline Logger& log_ = LogManager::logger("command");
     std::vector<std::string> args_;
     std::map<std::string, std::string> envs_;
     std::optional<std::string> working_dir_;
@@ -298,6 +300,8 @@ inline Child Command::spawn() {
 
         out.close();
         err.close();
+
+        LOG_TRACE(log_) << "Running a command " << string_join(args_, ' ');
 
         std::vector<char*> argv = collection_to_c_array(args_);
 

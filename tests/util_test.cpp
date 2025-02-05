@@ -28,9 +28,6 @@ TEST(UtilTest, EscapeCmdArg) {
     // clang-format on
 }
 
-// 'a'
-// '\'a\''
-
 TEST(CollectionToCArrayTest, EmptyTest) {
     std::vector<std::string> col;
     auto c_arr = collection_to_c_array(col);

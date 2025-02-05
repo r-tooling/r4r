@@ -96,7 +96,6 @@ UserInfo get_user_info() {
     uid_t uid = getuid();
     gid_t gid = getgid();
 
-    // retrieve the passwd struct for the user
     passwd* pwd = getpwuid(uid);
     if (!pwd) {
         throw std::runtime_error("Failed to get passwd struct for UID " +
@@ -115,7 +114,7 @@ UserInfo get_user_info() {
     }
     GroupInfo primary_group = {gid, grp->gr_name};
 
-    // get the list of groups
+    // groups
     int n_groups = 0;
     getgrouplist(username.c_str(), gid, nullptr,
                  &n_groups); // Get number of groups
@@ -127,7 +126,7 @@ UserInfo get_user_info() {
                                  username);
     }
 
-    // map gids to GroupInfo
+    // get gids
     std::vector<GroupInfo> groups;
     for (gid_t group_id : group_ids) {
         group* g = getgrgid(group_id);
@@ -216,6 +215,7 @@ struct Options {
     std::string docker_base_image{"ubuntu:22.04"};
     std::string docker_image_tag{STR(kBinaryName << "/test")};
     fs::path output_dir{"."};
+    AbsolutePathSet results;
 };
 
 struct Environment {
@@ -277,7 +277,7 @@ class CaptureEnvironmentTask : public Task<Environment> {
 
 class ManifestTask : public Task<Manifest> {
   public:
-    explicit ManifestTask(Options const& options, fs::path const& cwd,
+    explicit ManifestTask(Options& options, fs::path const& cwd,
                           std::vector<FileInfo>& files)
         : Task{"manifest"}, options_{options}, cwd_{cwd}, files_{files} {}
 
@@ -289,7 +289,8 @@ class ManifestTask : public Task<Manifest> {
         manifest.add<DebPackagesManifest>("deb");
         manifest.add<CRANPackagesManifest>("cran", options_.R_bin,
                                            options_.output_dir);
-        manifest.add<CopyFileManifest>("copy", cwd_, options_.output_dir);
+        manifest.add<CopyFileManifest>("copy", cwd_, options_.output_dir,
+                                       options_.results);
 
         LOG_INFO(log) << "Resolving " << files_.size() << " files";
         manifest.load_from_files(files_);
@@ -381,7 +382,8 @@ class ManifestTask : public Task<Manifest> {
     }
 
     static inline Logger& log_ = LogManager::logger("manifest");
-    Options const& options_;
+    // FIXME: do not take options, cherry-pick what is needed
+    Options& options_;
     fs::path const& cwd_;
     std::vector<FileInfo>& files_;
 };
@@ -511,9 +513,48 @@ class DockerFileBuilderTask : public Task<DockerFile> {
     }
 
     void prepare_command(DockerFileBuilder& builder) {
-        builder.run(STR("mkdir -p " << envir_.cwd));
+        builder.run(
+            {STR("mkdir -p " << envir_.cwd),
+             STR("chown " << envir_.user.username << ":"
+                          << envir_.user.group.name << " " << envir_.cwd)});
         builder.workdir(envir_.cwd);
         builder.user(envir_.user.username);
+
+        // fs::path run_file{options_.output_dir / "run.sh"};
+        // {
+        //     std::ofstream run{run_file};
+        //     run << "set -e\n";
+        //     run << "\n\n";
+        //     run << "# run user program\n";
+        //
+        //     for (size_t i = 0; auto& c : options_.cmd) {
+        //         run << escape_cmd_arg(c);
+        //         if (++i < options_.cmd.size()) {
+        //             run << ' ';
+        //         }
+        //     }
+        //
+        //     if (!options_.results.empty()) {
+        //
+        //         {
+        //             fs::path file =
+        //                 options_.output_dir / options_.result_list_filename;
+        //             std::ofstream out{file};
+        //             print_collection(out, options_.results, '\n');
+        //
+        //             builder.copy({file}, options_.result_list_filename);
+        //         }
+        //
+        //         run << "\n\n";
+        //         run << "# create archive with the results\n";
+        //         run << "tar -cf " << options_.result_archive_filename
+        //             << " --files-from " << options_.result_list_filename
+        //             << '\n';
+        //     }
+        // }
+        //
+        // builder.copy({run_file}, "/");
+        // builder.cmd({"bash", "/" / run_file.filename()});
         builder.cmd(options_.cmd);
     }
 
@@ -522,7 +563,9 @@ class DockerFileBuilderTask : public Task<DockerFile> {
     Manifest const& manifest_;
 };
 
-class DockerImage {};
+struct DockerImage {
+    std::string tag;
+};
 
 class DockerImageBuilder : public Task<DockerImage> {
   public:
@@ -530,11 +573,10 @@ class DockerImageBuilder : public Task<DockerImage> {
         : Task{"docker-image-builder"}, options_{options},
           docker_file_{docker_file} {}
 
-    DockerImage run([[maybe_unused]] Logger& log,
+    DockerImage run(Logger& log,
                     [[maybe_unused]] std::ostream& ostream) override {
-        (void)options_;
-
         docker_file_.save();
+        LOG_INFO(log) << "Building docker image: " << options_.docker_image_tag;
         auto process = Command("docker")
                            .arg("build")
                            .arg("--rm")
@@ -548,12 +590,66 @@ class DockerImageBuilder : public Task<DockerImage> {
             throw TaskException("Failed to build the Docker image");
         }
 
-        return DockerImage{};
+        return {options_.docker_image_tag};
     }
 
   private:
     Options const& options_;
     DockerFile const& docker_file_;
+};
+
+struct RerunResult {};
+
+class RerunCommandTask : public Task<RerunResult> {
+  public:
+    RerunCommandTask(Options const& options, DockerImage const& image)
+        : Task{"rerun"}, options_{options}, image_{image} {}
+
+    RerunResult run(Logger& log,
+                    [[maybe_unused]] std::ostream& ostream) override {
+
+        LOG_INFO(log) << "Running the created image";
+
+        std::string container_name = "test";
+
+        int res = Command("docker")
+                      .arg("run")
+                      .arg("-t")
+                      .arg("--name")
+                      .arg(container_name)
+                      .arg(image_.tag)
+                      .current_dir(options_.output_dir)
+                      .spawn()
+                      .wait();
+        if (res) {
+            throw TaskException("Docker run failed");
+        }
+
+        if (!options_.results.empty()) {
+            LOG_INFO(log) << "Copying back the result files";
+
+            for (auto& result : options_.results) {
+                fs::path path = result;
+
+                int res =
+                    Command("docker")
+                        .arg("cp")
+                        .arg(STR(container_name << ":" << result.string()))
+                        .arg(".")
+                        .current_dir(options_.output_dir)
+                        .spawn()
+                        .wait();
+                if (res != 0) {
+                    LOG_ERROR(log) << "Unable to copy back result: " << result;
+                }
+            }
+        }
+        return {};
+    }
+
+  private:
+    Options const& options_;
+    DockerImage const& image_;
 };
 
 class Tracer {
@@ -577,22 +673,26 @@ class Tracer {
             runner_.run(DockerFileBuilderTask{options_, envir, manifest});
         auto docker_image =
             runner_.run(DockerImageBuilder{options_, docker_file});
+        auto rerun_result =
+            runner_.run(RerunCommandTask{options_, docker_image});
 
-        (void)docker_image;
+        (void)rerun_result;
 
         // rerun();
         // diff();
     }
     void configure() const {
         Logger& log = LogManager::root_logger();
-        for (LogLevel level = LogLevel::Error; level != LogLevel::Trace;
+        for (LogLevel level = LogLevel::Error; level <= LogLevel::Trace;
              --level) {
             log.disable(level);
         }
-        for (LogLevel level = LogLevel::Error; level != options_.log_level;
+        for (LogLevel level = LogLevel::Error; level <= options_.log_level;
              --level) {
             log.enable(level);
         }
+
+        fs::create_directory(options_.output_dir);
     }
 
     static inline Logger& log_ = LogManager::logger("tracer");
@@ -613,6 +713,16 @@ Options parse_cmd_args(int argc, char* argv[]) {
         .has_argument()
         .with_metavar("NAME")
         .with_callback([&](auto& arg) { opts.docker_image_tag = arg; });
+    parser.add_option("result")
+        .with_help("Path to a result file")
+        .has_argument()
+        .with_metavar("PATH")
+        .with_callback([&](auto& arg) { opts.results.insert(arg); });
+    parser.add_option("output")
+        .with_help("Path for the output")
+        .has_argument()
+        .with_metavar("PATH")
+        .with_callback([&](auto& arg) { opts.output_dir = arg; });
     parser.add_option("help")
         .with_help("Print this message")
         .with_callback([&](auto) {

@@ -5,8 +5,8 @@
 #include <filesystem>
 #include <queue>
 #include <random>
+#include <system_error>
 #include <unordered_map>
-#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -177,5 +177,36 @@ inline AccessStatus check_accessibility(fs::path const& p) {
         return AccessStatus::InsufficientPermission;
     }
 }
+
+class AbsolutePathSet {
+  public:
+    bool insert(fs::path const& p) {
+        std::error_code ec;
+        fs::path resolved = fs::absolute(p, ec);
+        if (ec) {
+            // FIXME: log some warning?
+            // if (ec) {
+            //     LOG_WARN(log_) << "Failed to resolve absolute path: " << line
+            //                    << " - " << ec.message();
+            // }
+            return false;
+        } else {
+            auto [_, inserted] = paths_.insert(resolved);
+            return inserted;
+        }
+    }
+
+    size_t size() const { return paths_.size(); }
+
+    bool empty() const { return paths_.empty(); }
+
+    using const_iterator = std::unordered_set<fs::path>::const_iterator;
+
+    const_iterator begin() const noexcept { return paths_.begin(); }
+    const_iterator end() const noexcept { return paths_.end(); }
+
+  private:
+    std::unordered_set<fs::path> paths_;
+};
 
 #endif // FS_H

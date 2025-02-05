@@ -511,8 +511,9 @@ class IgnoreFilesManifest : public ManifestPart {
 
 class CopyFileManifest : public ManifestPart {
   public:
-    CopyFileManifest(fs::path const& cwd, fs::path const& output_dir)
-        : cwd_{cwd}, archive_{output_dir / "archive.tar"} {}
+    CopyFileManifest(fs::path const& cwd, fs::path const& output_dir,
+                     AbsolutePathSet& results)
+        : cwd_{cwd}, archive_{output_dir / "archive.tar"}, results_{results} {}
 
     void load_from_files(std::vector<FileInfo>& files) override;
     void load_from_manifest(std::istream& stream) override;
@@ -532,6 +533,7 @@ class CopyFileManifest : public ManifestPart {
     fs::path const& cwd_;
     fs::path archive_;
     std::map<fs::path, Status> files_;
+    AbsolutePathSet& results_;
     static inline Logger& log_ = LogManager::logger("manifest.copy");
 };
 
@@ -569,18 +571,32 @@ inline void CopyFileManifest::load_from_manifest(std::istream& stream) {
     std::string line;
     while (std::getline(stream, line)) {
         line = string_trim(line);
-        auto status = Status::Copy;
-        if (line.starts_with("-")) {
-            line = line.substr(1);
-            line = string_trim(line);
-            if (line.starts_with('"')) {
-                if (line.ends_with('"')) {
-                    line = line.substr(1, line.size() - 2);
-                } else {
-                    throw std::runtime_error("Invalid file path: " + line);
-                }
+        bool copy;
+
+        if (line.starts_with("C")) {
+            copy = true;
+        } else if (line.starts_with("R")) {
+            copy = false;
+        } else {
+            LOG_WARN(log_) << "Invalid line: " << line;
+            continue;
+        }
+
+        line = line.substr(1);
+        line = string_trim(line);
+        if (line.starts_with('"')) {
+            if (line.ends_with('"')) {
+                line = line.substr(1, line.size() - 2);
+            } else {
+                LOG_WARN(log_) << "Invalid path: " << line;
+                continue;
             }
-            files_.emplace(line, status);
+        }
+
+        if (copy) {
+            files_.emplace(line, Status::Copy);
+        } else {
+            results_.insert(line);
         }
     }
 
@@ -595,14 +611,18 @@ CopyFileManifest::write_to_manifest(ManifestFormat::Section& section) const {
     }
 
     section.preamble =
-        STR("The following " << files_.size() << " files will be copied:");
+        STR("The following "
+            << files_.size() << " files has not been resolved.\n"
+            << "By default, they will be copied, unless explicitly ignored.\n"
+            << "C - mark file to be copied into the image.\n"
+            << "R - mark as additional result file.");
 
     std::ostringstream content;
     for (auto& [path, status] : files_) {
         if (status == Status::Copy) {
-            content << "- " << path << "\n";
+            content << "C " << path << "\n";
         } else {
-            content << ManifestFormat::comment() << " - " << path << " "
+            content << ManifestFormat::comment() << " " << path << " "
                     << ManifestFormat::comment() << " " << status << "\n";
         }
     }

@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "syscall_monitor.h"
 #include <fcntl.h>
+#include <filesystem>
 #include <variant>
 
 struct FileInfo {
@@ -80,21 +81,24 @@ class FileTracer : public SyscallListener {
     Files const& files() const { return files_; }
 
   private:
-    // FIXME: use logger
-    void register_warning(std::string const& message) {
-        warnings_.push_back(message);
-    }
-
     void register_file(FileInfo info) {
+        std::error_code ec;
         auto& path = info.path;
+        if (!path.is_absolute()) {
+            path = fs::absolute(path, ec);
+            if (ec) {
+                LOG_WARN(log_)
+                    << "Failed to resolve path to absolute:  " << info.path
+                    << ": " << ec.message();
+            }
+        }
 
         if (info.existed_before) {
-            std::error_code ec;
             auto size = fs::file_size(path, ec);
 
             if (ec) {
-                register_warning(STR("Failed to get file size of:  "
-                                     << path << ": " << ec.message()));
+                LOG_WARN(log_) << "Failed to get file size of:  " << path
+                               << ": " << ec.message();
             } else {
                 info.size = size;
             }
@@ -116,14 +120,14 @@ class FileTracer : public SyscallListener {
             if (dirfd == AT_FDCWD) {
                 auto d = get_process_cwd(pid);
                 if (!d) {
-                    register_warning(STR("failed to resolve cwd of: " << pid));
+                    LOG_WARN(log_) << "Failed to resolve cwd of: " << pid;
                     return;
                 }
                 result = *d;
             } else {
                 auto d = resolve_fd_filename(pid, dirfd);
                 if (!d) {
-                    register_warning(STR("Failed to resolve dirfd: " << dirfd));
+                    LOG_WARN(log_) << "Failed to resolve dirfd: " << dirfd;
                     return;
                 }
                 result = *d;
@@ -138,6 +142,7 @@ class FileTracer : public SyscallListener {
                            << ": " << ec.message();
             return;
         }
+
         state = FileInfo{.path = result, .existed_before = exists};
     }
 
@@ -151,11 +156,23 @@ class FileTracer : public SyscallListener {
             auto& info = std::get<FileInfo>(state);
             auto& entry_file = info.path;
 
+            std::error_code ec;
+            if (!fs::exists(entry_file, ec)) {
+                return;
+            }
+
+            fs::file_status fs = fs::status(entry_file, ec);
+            if (!(fs::is_regular_file(fs) || fs::is_directory(fs) ||
+                  fs::is_symlink(fs))) {
+                LOG_WARN(log_) << "Unsupported file type: " << entry_file << " "
+                               << fs::exists(entry_file, ec);
+                return;
+            }
+
             if (ret_val >= 0) {
                 auto exit_file =
                     resolve_fd_filename(pid, static_cast<int>(ret_val));
 
-                std::error_code ec;
                 if (!exit_file) {
                     LOG_WARN(log_)
                         << "Unable to resolve fd: " << ret_val << " to a path";
