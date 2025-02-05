@@ -39,7 +39,7 @@ TEST(ArgumentParserTest, OptionWithArgument) {
     std::string log_level;
 
     parser.add_option('l', "level")
-        .has_argument()
+        .with_argument()
         .with_callback([&](std::string const& val) { log_level = val; });
 
     char const* argv[] = {"test", "--level=3"};
@@ -77,7 +77,7 @@ TEST(ArgumentParserTest, MixedArguments) {
     });
 
     parser.add_option('i', "input")
-        .has_argument()
+        .with_argument()
         .with_callback([&](std::string const& val) { input_file = val; });
 
     parser.add_positional("output").with_callback(
@@ -136,14 +136,16 @@ TEST(ArgumentParserTest, MultiplePositionals) {
 }
 
 TEST(ArgumentParserTest, HelpOutput) {
-    ArgumentParser parser("sample", "Sample Program");
+    ArgumentParser parser("sample", "Sample program");
     parser.add_option('v', "verbose").with_help("Enable verbose output");
-    parser.add_option('o', "output").has_argument().with_metavar("FILE");
+    parser.add_option('o', "output").with_argument("FILE");
     parser.add_option("help").with_help("Prints this message");
     parser.add_positional("input").required().with_help("Input file");
-    parser.add_positional("very long positional name").required().with_help("Help text");
+    parser.add_positional("very long positional name")
+        .required()
+        .with_help("Help text");
 
-    std::string const expected = R"(Sample Program
+    std::string const expected = R"(Sample program
 
 Usage: sample [OPTIONS] <input> <very long positional name>
 
@@ -158,7 +160,6 @@ Positional arguments:
 )";
 
     std::string const help = parser.help();
-    std::cout << help;
     EXPECT_EQ(help, expected);
 }
 
@@ -167,7 +168,7 @@ TEST(ArgumentParserTest, ArgumentWithEqualSign) {
     std::string config_path;
 
     parser.add_option('c', "config")
-        .has_argument()
+        .with_argument()
         .with_callback([&](std::string const& val) { config_path = val; });
 
     char const* argv[] = {"test", "--config=settings.conf"};

@@ -24,9 +24,8 @@ class ArgumentParser {
         std::string short_name;
         std::string long_name;
         std::string help;
-        std::string metavar;
-        bool requires_arg = false;
-        bool is_required = false;
+        std::optional<std::string> has_arg;
+        bool is_required{false};
         std::optional<std::string> default_value;
         Callback callback;
         std::optional<std::string> value;
@@ -38,12 +37,8 @@ class ArgumentParser {
             help = std::move(text);
             return *this;
         }
-        Option& with_metavar(std::string var) {
-            metavar = std::move(var);
-            return *this;
-        }
-        Option& has_argument() {
-            requires_arg = true;
+        Option& with_argument(std::string metavar = "ARG") {
+            has_arg = metavar;
             return *this;
         }
         Option& required() {
@@ -196,8 +191,8 @@ class ArgumentParser {
             if (!opt.long_name.empty()) {
                 opt_line_length += 2 + opt.long_name.size(); // '--xx'
             }
-            if (!opt.metavar.empty()) {
-                opt_line_length += 1 + opt.metavar.size(); // ' XX'
+            if (opt.has_arg) {
+                opt_line_length += 1 + opt.has_arg->size(); // ' XX'
             }
             opt_line_max_length =
                 std::max(opt_line_max_length, opt_line_length);
@@ -219,8 +214,8 @@ class ArgumentParser {
                     oss << "--" << opt.long_name;
                 }
 
-                if (opt.requires_arg) {
-                    oss << ' ' << (opt.metavar.empty() ? "ARG" : opt.metavar);
+                if (opt.has_arg) {
+                    oss << ' ' << *opt.has_arg;
                 }
 
                 if (!opt.help.empty() || opt.default_value.has_value()) {
@@ -269,7 +264,7 @@ class ArgumentParser {
             char const c = options[i];
             auto& opt = find_option(std::string(1, c));
 
-            if (opt.requires_arg) {
+            if (opt.has_arg) {
                 std::string value;
                 if (i + 1 < options.size()) {
                     value = options.substr(i + 1);
@@ -299,7 +294,7 @@ class ArgumentParser {
         std::string const name = arg.substr(2, equal_pos - 2);
         auto& opt = find_option(name);
 
-        if (opt.requires_arg) {
+        if (opt.has_arg) {
             std::string value;
             if (equal_pos != std::string::npos) {
                 value = arg.substr(equal_pos + 1);

@@ -214,7 +214,10 @@ struct Options {
     std::vector<std::string> cmd;
     std::string docker_base_image{"ubuntu:22.04"};
     std::string docker_image_tag{STR(kBinaryName << "/test")};
+    std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
+    fs::path dockerfile;
+    fs::path makefile;
     AbsolutePathSet results;
 };
 
@@ -398,6 +401,8 @@ class DockerFileBuilderTask : public Task<DockerFile> {
     DockerFile run([[maybe_unused]] Logger& log,
                    [[maybe_unused]] std::ostream& ostream) override {
 
+        LOG_INFO(log) << "Generating Dockerfile: " << options_.dockerfile;
+
         DockerFileBuilder builder{options_.docker_base_image,
                                   options_.output_dir};
 
@@ -414,7 +419,10 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         builder.nl();
         prepare_command(builder);
 
-        return builder.build();
+        DockerFile docker_file = builder.build();
+        docker_file.save(options_.dockerfile);
+
+        return docker_file;
     }
 
   private:
@@ -567,89 +575,89 @@ struct DockerImage {
     std::string tag;
 };
 
-class DockerImageBuilder : public Task<DockerImage> {
+// FIXME: return void
+class MakefileBuilderTask : public Task<fs::path> {
   public:
-    DockerImageBuilder(Options const& options, DockerFile const& docker_file)
-        : Task{"docker-image-builder"}, options_{options},
-          docker_file_{docker_file} {}
+    MakefileBuilderTask(Options const& options)
+        : Task{"makefile"}, options_{options} {}
 
-    DockerImage run(Logger& log,
-                    [[maybe_unused]] std::ostream& ostream) override {
-        docker_file_.save();
-        LOG_INFO(log) << "Building docker image: " << options_.docker_image_tag;
-        auto process = Command("docker")
-                           .arg("build")
-                           .arg("--rm")
-                           .arg("-t")
-                           .arg(options_.docker_image_tag)
-                           .arg(".")
-                           .current_dir(docker_file_.context_dir())
-                           .spawn();
+    fs::path run(Logger& log, [[maybe_unused]] std::ostream& ostream) override {
+        LOG_INFO(log) << "Generating makefile: " << options_.makefile;
 
-        if (process.wait() != 0) {
-            throw TaskException("Failed to build the Docker image");
+        std::ofstream makefile{options_.makefile};
+        generate_makefile(makefile);
+
+        return options_.makefile;
+    }
+
+    void generate_makefile(std::ostream& makefile) {
+        // TODO: MAKEFILE_DIR := $(dir $(realpath $(lastword
+        // $(MAKEFILE_LIST))))
+        // TODO: pretty print
+        makefile << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
+                 << "CONTAINER_NAME = " << options_.docker_container_name
+                 << "\n"
+                 << "TARGET_DIR = " << (options_.output_dir / "out").string()
+                 << "\n\n"
+
+                 << "fg_blue  = \033[1;34m\n"
+                 << "fg_reset = \033[0m"
+
+                 << ".PHONY: all build run copy clean\n\n"
+
+                 << "all: clean copy\n\n"
+
+                 << "build:\n"
+                 << "\tdocker build -t $(IMAGE_TAG) .\n\n"
+
+                 << "run: build\n"
+                 << "\t@echo '$(fg_blue)[running]$(fg_reset)'\n"
+                 << "\tdocker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG)\n\n"
+
+                 << "copy: run\n"
+                 << "\tmkdir -p $(TARGET_DIR)\n";
+
+        for (auto& file : options_.results) {
+            makefile << "\tdocker cp -L $(CONTAINER_NAME):" << file.string()
+                     << " $(TARGET_DIR)\n";
         }
 
-        return {options_.docker_image_tag};
+        makefile << "\n"
+
+                 << "clean:\n"
+                 << "\t- docker rm $(CONTAINER_NAME)\n"
+                 << "\t- docker rmi $(IMAGE_TAG)\n"
+                 << "\trm -rf $(TARGET_DIR)\n\n";
     }
 
   private:
+    // FIXME: cherry-pick options
     Options const& options_;
-    DockerFile const& docker_file_;
 };
 
-struct RerunResult {};
-
-class RerunCommandTask : public Task<RerunResult> {
+class RunMakefileTask : public Task<int> {
   public:
-    RerunCommandTask(Options const& options, DockerImage const& image)
-        : Task{"rerun"}, options_{options}, image_{image} {}
+    RunMakefileTask(Options const& options)
+        : Task{"docker-image-builder"}, options_{options} {}
 
-    RerunResult run(Logger& log,
-                    [[maybe_unused]] std::ostream& ostream) override {
+    int run(Logger& log, [[maybe_unused]] std::ostream& ostream) override {
+        LOG_INFO(log) << "Running Makefile: " << options_.makefile;
+        auto exit_code = Command("make")
+                             .arg("-f")
+                             .arg(options_.makefile.filename())
+                             .current_dir(options_.makefile.parent_path())
+                             .spawn()
+                             .wait();
 
-        LOG_INFO(log) << "Running the created image";
-
-        std::string container_name = "test";
-
-        int res = Command("docker")
-                      .arg("run")
-                      .arg("-t")
-                      .arg("--name")
-                      .arg(container_name)
-                      .arg(image_.tag)
-                      .current_dir(options_.output_dir)
-                      .spawn()
-                      .wait();
-        if (res) {
-            throw TaskException("Docker run failed");
+        if (exit_code != 0) {
+            throw TaskException("Failed to run make");
         }
 
-        if (!options_.results.empty()) {
-            LOG_INFO(log) << "Copying back the result files";
-
-            for (auto& result : options_.results) {
-                fs::path path = result;
-
-                int res =
-                    Command("docker")
-                        .arg("cp")
-                        .arg(STR(container_name << ":" << result.string()))
-                        .arg(".")
-                        .current_dir(options_.output_dir)
-                        .spawn()
-                        .wait();
-                if (res != 0) {
-                    LOG_ERROR(log) << "Unable to copy back result: " << result;
-                }
-            }
-        }
-        return {};
+        return exit_code;
     }
 
   private:
     Options const& options_;
-    DockerImage const& image_;
 };
 
 class Tracer {
@@ -669,19 +677,13 @@ class Tracer {
         auto envir = runner_.run(CaptureEnvironmentTask{});
         auto files = runner_.run(TracingTask{options_.cmd});
         auto manifest = runner_.run(ManifestTask{options_, envir.cwd, files});
-        auto docker_file =
-            runner_.run(DockerFileBuilderTask{options_, envir, manifest});
-        auto docker_image =
-            runner_.run(DockerImageBuilder{options_, docker_file});
-        auto rerun_result =
-            runner_.run(RerunCommandTask{options_, docker_image});
 
-        (void)rerun_result;
-
-        // rerun();
-        // diff();
+        runner_.run(DockerFileBuilderTask{options_, envir, manifest});
+        runner_.run(MakefileBuilderTask{options_});
+        runner_.run(RunMakefileTask{options_});
     }
-    void configure() const {
+
+    void configure() {
         Logger& log = LogManager::root_logger();
         for (LogLevel level = LogLevel::Error; level <= LogLevel::Trace;
              --level) {
@@ -693,6 +695,13 @@ class Tracer {
         }
 
         fs::create_directory(options_.output_dir);
+
+        if (options_.dockerfile.empty()) {
+            options_.dockerfile = options_.output_dir / "Dockerfile";
+        }
+        if (options_.makefile.empty()) {
+            options_.makefile = options_.output_dir / "Makefile";
+        }
     }
 
     static inline Logger& log_ = LogManager::logger("tracer");
@@ -710,18 +719,15 @@ Options parse_cmd_args(int argc, char* argv[]) {
     parser.add_option("docker-image-tag")
         .with_help("The docker image tag")
         .with_default(opts.docker_image_tag)
-        .has_argument()
-        .with_metavar("NAME")
+        .with_argument("NAME")
         .with_callback([&](auto& arg) { opts.docker_image_tag = arg; });
     parser.add_option("result")
         .with_help("Path to a result file")
-        .has_argument()
-        .with_metavar("PATH")
+        .with_argument("PATH")
         .with_callback([&](auto& arg) { opts.results.insert(arg); });
     parser.add_option("output")
         .with_help("Path for the output")
-        .has_argument()
-        .with_metavar("PATH")
+        .with_argument("PATH")
         .with_callback([&](auto& arg) { opts.output_dir = arg; });
     parser.add_option("help")
         .with_help("Print this message")
