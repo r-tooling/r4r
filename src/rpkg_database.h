@@ -57,7 +57,7 @@ class RpkgDatabase {
                                      gsub(
                                        "\n",
                                        "",
-                                       installed.packages()[c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo", "Priority")]
+                                       installed.packages()[,c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo", "Priority")]
                                      ),
                                      sep="\U00A0",
                                      quote=FALSE,

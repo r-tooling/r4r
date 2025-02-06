@@ -721,6 +721,11 @@ Options parse_cmd_args(int argc, char* argv[]) {
         .with_default(opts.docker_image_tag)
         .with_argument("NAME")
         .with_callback([&](auto& arg) { opts.docker_image_tag = arg; });
+    parser.add_option("docker-container-name")
+        .with_help("The docker container name")
+        .with_default(opts.docker_container_name)
+        .with_argument("NAME")
+        .with_callback([&](auto& arg) { opts.docker_container_name = arg; });
     parser.add_option("result")
         .with_help("Path to a result file")
         .with_argument("PATH")

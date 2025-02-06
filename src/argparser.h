@@ -140,23 +140,27 @@ class ArgumentParser {
 
     ParseResult parse(int argc, char* argv[]) {
         args_ = {argv + 1, argv + argc};
-        if (program_name_.empty() && argc > 0) {
-            program_name_ = argv[0];
-        }
-
         size_t current_arg = 0;
         size_t positional_index = 0;
+        bool positionals = false;
 
         while (current_arg < args_.size()) {
             auto const& arg = args_[current_arg];
 
-            if (arg.starts_with("--")) {
-                parse_long_option(arg, current_arg);
-            } else if (arg.starts_with('-')) {
-                parse_short_options(arg, current_arg);
-            } else {
+            if (!positionals) {
+                if (arg.starts_with("--")) {
+                    parse_long_option(arg, current_arg);
+                } else if (arg.starts_with('-')) {
+                    parse_short_options(arg, current_arg);
+                } else {
+                    positionals = true;
+                }
+            }
+
+            if (positionals) {
                 parse_positional(arg, positional_index);
             }
+
             current_arg++;
         }
 

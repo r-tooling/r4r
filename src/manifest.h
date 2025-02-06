@@ -277,7 +277,7 @@ class DebPackagesManifest : public ManifestPart {
 
         std::vector<std::string> cmds;
         cmds.push_back("apt-get update -y");
-        cmds.push_back("apt-get install -y --no-install-recommend " +
+        cmds.push_back("apt-get install -y --no-install-recommends " +
                        pkgs_line);
 
         builder.run(cmds);
