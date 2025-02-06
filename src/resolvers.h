@@ -148,8 +148,10 @@ inline void CopyFileResolver::add_to_manifest(Manifest& manifest) const {
 class CRANPackageResolver : public Resolver {
   public:
     explicit CRANPackageResolver(
-        std::shared_ptr<RpkgDatabase const> rpkg_database)
-        : rpkg_database_(std::move(rpkg_database)) {}
+        std::shared_ptr<RpkgDatabase const> rpkg_database,
+        std::shared_ptr<DpkgDatabase const> dpkg_database)
+        : rpkg_database_{std::move(rpkg_database)},
+          dpkg_database_{std::move(dpkg_database)} {}
 
     void load_from_files(std::vector<FileInfo>& files) override;
     void add_to_manifest(Manifest& manifest) const override;
@@ -158,6 +160,7 @@ class CRANPackageResolver : public Resolver {
     static inline Logger& log_ = LogManager::logger("manifest.rpkg");
 
     std::shared_ptr<RpkgDatabase const> rpkg_database_;
+    std::shared_ptr<DpkgDatabase const> dpkg_database_;
     std::unordered_map<fs::path, RPackage const*> files_;
     std::unordered_set<RPackage const*> packages_;
 };
@@ -187,12 +190,23 @@ inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
 };
 
 inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
+    bool needs_compilation = false;
     for (auto const* pkg : rpkg_database_->get_dependencies(packages_)) {
         if (pkg->is_base) {
             continue;
         }
 
+        needs_compilation = needs_compilation || pkg->needs_compilation;
         manifest.add_cran_package(*pkg);
+    }
+
+    if (needs_compilation) {
+        auto const* be = dpkg_database_->lookup_by_name("build-essential");
+        if (be == nullptr) {
+            LOG_WARN(log_) << "Failed to find build-essential package needed "
+                              "by R packages to be built from source";
+        }
+        manifest.add_deb_package(*be);
     }
 }
 

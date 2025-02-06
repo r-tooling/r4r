@@ -21,11 +21,13 @@ struct RPackage {
     std::string version;
     std::unordered_set<std::string> dependencies;
     bool is_base = false;
+    bool needs_compilation = false;
 
     bool operator==(RPackage const& other) const {
         return name == other.name && lib_path == other.lib_path &&
                version == other.version && dependencies == other.dependencies &&
-               is_base == other.is_base;
+               is_base == other.is_base &&
+               needs_compilation == other.needs_compilation;
     }
 };
 
@@ -57,7 +59,7 @@ class RpkgDatabase {
                                      gsub(
                                        "\n",
                                        "",
-                                       installed.packages()[,c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo", "Priority")]
+                                       installed.packages()[,c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo", "Priority", "NeedsCompilation")]
                                      ),
                                      sep="\U00A0",
                                      quote=FALSE,
@@ -82,8 +84,8 @@ class RpkgDatabase {
     RpkgDatabase& operator=(RpkgDatabase const&) = delete;
 
     RPackage const* lookup_by_path(fs::path const& path) const {
-        auto r = files_.find_last_matching(path);
-        return r ? *r : nullptr;
+        auto const* r = files_.find_last_matching(path);
+        return r != nullptr ? *r : nullptr;
     }
 
     // Return all dependencies (recursively) of the given set of packages
@@ -147,7 +149,7 @@ class RpkgDatabase {
                 continue;
             }
 
-            auto tokens = string_split_n<7>(line, NBSP);
+            auto tokens = string_split_n<8>(line, NBSP);
             if (!tokens) {
                 LOG_WARN(log_)
                     << "Unable to parse installed.package() output line: "
@@ -164,10 +166,11 @@ class RpkgDatabase {
             parse_dependency_field(tokens->at(5), dependencies);
 
             bool is_base = tokens->at(6) == "base";
+            bool needs_compilation = tokens->at(7) == "yes";
 
             auto pkg = std::make_unique<RPackage>(tokens->at(0), tokens->at(1),
                                                   tokens->at(2), dependencies,
-                                                  is_base);
+                                                  is_base, needs_compilation);
             packages.emplace(pkg->name, std::move(pkg));
         }
     }

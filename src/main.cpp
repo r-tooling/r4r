@@ -298,7 +298,8 @@ class ResolveTask : public Task<Resolvers> {
         Resolvers resolvers;
         resolvers.add<IgnoreFileResolver>("ignore");
         resolvers.add<DebPackageResolver>("deb", dpkg_database);
-        resolvers.add<CRANPackageResolver>("cran", rpkg_database);
+        resolvers.add<CRANPackageResolver>("cran", rpkg_database,
+                                           dpkg_database);
         resolvers.add<CopyFileResolver>("copy", cwd_);
 
         LOG_INFO(log) << "Resolving " << files_.size() << " files";

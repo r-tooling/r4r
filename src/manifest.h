@@ -79,16 +79,18 @@ class Manifest {
     fs::path archive_;
     fs::path cran_install_script_;
     Files files_;
-    std::unordered_set<RPackage> cran_packages_;
-    std::unordered_set<DebPackage> deb_packages_;
+
+    // TODO: use pointers to databases
+    std::vector<RPackage> cran_packages_;
+    std::vector<DebPackage> deb_packages_;
 };
 
 void Manifest::add_cran_package(RPackage const& pkg) {
-    cran_packages_.insert(pkg);
+    cran_packages_.push_back(pkg);
 }
 
 void Manifest::add_deb_package(DebPackage const& pkg) {
-    deb_packages_.insert(pkg);
+    deb_packages_.push_back(pkg);
 }
 
 void Manifest::add_file(fs::path const& path, FileStatus status) {
@@ -112,10 +114,14 @@ void Manifest::write_deb_packages(DockerFileBuilder& builder) const {
     }
 
     std::vector<std::string> pkgs;
+    std::unordered_set<std::string> seen;
     pkgs.reserve(deb_packages_.size());
 
     for (auto const& pkg : deb_packages_) {
-        pkgs.push_back(pkg.name + "=" + pkg.version);
+        std::string p = pkg.name + "=" + pkg.version;
+        if (seen.insert(p).second) {
+            pkgs.push_back(p);
+        }
     }
 
     std::sort(pkgs.begin(), pkgs.end());
@@ -169,11 +175,17 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
            << "\n"
            << "# installing packages\n\n";
 
+    std::unordered_set<std::string> seen;
     // we have to install the dependencies ourselves otherwise we cannot get
     // pin the package versions. R default is to install the latest version.
     for (auto& pkg : cran_packages_) {
         // https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
         // https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
+
+        if (!seen.insert(pkg.name).second) {
+            continue;
+        }
+
         script << "install_version('" << pkg.name << "', '" << pkg.version
                << "', upgrade = 'never', dependencies = FALSE, Ncpus = cores"
                << ")" << std::endl;

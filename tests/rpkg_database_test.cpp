@@ -6,10 +6,10 @@ TEST(RPackagesTest, BasicParsing) {
     // note: beaware of the field separator being non-breaking-line
     // clang-format off
     char const* data =
-        "askpass"   NBSP "/home/user/R/library/4.1" NBSP "1.1"   NBSP "NA"           NBSP "sys (>= 2.1)"                                                         NBSP "NA" NBSP "NA\n"
-        "backports" NBSP "/home/user/R/library/4.1" NBSP "1.4.1" NBSP "R (>= 3.0.0)" NBSP "NA"                                                                   NBSP "NA" NBSP "NA\n"
-        "bslib"     NBSP "/home/user/R/library/4.1" NBSP "0.4.2" NBSP "R (>= 2.10)"  NBSP "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>= 0.1.3)" NBSP "NA" NBSP "NA\n"
-        "tools"     NBSP "/usr/lib/R/library"       NBSP "4.1.2" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "base\n";
+        "askpass"   NBSP "/home/user/R/library/4.1" NBSP "1.1"   NBSP "NA"           NBSP "sys (>= 2.1)"                                                         NBSP "NA" NBSP "NA"   NBSP "yes\n"
+        "backports" NBSP "/home/user/R/library/4.1" NBSP "1.4.1" NBSP "R (>= 3.0.0)" NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "NA\n"
+        "bslib"     NBSP "/home/user/R/library/4.1" NBSP "0.4.2" NBSP "R (>= 2.10)"  NBSP "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>= 0.1.3)" NBSP "NA" NBSP "NA"   NBSP "NA\n"
+        "tools"     NBSP "/usr/lib/R/library"       NBSP "4.1.2" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "base" NBSP "NA\n";
     // clang-format on
 
     std::istringstream iss(data);
@@ -27,6 +27,7 @@ TEST(RPackagesTest, BasicParsing) {
         ASSERT_EQ(pkg->dependencies.size(), 1u);
         EXPECT_TRUE(pkg->dependencies.contains("sys"));
         EXPECT_FALSE(pkg->is_base);
+        EXPECT_TRUE(pkg->needs_compilation);
     }
 
     // check backports
@@ -36,6 +37,7 @@ TEST(RPackagesTest, BasicParsing) {
         // "R (>= 3.0.0)" => ignore "R"
         EXPECT_EQ(pkg->dependencies.size(), 0u);
         EXPECT_FALSE(pkg->is_base);
+        EXPECT_FALSE(pkg->needs_compilation);
     }
 
     // check bslib
@@ -52,6 +54,7 @@ TEST(RPackagesTest, BasicParsing) {
         EXPECT_TRUE(pkg->dependencies.contains("sass"));
         EXPECT_TRUE(pkg->dependencies.contains("jquerylib"));
         EXPECT_FALSE(pkg->is_base);
+        EXPECT_FALSE(pkg->needs_compilation);
     }
 
     // check base
@@ -70,10 +73,11 @@ TEST(RPackagesTest, TopologicalSorting) {
     // So topological ordering for A is [C, B, A], for D alone is [D].
     // clang-format off
     char const* data = 
-        "A" NBSP "/home/user/R/library/4.1" NBSP "1.0" NBSP "B " NBSP "NA" NBSP "NA" NBSP "NA\n"
-        "B" NBSP "/home/user/R/library/4.1" NBSP "1.1" NBSP "C " NBSP "NA" NBSP "NA" NBSP "NA\n"
-        "C" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n"
-        "D" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n";
+    //  name     path                            version    <--   dependencies   -->      priority  compilation
+        "A" NBSP "/home/user/R/library/4.1" NBSP "1.0" NBSP "B " NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n"
+        "B" NBSP "/home/user/R/library/4.1" NBSP "1.1" NBSP "C " NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n"
+        "C" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n"
+        "D" NBSP "/home/user/R/library/4.1" NBSP "1.2" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA\n";
     // clang-format on
 
     std::istringstream iss(data);
