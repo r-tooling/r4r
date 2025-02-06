@@ -1,6 +1,7 @@
 #ifndef RESOLVERS_H
 #define RESOLVERS_H
 
+#include "default_image_files.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
 #include "manifest.h"
@@ -201,12 +202,18 @@ inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
     }
 
     if (needs_compilation) {
-        auto const* be = dpkg_database_->lookup_by_name("build-essential");
-        if (be == nullptr) {
-            LOG_WARN(log_) << "Failed to find build-essential package needed "
-                              "by R packages to be built from source";
+        // TODO: this is a massive simplification, but in general there is no
+        // way to figure what are the built requirements for a given package,
+        // cf. https://github.com/r-tooling/r4r/issues/6
+        for (auto const& name : {"build-essential", "r-base-dev"}) {
+            auto const* pkg = dpkg_database_->lookup_by_name(name);
+            if (pkg == nullptr) {
+                LOG_WARN(log_) << "Failed to find " << name
+                               << " package needed "
+                                  "by R packages to be built from source";
+            }
+            manifest.add_deb_package(*pkg);
         }
-        manifest.add_deb_package(*be);
     }
 }
 

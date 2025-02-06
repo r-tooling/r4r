@@ -3,19 +3,13 @@
 
 #include "archive.h"
 #include "cli.h"
-#include "default_image_files.h"
 #include "dockerfile.h"
 #include "dpkg_database.h"
-#include "file_tracer.h"
-#include "fs.h"
-#include "logger.h"
 #include "rpkg_database.h"
 #include <algorithm>
 #include <bits/types/struct_sched_param.h>
 #include <filesystem>
 #include <fstream>
-#include <memory>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -178,7 +172,7 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
     std::unordered_set<std::string> seen;
     // we have to install the dependencies ourselves otherwise we cannot get
     // pin the package versions. R default is to install the latest version.
-    for (auto& pkg : cran_packages_) {
+    for (auto const& pkg : cran_packages_) {
         // https://stat.ethz.ch/pipermail/r-devel/2018-October/076989.html
         // https://stackoverflow.com/questions/17082341/installing-older-version-of-r-package
 
@@ -192,8 +186,9 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
     }
 
     builder.copy({cran_install_script_}, "/");
-    builder.run({STR("Rscript /" << cran_install_script_.filename()),
-                 STR("rm -f /" << cran_install_script_.filename())});
+    // TODO: simplify
+    builder.run({STR("Rscript /" << cran_install_script_.filename().string()),
+                 STR("rm -f /" << cran_install_script_.filename().string())});
 }
 
 class ManifestFormat {

@@ -366,8 +366,17 @@ class ManifestTask : public Task<Manifest> {
                 << "R - mark as additional result file.")};
         // clang-format on
 
+        std::vector<std::pair<fs::path, FileStatus>> sorted_files;
+        sorted_files.reserve(files.size());
+        for (auto const& f : files) {
+            sorted_files.emplace_back(f);
+        }
+
+        std::sort(sorted_files.begin(), sorted_files.end(),
+                  [](auto& lhs, auto& rhs) { return lhs.first < rhs.first; });
+
         std::ostringstream content;
-        for (auto const& [path, status] : files) {
+        for (auto const& [path, status] : sorted_files) {
             if (status == FileStatus::Copy) {
                 content << "C " << path << "\n";
             } else {
@@ -654,7 +663,8 @@ class MakefileBuilderTask : public Task<fs::path> {
         makefile << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
                  << "CONTAINER_NAME = " << options_.docker_container_name
                  << "\n"
-                 << "TARGET_DIR = " << (options_.output_dir / "out").string()
+                 // TODO: add to settings
+                 << "TARGET_DIR = out"
                  << "\n\n"
 
                  << "fg_blue  = \033[1;34m\n"
@@ -665,11 +675,14 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "all: clean copy\n\n"
 
                  << "build:\n"
-                 << "\tdocker build -t $(IMAGE_TAG) .\n\n"
+                 << "\t@echo '$(fg_blue)[building]$(fg_reset)'\n"
+                 << "\tdocker build --progress=plain -t $(IMAGE_TAG) . 2>&1 | "
+                    "tee docker-build.log\n\n"
 
                  << "run: build\n"
                  << "\t@echo '$(fg_blue)[running]$(fg_reset)'\n"
-                 << "\tdocker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG)\n\n"
+                 << "\tdocker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) "
+                    "2>&1 | tee docker-run.log\n\n"
 
                  << "copy: run\n"
                  << "\tmkdir -p $(TARGET_DIR)\n";
