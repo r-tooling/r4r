@@ -127,11 +127,11 @@ class DockerFileBuilder {
         return *this;
     }
 
-    DockerFile build() const {
+    [[nodiscard]] DockerFile build() const {
         std::ostringstream dockerfile;
         dockerfile << "FROM " << base_image_ << "\n";
-        for (auto& cmd : commands_) {
-            dockerfile << cmd << "\n";
+        for (auto const& cmd : commands_) {
+            dockerfile << cmd << "\n\n";
         }
 
         return DockerFile{context_dir_, dockerfile.str(), copied_files_};

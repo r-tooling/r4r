@@ -16,7 +16,7 @@
 
 enum class FileStatus {
     Copy,
-    Ignore,
+    Result,
     IgnoreDidNotExistBefore,
     IgnoreNoLongerExist,
     IgnoreNotAccessible,
@@ -29,8 +29,8 @@ inline std::ostream& operator<<(std::ostream& os, FileStatus status) {
     case FileStatus::Copy:
         os << "Copy";
         break;
-    case FileStatus::Ignore:
-        os << "Ignore";
+    case FileStatus::Result:
+        os << "Result file";
         break;
     case FileStatus::IgnoreDidNotExistBefore:
         os << "Ignore, did not exist before";

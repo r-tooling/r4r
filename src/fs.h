@@ -190,11 +190,13 @@ class AbsolutePathSet {
             //                    << " - " << ec.message();
             // }
             return false;
-        } else {
-            auto [_, inserted] = paths_.insert(resolved);
-            return inserted;
         }
+
+        auto [_, inserted] = paths_.insert(resolved);
+        return inserted;
     }
+
+    bool contains(fs::path const& p) const { return paths_.contains(p); }
 
     size_t size() const { return paths_.size(); }
 

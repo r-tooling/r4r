@@ -4,6 +4,7 @@
 #include "default_image_files.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
+#include "fs.h"
 #include "manifest.h"
 #include "rpkg_database.h"
 #include <memory>
@@ -98,15 +99,18 @@ inline void DebPackageResolver::add_to_manifest(Manifest& manifest) const {
 
 class CopyFileResolver : public Resolver {
   public:
-    explicit CopyFileResolver(fs::path const& cwd) : cwd_{cwd} {}
+    explicit CopyFileResolver(fs::path const& cwd,
+                              AbsolutePathSet const& result_files)
+        : cwd_{cwd}, result_files_{result_files} {}
 
     void load_from_files(std::vector<FileInfo>& files) override;
     void add_to_manifest(Manifest& manifest) const override;
 
   private:
-    fs::path const& cwd_;
-    std::map<fs::path, FileStatus> files_;
     static inline Logger& log_ = LogManager::logger("resolver.copy");
+    fs::path const& cwd_;
+    AbsolutePathSet const& result_files_;
+    std::map<fs::path, FileStatus> files_;
 };
 
 inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
@@ -114,7 +118,9 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
         auto& path = f.path;
         FileStatus status;
 
-        if (!f.existed_before) {
+        if (result_files_.contains(path)) {
+            status = FileStatus::Result;
+        } else if (!f.existed_before) {
             status = FileStatus::IgnoreDidNotExistBefore;
         } else if (fs::equivalent(path, cwd_)) {
             status = FileStatus::IgnoreCWD;

@@ -51,48 +51,15 @@ void register_signal_handlers(std::function<void(int)> handler) {
 struct GroupInfo {
     gid_t gid;
     std::string name;
-
-    friend std::ostream& operator<<(std::ostream& os, GroupInfo const& group) {
-        os << "GroupInfo {\n";
-        prefixed_ostream(os, "  ", [&] {
-            os << "gid: " << group.gid << "\n";
-            os << "name: '" << group.name << "\n";
-        });
-        os << "}";
-        return os;
-    }
 };
 
 struct UserInfo {
     uid_t uid;
     GroupInfo group;
-
     std::string username;
     std::string home_directory;
     std::string shell;
     std::vector<GroupInfo> groups;
-
-    friend std::ostream& operator<<(std::ostream& os, UserInfo const& user) {
-        os << "UserInfo {\n";
-        prefixed_ostream(os, "  ", [&] {
-            os << "uid: " << user.uid << "\n";
-            os << "group: " << user.group << "\n";
-            os << "username: '" << user.username << "'\n";
-            os << "home_directory: '" << user.home_directory << "'\n";
-            os << "shell: '" << user.shell << "'\n";
-            os << "groups:\n";
-            if (!user.groups.empty()) {
-                prefixed_ostream(os, "  ", [&] {
-                    for (auto const& g : user.groups) {
-                        os << "- " << g << "\n";
-                    }
-                });
-            }
-            os << "\n";
-        });
-        os << "}";
-        return os;
-    }
 };
 
 UserInfo get_user_info() {
@@ -221,33 +188,13 @@ struct Options {
     fs::path dockerfile;
     fs::path makefile;
     AbsolutePathSet results;
+    bool docker_sudo_access{true};
 };
 
 struct Environment {
     fs::path cwd;
     std::unordered_map<std::string, std::string> vars;
     UserInfo user;
-
-    friend std::ostream& operator<<(std::ostream& os,
-                                    Environment const& trace) {
-        os << "Environment {\n";
-        prefixed_ostream(os, "  ", [&] {
-            os << "'\n";
-            os << "cwd: " << trace.cwd << "\n";
-            os << "env:\n";
-            prefixed_ostream(os, "  ", [&] {
-                for (const auto& [k, v] : trace.vars) {
-                    os << "- " << k << ": " << remove_ansi(v) << "\n";
-                }
-            });
-            os << "user: ";
-            prefixed_ostream(os, "  ", [&] { os << trace.user; });
-            os << "\n";
-        });
-
-        os << "}";
-        return os;
-    }
 };
 
 class CaptureEnvironmentTask : public Task<Environment> {
@@ -282,10 +229,11 @@ class CaptureEnvironmentTask : public Task<Environment> {
 
 class ResolveTask : public Task<Resolvers> {
   public:
-    explicit ResolveTask(std::vector<FileInfo>& files, fs::path cwd,
+    explicit ResolveTask(std::vector<FileInfo>& files,
+                         AbsolutePathSet const& result_files, fs::path cwd,
                          fs::path R_bin)
-        : Task{"resolve"}, files_{files}, cwd_{std::move(cwd)},
-          R_bin_{std::move(R_bin)} {}
+        : Task{"resolve"}, files_{files}, result_files_{result_files},
+          cwd_{std::move(cwd)}, R_bin_{std::move(R_bin)} {}
 
     Resolvers run(Logger& log,
                   [[maybe_unused]] std::ostream& ostream) override {
@@ -300,7 +248,7 @@ class ResolveTask : public Task<Resolvers> {
         resolvers.add<DebPackageResolver>("deb", dpkg_database);
         resolvers.add<CRANPackageResolver>("cran", rpkg_database,
                                            dpkg_database);
-        resolvers.add<CopyFileResolver>("copy", cwd_);
+        resolvers.add<CopyFileResolver>("copy", cwd_, result_files_);
 
         LOG_INFO(log) << "Resolving " << files_.size() << " files";
         resolvers.load_from_files(files_);
@@ -310,6 +258,7 @@ class ResolveTask : public Task<Resolvers> {
 
   private:
     std::vector<FileInfo>& files_;
+    AbsolutePathSet const& result_files_;
     fs::path cwd_;
     fs::path R_bin_;
 };
@@ -377,9 +326,14 @@ class ManifestTask : public Task<Manifest> {
 
         std::ostringstream content;
         for (auto const& [path, status] : sorted_files) {
-            if (status == FileStatus::Copy) {
+            switch (status) {
+            case FileStatus::Copy:
                 content << "C " << path << "\n";
-            } else {
+                break;
+            case FileStatus::Result:
+                content << "R " << path << "\n";
+                break;
+            default:
                 content << ManifestFormat::comment() << " " << path << " "
                         << ManifestFormat::comment() << " " << status << "\n";
             }
@@ -508,16 +462,13 @@ class DockerFileBuilderTask : public Task<DockerFile> {
                                   options_.output_dir};
 
         builder.env("DEBIAN_FRONTEND", "noninteractive");
-        builder.nl();
+
         set_locale(builder);
-        builder.nl();
         create_user(builder);
 
         manifest_.write_to_docker(builder);
 
-        builder.nl();
         set_environment(builder);
-        builder.nl();
         prepare_command(builder);
 
         DockerFile docker_file = builder.build();
@@ -581,6 +532,16 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         cmds.push_back(STR("chown " << user.username << ":" << user.group.name
                                     << " " << user.home_directory));
 
+        // sudo?
+        if (options_.docker_sudo_access) {
+            cmds.emplace_back("apt-get install -y sudo");
+            cmds.push_back(STR("echo '"
+                               << user.username
+                               << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
+                               << user.username));
+            cmds.push_back(STR("chmod 0440 /etc/sudoers.d/" << user.username));
+        }
+
         builder.run(cmds);
     }
 
@@ -590,7 +551,7 @@ class DockerFileBuilderTask : public Task<DockerFile> {
             return;
         }
 
-        // FIXME: add to the task
+        // FIXME: add to the environment task (possibly to manifest)
         static std::unordered_set<std::string> const ignored_env = {
             "DBUS_SESSION_BUS_ADDRES",
             "GPG_TTY",
@@ -657,46 +618,57 @@ class MakefileBuilderTask : public Task<fs::path> {
     }
 
     void generate_makefile(std::ostream& makefile) {
-        // TODO: MAKEFILE_DIR := $(dir $(realpath $(lastword
-        // $(MAKEFILE_LIST))))
-        // TODO: pretty print
-        makefile << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
-                 << "CONTAINER_NAME = " << options_.docker_container_name
-                 << "\n"
-                 // TODO: add to settings
-                 << "TARGET_DIR = out"
-                 << "\n\n"
+        // TODO: make sure it executes in the same dir as the makefile
+        // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+        makefile
+            << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
+            << "CONTAINER_NAME = " << options_.docker_container_name
+            << "\n"
+            // TODO: add to settings
+            << "TARGET_DIR = out"
+            << "\n\n"
 
-                 << "fg_blue  = \033[1;34m\n"
-                 << "fg_reset = \033[0m"
+            << "fg_blue  = \033[1;34m\n"
+            << "fg_reset = \033[0m\n"
 
-                 << ".PHONY: all build run copy clean\n\n"
+            << "docker_build = [$(fg_blue)docker-build$(fg_reset)]\n"
+            << "docker_run   = [$(fg_blue)docker-run$(fg_reset)]\n"
+            << "docker_copy  = [$(fg_blue)docker-copy$(fg_reset)]\n"
 
-                 << "all: clean copy\n\n"
+            << ".PHONY: all build run copy clean\n\n"
 
-                 << "build:\n"
-                 << "\t@echo '$(fg_blue)[building]$(fg_reset)'\n"
-                 << "\tdocker build --progress=plain -t $(IMAGE_TAG) . 2>&1 | "
-                    "tee docker-build.log\n\n"
+            << "all: clean copy\n\n"
 
-                 << "run: build\n"
-                 << "\t@echo '$(fg_blue)[running]$(fg_reset)'\n"
-                 << "\tdocker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) "
-                    "2>&1 | tee docker-run.log\n\n"
+            << "build:\n"
+            << "\t@echo '$(docker_build) build image $(IMAGE_TAG)'\n"
+            << "\t@docker build --progress=plain -t $(IMAGE_TAG) ."
+            << " 2>&1 | tee docker-build.log"
+            << " | sed 's/^/$(docker_build) /'\n\n"
 
-                 << "copy: run\n"
-                 << "\tmkdir -p $(TARGET_DIR)\n";
+            << "run: build\n"
+            << "\t@echo '$(docker_run) running container $(CONTAINER_NAME)'\n"
+            << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) "
+            << " 2>&1 | tee docker-run.log"
+            << " | sed 's/^/$(docker_run) /'\n\n"
+
+            << "copy: run\n"
+            << "\t@echo '$(docker_copy) copying files'\n"
+            << "\t@rm -f docker-copy.log\n"
+            << "\t@mkdir -p $(TARGET_DIR)\n";
 
         for (auto const& file : options_.results) {
-            makefile << "\tdocker cp -L $(CONTAINER_NAME):" << file.string()
-                     << " $(TARGET_DIR)\n";
+            makefile << "\t@echo -n '$(docker_copy)' copying file: " << file
+                     << "...\n"
+                     << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
+                     << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
+                        "failed'"
+                     << "\n";
         }
 
         makefile << "\n"
-
                  << "clean:\n"
-                 << "\t- docker rm $(CONTAINER_NAME)\n"
-                 << "\t- docker rmi $(IMAGE_TAG)\n"
+                 << "\t-docker rm $(CONTAINER_NAME)\n"
+                 << "\t-docker rmi $(IMAGE_TAG)\n"
                  << "\trm -rf $(TARGET_DIR)\n\n";
     }
 
@@ -732,8 +704,8 @@ class RunMakefileTask : public Task<int> {
 
 class Tracer {
   public:
-    explicit Tracer(Options const& options)
-        : options_{options}, runner_{std::cout} {}
+    explicit Tracer(Options options)
+        : options_{std::move(options)}, runner_{std::cout} {}
 
     void execute() {
         configure();
@@ -746,8 +718,8 @@ class Tracer {
     void run_pipeline() {
         auto envir = runner_.run(CaptureEnvironmentTask{});
         auto files = runner_.run(TracingTask{options_.cmd});
-        auto resolvers =
-            runner_.run(ResolveTask{files, envir.cwd, options_.R_bin});
+        auto resolvers = runner_.run(
+            ResolveTask{files, options_.results, envir.cwd, options_.R_bin});
         auto manifest = runner_.run(
             ManifestTask{resolvers, options_.output_dir, options_.results});
 

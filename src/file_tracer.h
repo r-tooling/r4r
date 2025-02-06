@@ -1,7 +1,6 @@
 #ifndef FILE_TRACER_H
 #define FILE_TRACER_H
 
-#include "fs.h"
 #include "logger.h"
 #include "syscall_monitor.h"
 #include <fcntl.h>
@@ -12,18 +11,6 @@ struct FileInfo {
     fs::path path;
     std::optional<std::uintmax_t> size{};
     bool existed_before{};
-
-    friend std::ostream& operator<<(std::ostream& os, FileInfo const& info) {
-        os << "FileInfo { " << info.path << ", size: ";
-        if (info.size) {
-            os << *info.size;
-        } else {
-            os << "N/A";
-        }
-        os << ", existed_before: " << info.existed_before;
-        os << "}";
-        return os;
-    }
 };
 
 class FileTracer : public SyscallListener {
