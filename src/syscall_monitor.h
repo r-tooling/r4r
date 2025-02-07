@@ -23,6 +23,8 @@ using SyscallRet = std::int64_t;
 
 class SyscallListener {
   public:
+    virtual ~SyscallListener() = default;
+
     virtual void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                                   SyscallArgs args) = 0;
     virtual void on_syscall_exit(pid_t pid, SyscallRet args, bool is_error) = 0;
