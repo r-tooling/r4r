@@ -6,7 +6,6 @@
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
-#include "util_fs.h"
 #include "logger.h"
 #include "manifest.h"
 #include "process.h"
@@ -15,6 +14,7 @@
 #include "syscall_monitor.h"
 #include "user.h"
 #include "util.h"
+#include "util_fs.h"
 
 #include <fcntl.h>
 #include <filesystem>
@@ -141,6 +141,7 @@ class CaptureEnvironmentTask : public Task<Environment> {
         envir.user = UserInfo::get_current_user_info();
 
         if (environ != nullptr) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
             for (char** env = environ; *env != nullptr; ++env) {
                 std::string s(*env);
                 size_t pos = s.find('=');
@@ -251,7 +252,9 @@ class ManifestTask : public Task<Manifest> {
         }
 
         std::sort(sorted_files.begin(), sorted_files.end(),
-                  [](auto& lhs, auto& rhs) { return lhs.first < rhs.first; });
+                  [](auto const& lhs, auto const& rhs) {
+                      return lhs.first < rhs.first;
+                  });
 
         std::ostringstream content;
         for (auto const& [path, status] : sorted_files) {

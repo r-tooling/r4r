@@ -6,12 +6,74 @@
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
+#include <span>
 #include <string>
 
-std::function<void(int)> global_signal_handler;
+static Options parse_cmd_args(std::span<char const*> args);
+static void register_error_handler(Tracer& tracer);
+static int do_main(std::span<char const*> args);
 
-void register_signal_handlers(std::function<void(int)> handler) {
-    global_signal_handler = std::move(handler);
+int main(int argc, char* argv[]) {
+    try {
+        std::span<char const*> args(const_cast<char const**>(argv), argc);
+
+        return do_main(args);
+    } catch (std::exception const& ex) {
+        std::cerr << "Unhandled exception: " << ex.what() << '\n';
+        return EXIT_FAILURE;
+    } catch (...) {
+        std::cerr << "Unhandled unknown exception." << '\n';
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+static int do_main(std::span<char const*> args) {
+    Options options = parse_cmd_args(args);
+    Tracer tracer{options};
+
+    // Interrupt signals generated in the terminal are delivered to the
+    // active process group, which here includes both parent and child. A
+    // signal manually generated and sent to an individual process (perhaps
+    // with kill) will be delivered only to that process, regardless of
+    // whether it is the parent or child. That is why we need to register a
+    // signal handler that will terminate the tracee when the tracer
+    // gets killed.
+
+    register_error_handler(tracer);
+
+    try {
+        tracer.execute();
+    } catch (TaskException& e) {
+        std::cerr << e.what() << "\n";
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+static void register_error_handler(Tracer& tracer) {
+    static std::function<void(int)> global_signal_handler =
+        [&, got_sigint = false](int sig) mutable {
+            switch (sig) {
+            case SIGTERM:
+                tracer.stop();
+                exit(1);
+            case SIGINT:
+                if (got_sigint) {
+                    std::cerr << "SIGINT twice, exiting the tracer!";
+                    exit(1);
+                } else {
+                    std::cerr << "SIGINT, stopping the current task...";
+                    tracer.stop();
+                    got_sigint = true;
+                }
+                break;
+            default:
+                UNREACHABLE();
+            }
+        };
+
     std::array signals = {SIGINT, SIGTERM};
     for (int sig : signals) {
         auto status = signal(sig, [](int sig) { global_signal_handler(sig); });
@@ -23,7 +85,7 @@ void register_signal_handlers(std::function<void(int)> handler) {
     }
 }
 
-Options parse_cmd_args(int argc, char* argv[]) {
+static Options parse_cmd_args(std::span<char const*> args) {
     Options opts;
     ArgumentParser parser{std::string(kBinaryName)};
 
@@ -61,7 +123,7 @@ Options parse_cmd_args(int argc, char* argv[]) {
         .with_callback([&](auto& arg) { opts.cmd.push_back(arg); });
 
     try {
-        parser.parse(argc, argv);
+        parser.parse(args);
         return opts;
     } catch (ArgumentParserException const& e) {
         std::cerr << kBinaryName << ": " << e.what() << '\n';
@@ -70,46 +132,5 @@ Options parse_cmd_args(int argc, char* argv[]) {
                   << '\n';
 
         exit(1);
-    }
-}
-
-int main(int argc, char* argv[]) {
-    Options options = parse_cmd_args(argc, argv);
-    Tracer tracer{options};
-
-    // Interrupt signals generated in the terminal are delivered to the
-    // active process group, which here includes both parent and child. A
-    // signal manually generated and sent to an individual process (perhaps
-    // with kill) will be delivered only to that process, regardless of
-    // whether it is the parent or child. That is why we need to register a
-    // signal handler that will terminate the tracee when the tracer
-    // gets killed.
-
-    register_signal_handlers([&, got_sigint = false](int sig) mutable {
-        switch (sig) {
-        case SIGTERM:
-            tracer.stop();
-            exit(1);
-        case SIGINT:
-            if (got_sigint) {
-                std::cerr << "SIGINT twice, exiting the tracer!";
-                exit(1);
-            } else {
-                std::cerr << "SIGINT, stopping the current task...";
-                tracer.stop();
-                got_sigint = true;
-            }
-            break;
-        default:
-            UNREACHABLE();
-        }
-    });
-
-    try {
-        tracer.execute();
-        return 0;
-    } catch (TaskException& e) {
-        std::cerr << e.what() << "\n";
-        return 1;
     }
 }

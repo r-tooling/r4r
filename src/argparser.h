@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <functional>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -138,8 +139,8 @@ class ArgumentParser {
         return positionals_.emplace_back(std::move(name));
     }
 
-    ParseResult parse(int argc, char* argv[]) {
-        args_ = {argv + 1, argv + argc};
+    ParseResult parse(std::span<char const*> argv) {
+        args_ = {argv.begin() + 1, argv.end()};
         size_t current_arg = 0;
         size_t positional_index = 0;
         bool positionals = false;

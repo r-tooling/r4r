@@ -1,5 +1,6 @@
 #include "argparser.h"
 #include <gtest/gtest.h>
+#include <stdexcept>
 #include <vector>
 
 TEST(ArgumentParserTest, BasicOptionParsing) {
@@ -10,8 +11,8 @@ TEST(ArgumentParserTest, BasicOptionParsing) {
         verbose_flag = true;
     });
 
-    char const* argv[] = {"test", "-v"};
-    auto result = parser.parse(2, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "-v"};
+    auto result = parser.parse(argv);
 
     EXPECT_TRUE(verbose_flag);
     EXPECT_TRUE(result.contains("v"));
@@ -26,8 +27,8 @@ TEST(ArgumentParserTest, PositionalArgumentParsing) {
         .with_callback([&](std::string const& val) { input_file = val; })
         .required();
 
-    char const* argv[] = {"test", "data.txt"};
-    auto result = parser.parse(2, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "data.txt"};
+    auto result = parser.parse(argv);
 
     EXPECT_EQ(input_file, "data.txt");
     EXPECT_EQ(result.get_positional("input").size(), 1);
@@ -42,8 +43,8 @@ TEST(ArgumentParserTest, OptionWithArgument) {
         .with_argument()
         .with_callback([&](std::string const& val) { log_level = val; });
 
-    char const* argv[] = {"test", "--level=3"};
-    auto result = parser.parse(2, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "--level=3"};
+    auto result = parser.parse(argv);
 
     EXPECT_EQ(log_level, "3");
     EXPECT_EQ(result.get("level"), "3");
@@ -53,8 +54,8 @@ TEST(ArgumentParserTest, DefaultValues) {
     ArgumentParser parser("Test", "test");
     parser.add_option('d', "debug").with_default("1");
 
-    char const* argv[] = {"test"};
-    auto result = parser.parse(1, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test"};
+    auto result = parser.parse(argv);
 
     EXPECT_EQ(result.get("debug"), "1");
 }
@@ -63,13 +64,14 @@ TEST(ArgumentParserTest, RequiredOptionEnforcement) {
     ArgumentParser parser("Test", "test");
     parser.add_option('r', "required").required();
 
-    char const* argv[] = {"test"};
-    EXPECT_THROW(parser.parse(1, const_cast<char**>(argv)), std::runtime_error);
+    std::vector<char const*> argv{"test"};
+    EXPECT_THROW(parser.parse(argv), std::runtime_error);
 }
 
 TEST(ArgumentParserTest, MixedArguments) {
     ArgumentParser parser("Test", "test");
-    std::string input_file, output_file;
+    std::string input_file;
+    std::string output_file;
     int verbosity = 0;
 
     parser.add_option('v', "verbose").with_callback([&](std::string const&) {
@@ -83,8 +85,8 @@ TEST(ArgumentParserTest, MixedArguments) {
     parser.add_positional("output").with_callback(
         [&](std::string const& val) { output_file = val; });
 
-    char const* argv[] = {"test", "-vi", "in.txt", "out.txt"};
-    auto result = parser.parse(4, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "-vi", "in.txt", "out.txt"};
+    auto result = parser.parse(argv);
 
     EXPECT_EQ(verbosity, 1);
     EXPECT_EQ(input_file, "in.txt");
@@ -95,15 +97,16 @@ TEST(ArgumentParserTest, MixedArguments) {
 
 TEST(ArgumentParserTest, GroupedShortOptions) {
     ArgumentParser parser("Test", "test");
-    bool a_flag = false, b_flag = false;
+    bool a_flag = false;
+    bool b_flag = false;
 
     parser.add_option('a').with_callback(
         [&](std::string const&) { a_flag = true; });
     parser.add_option('b').with_callback(
         [&](std::string const&) { b_flag = true; });
 
-    char const* argv[] = {"test", "-ab"};
-    auto result = parser.parse(2, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "-ab"};
+    auto result = parser.parse(argv);
 
     EXPECT_TRUE(a_flag);
     EXPECT_TRUE(b_flag);
@@ -113,9 +116,8 @@ TEST(ArgumentParserTest, GroupedShortOptions) {
 
 TEST(ArgumentParserTest, ErrorOnUnknownOption) {
     ArgumentParser parser("Test", "test");
-    char const* argv[] = {"test", "--unknown"};
-    EXPECT_THROW(parser.parse(2, const_cast<char**>(argv)),
-                 ArgumentParserException);
+    std::vector<char const*> argv{"test", "--unknown"};
+    EXPECT_THROW(parser.parse(argv), ArgumentParserException);
 }
 
 TEST(ArgumentParserTest, MultiplePositionals) {
@@ -125,8 +127,8 @@ TEST(ArgumentParserTest, MultiplePositionals) {
     parser.add_positional("files").required().multiple().with_callback(
         [&](std::string const& val) { files.push_back(val); });
 
-    char const* argv[] = {"test", "a.txt", "b.txt", "c.txt"};
-    auto result = parser.parse(4, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "a.txt", "b.txt", "c.txt"};
+    auto result = parser.parse(argv);
 
     ASSERT_EQ(files.size(), 3);
     EXPECT_EQ(result.get_positional("files").size(), 3);
@@ -171,8 +173,8 @@ TEST(ArgumentParserTest, ArgumentWithEqualSign) {
         .with_argument()
         .with_callback([&](std::string const& val) { config_path = val; });
 
-    char const* argv[] = {"test", "--config=settings.conf"};
-    auto result = parser.parse(2, const_cast<char**>(argv));
+    std::vector<char const*> argv{"test", "--config=settings.conf"};
+    auto result = parser.parse(argv);
 
     EXPECT_EQ(config_path, "settings.conf");
     EXPECT_EQ(result.get("config"), "settings.conf");
@@ -182,11 +184,6 @@ TEST(ArgumentParserTest, MissingRequiredPositional) {
     ArgumentParser parser("Test", "test");
     parser.add_positional("input").required();
 
-    char const* argv[] = {"test"};
-    EXPECT_THROW(parser.parse(1, const_cast<char**>(argv)), std::runtime_error);
-}
-
-int main(int argc, char** argv) {
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    std::vector<char const*> argv{"test"};
+    EXPECT_THROW(parser.parse(argv), std::runtime_error);
 }
