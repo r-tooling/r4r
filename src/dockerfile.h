@@ -2,7 +2,7 @@
 #define DOCKERFILE_H
 
 #include "common.h"
-#include "fs.h"
+#include "util_fs.h"
 #include "util.h"
 #include <sstream>
 #include <string>

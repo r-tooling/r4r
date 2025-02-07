@@ -4,8 +4,11 @@
 #include "common.h"
 #include "logger.h"
 #include "util.h"
+#include <filesystem>
+#include <linux/limits.h>
 #include <optional>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -17,8 +20,8 @@ class Pipe {
     Pipe& operator=(Pipe const&) = delete;
 
     Pipe() {
-        int fds[2];
-        if (::pipe(fds) < 0) {
+        std::array<int, 2> fds{};
+        if (::pipe(fds.data()) < 0) {
             throw make_system_error(errno, "Failed to create pipe");
         }
         read_fd = fds[0];
@@ -106,15 +109,15 @@ class Child {
     }
 
     [[nodiscard]] std::optional<int> try_wait() const {
-        int status;
+        int status = 0;
         pid_t result = waitpid(pid_, &status, WNOHANG);
         if (result == 0) {
             return {};
-        } else if (result == pid_) {
-            return status_to_exit_code(status);
-        } else {
-            throw make_system_error(errno, STR("waitpid failed for " << pid_));
         }
+        if (result == pid_) {
+            return status_to_exit_code(status);
+        }
+        throw make_system_error(errno, STR("waitpid failed for " << pid_));
     }
 
     void kill(int signal = SIGKILL) const {
@@ -126,7 +129,7 @@ class Child {
     }
 
     std::string read_stdout() {
-        if (!stdout_.read()) {
+        if (stdout_.read() == 0) {
             return "";
         }
         std::string data = read_all_from_fd(stdout_.read());
@@ -135,7 +138,7 @@ class Child {
     }
 
     std::string read_stderr() {
-        if (!stderr_.read()) {
+        if (stderr_.read() == 0) {
             return "";
         }
         std::string data = read_all_from_fd(stderr_.read());
@@ -153,20 +156,19 @@ class Child {
     static int status_to_exit_code(int status) {
         if (WIFEXITED(status)) {
             return WEXITSTATUS(status);
-        } else if (WIFSIGNALED(status)) {
-            return 126 + WTERMSIG(status);
-        } else {
-            return status;
         }
+        if (WIFSIGNALED(status)) {
+            return 126 + WTERMSIG(status);
+        }
+        return status;
     }
 
     static std::string read_all_from_fd(int fd) {
-        constexpr size_t buf_size = 4096;
-        char buffer[buf_size];
+        std::array<char, 4096> buffer{};
         std::string result;
 
         while (true) {
-            ssize_t bytes_read = ::read(fd, buffer, buf_size);
+            ssize_t bytes_read = ::read(fd, buffer.data(), buffer.size());
             if (bytes_read < 0) {
                 // retry if interrupted by signal; otherwise throw.
                 if (errno == EINTR) {
@@ -175,12 +177,12 @@ class Child {
 
                 throw make_system_error(
                     errno, STR("Failed to read from pipe: " << fd));
-            } else if (bytes_read == 0) {
+            }
+            if (bytes_read == 0) {
                 // EOF
                 break;
-            } else {
-                result.append(buffer, static_cast<size_t>(bytes_read));
             }
+            result.append(buffer.data(), static_cast<size_t>(bytes_read));
         }
         return result;
     }
@@ -216,8 +218,8 @@ class Command {
     std::vector<std::string> args_;
     std::map<std::string, std::string> envs_;
     std::optional<std::string> working_dir_;
-    std::optional<Stdio> stdout_setting_{};
-    std::optional<Stdio> stderr_setting_{};
+    std::optional<Stdio> stdout_setting_;
+    std::optional<Stdio> stderr_setting_;
 };
 
 inline Command::Command(std::string const& program) {
@@ -280,6 +282,8 @@ inline Child Command::spawn() {
             }
         }
 
+        LOG(TRACE) << "Running command " << string_join(args_, ' ');
+
         for (auto& [k, v] : envs_) {
             ::setenv(k.c_str(), v.c_str(), 1);
         }
@@ -300,8 +304,6 @@ inline Child Command::spawn() {
 
         out.close();
         err.close();
-
-        LOG(TRACE) << "Running a command " << string_join(args_, ' ');
 
         std::vector<char*> argv = collection_to_c_array(args_);
 
@@ -332,11 +334,13 @@ inline Output Command::output(bool redirect_stderr_to_stdout) {
     std::string err = child.read_stderr();
     int exit_code = child.wait();
 
-    return {std::move(out), std::move(err), exit_code};
+    return {.stdout_data = std::move(out),
+            .stderr_data = std::move(err),
+            .exit_code = exit_code};
 }
 
 struct WaitForSignalResult {
-    enum Status { Success, Timeout, Exit, Signal } status;
+    enum Status { Success, Timeout, Exit, Signal } status = Success;
     std::optional<int> detail;
 };
 
@@ -355,23 +359,24 @@ inline WaitForSignalResult wait_for_signal(pid_t pid, int sig,
 
         if (w == pid) {
             if (WIFSTOPPED(status) && WSTOPSIG(status) == sig) {
-                return {WaitForSignalResult::Success, {}};
+                return {.status = WaitForSignalResult::Success, .detail = {}};
             }
 
             if (WIFEXITED(status)) {
-                return {WaitForSignalResult::Exit, WEXITSTATUS(status)};
+                return {.status = WaitForSignalResult::Exit,
+                        .detail = WEXITSTATUS(status)};
             }
 
             if (WIFSIGNALED(status)) {
                 return {
-                    WaitForSignalResult::Signal,
-                    WTERMSIG(status),
+                    .status = WaitForSignalResult::Signal,
+                    .detail = WTERMSIG(status),
                 };
             }
         }
 
         if (clock::now() - start_time > timeout) {
-            return {WaitForSignalResult::Timeout, {}};
+            return {.status = WaitForSignalResult::Timeout, .detail = {}};
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -384,28 +389,27 @@ inline std::optional<fs::path> get_process_cwd(pid_t pid) {
     }
 
     std::string path = "/proc/" + std::to_string(pid) + "/cwd";
-    char buffer[PATH_MAX];
-    ssize_t len = readlink(path.c_str(), buffer, sizeof(buffer) - 1);
-    if (len == -1) {
+
+    std::error_code ec;
+    fs::path result = fs::read_symlink(path, ec);
+    if (ec) {
         return {};
     }
-    buffer[len] = '\0';
-    return fs::path(buffer);
+
+    return result;
 }
 
 inline std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
     fs::path path =
         fs::path("/proc") / std::to_string(pid) / "fd" / std::to_string(fd);
 
-    char resolved_path[PATH_MAX];
-    ssize_t len =
-        readlink(path.c_str(), resolved_path, sizeof(resolved_path) - 1);
-    if (len == -1) {
+    std::error_code ec;
+    fs::path result = fs::read_symlink(path, ec);
+    if (ec) {
         return {};
     }
 
-    resolved_path[len] = '\0'; // readlink does not null-terminate
-    return {std::string(resolved_path)};
+    return result;
 }
 
 #endif // PROCESS_H

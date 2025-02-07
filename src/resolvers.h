@@ -4,7 +4,7 @@
 #include "default_image_files.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
-#include "fs.h"
+#include "util_fs.h"
 #include "manifest.h"
 #include "rpkg_database.h"
 #include <memory>
@@ -113,7 +113,7 @@ class CopyFileResolver : public Resolver {
 inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
     for (auto& f : files) {
         auto& path = f.path;
-        FileStatus status;
+        FileStatus status = FileStatus::Copy;
 
         if (result_files_.contains(path)) {
             status = FileStatus::Result;

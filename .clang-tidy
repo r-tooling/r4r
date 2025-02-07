@@ -1,4 +1,5 @@
 ---
+# https://clang.llvm.org/extra/clang-tidy/checks/list.html
 Checks:  '-*,
           bugprone-*,
           clang-analyzer-*,
@@ -11,10 +12,13 @@ Checks:  '-*,
           modernize-*,
           performance-*,
           readability-*,
+          -bugprone-easily-swappable-parameters,
+          -cppcoreguidelines-avoid-magic-numbers,
           -modernize-use-ranges,
           -modernize-use-trailing-return-type,
           -readability-identifier-length,
           -readability-magic-numbers,
+          -performance-enum-size
           '
 CheckOptions:
   # https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five

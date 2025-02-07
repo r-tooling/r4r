@@ -3,7 +3,6 @@
 
 #include "common.h"
 
-#include <fstream>
 #include <ranges>
 #include <regex>
 #include <sstream>
@@ -12,6 +11,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 inline std::string escape_cmd_arg(std::string const& arg,
                                   bool single_quote = true,

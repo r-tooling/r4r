@@ -6,7 +6,7 @@
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
-#include "fs.h"
+#include "util_fs.h"
 #include "logger.h"
 #include "manifest.h"
 #include "process.h"
@@ -680,8 +680,10 @@ class Tracer {
         auto before = std::chrono::steady_clock::now();
         LOG(INFO) << " starting";
 
+        // auto* log_sink = Logger::get().set_sink<StoreSink>();
+
         if constexpr (std::is_void_v<T>) {
-            task.run(); // run() returns void.
+            task.run();
             current_task_ = nullptr;
             auto now = std::chrono::steady_clock::now();
             auto elapsed = now - before;

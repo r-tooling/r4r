@@ -1,5 +1,5 @@
-#ifndef FS_H
-#define FS_H
+#ifndef UTIL_FS_H
+#define UTIL_FS_H
 
 #include "common.h"
 #include <filesystem>
@@ -9,6 +9,8 @@
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
+
+namespace fs = std::filesystem;
 
 inline bool is_sub_path(fs::path const& path, fs::path const& base) {
     auto const mismatch =
@@ -250,4 +252,4 @@ inline std::string read_from_file(fs::path const& path) {
     return buffer.str();
 }
 
-#endif // FS_H
+#endif // UTIL_FS_H

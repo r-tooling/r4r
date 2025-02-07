@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -71,8 +72,9 @@ class ConsoleSink : public LogSink {
     void sink(LogEvent const& event) override {
         std::ostream& os =
             (event.level >= LogLevel::Warning) ? std::cerr : std::cout;
-        os << "[" << event.level << "] "
-           << " - " << event.message << "\n";
+        os << "[" << std::setw(5) << std::right << event.level << "] "
+           << " " << event.message << "\n";
+        os.flush();
     }
 };
 
@@ -125,7 +127,7 @@ class Logger {
             return true;
         }
 
-        return levels_enabled_[static_cast<size_t>(level)];
+        return levels_enabled_.at(static_cast<size_t>(level));
     }
 
     template <std::derived_from<LogSink> T, typename... Args>
@@ -136,6 +138,8 @@ class Logger {
         sink_ = std::move(unique);
         return raw;
     }
+
+    LogSink* get_sink() { return sink_.get(); }
 
     void log(LogEvent event) {
         std::lock_guard lock(mutex_);
@@ -161,7 +165,7 @@ class Logger {
         }
 
         std::lock_guard lock(mutex_);
-        levels_enabled_[static_cast<size_t>(level)] = enabled;
+        levels_enabled_.at(static_cast<size_t>(level)) = enabled;
     }
 
     static size_t constexpr kLevelsCount =
@@ -201,6 +205,7 @@ class LogMessage {
 #define ERROR LogLevel::Error
 #define FATAL LogLevel::Fatal
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define LOG(level)                                                             \
     for (bool enabled = Logger::get().is_enabled(level); enabled;              \
          enabled = false)                                                      \
