@@ -96,8 +96,8 @@ class RpkgDatabase {
         std::unordered_set<RPackage const*> visited;
         std::unordered_set<RPackage const*> in_stack;
 
-        for (auto p : pkgs) {
-            if (!visited.count(p)) {
+        for (auto const* p : pkgs) {
+            if (!visited.contains(p)) {
                 dfs_visit(p, visited, in_stack, deps);
             }
         }
@@ -105,8 +105,8 @@ class RpkgDatabase {
         std::unordered_set<RPackage const*> seen;
         std::vector<RPackage const*> result;
         result.reserve(deps.size());
-        for (auto* d : deps) {
-            if (!seen.count(d)) {
+        for (auto const* d : deps) {
+            if (!seen.contains(d)) {
                 seen.insert(d);
                 result.push_back(d);
             }
@@ -120,9 +120,8 @@ class RpkgDatabase {
         auto it = packages_.find(name);
         if (it != packages_.end()) {
             return it->second.get();
-        } else {
-            return {};
         }
+        return {};
     }
 
   private:
@@ -151,9 +150,8 @@ class RpkgDatabase {
 
             auto tokens = string_split_n<8>(line, NBSP);
             if (!tokens) {
-                LOG_WARN(log_)
-                    << "Unable to parse installed.package() output line: "
-                    << line;
+                LOG(WARN) << "Unable to parse installed.package() output line: "
+                          << line;
                 continue;
             }
 
@@ -224,9 +222,9 @@ class RpkgDatabase {
         visited.insert(pkg);
         in_stack.insert(pkg);
 
-        for (auto& d : pkg->dependencies) {
-            auto* d_pkg = find(d);
-            assert(d_pkg);
+        for (auto const& d : pkg->dependencies) {
+            auto const* d_pkg = find(d);
+            CHECK(d_pkg);
 
             if (!visited.contains(d_pkg)) {
                 dfs_visit(d_pkg, visited, in_stack, sorted);
@@ -241,7 +239,6 @@ class RpkgDatabase {
         sorted.push_back(pkg);
     }
 
-    static inline Logger& log_ = LogManager::logger("rpkg-database");
     RPackages packages_;
     FileSystemTrie<RPackage const*> files_;
 };

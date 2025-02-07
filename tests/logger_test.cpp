@@ -1,134 +1,67 @@
 #include "logger.h"
 #include <gtest/gtest.h>
-#include <memory>
-#include <regex>
-#include <sstream>
 
-TEST(LoggerTest, BasicLogging) {
-    std::stringstream s;
-    auto& log = LogManager::logger("TestLogger");
-    log.set_sink(std::make_shared<OutputStreamSink>(
-        std::make_shared<PatternLogFormatter>("{logger} {level}: {message}"),
-        s));
-    LOG_INFO(log) << "Test message";
-    ASSERT_EQ(s.str(), "TestLogger INF: Test message\n");
+class LoggerTest : public ::testing::Test {
+  protected:
+    void TearDown() override { Logger::get().set_sink<ConsoleSink>(); }
+};
+
+TEST_F(LoggerTest, BasicLogging) {
+    auto* sink = Logger::get().set_sink<StoreSink>();
+    LOG(INFO) << "Test message";
+    auto messages = sink->get_messages();
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages[0].message, "Test message");
+    EXPECT_EQ(messages[0].level, LogLevel::Info);
 }
-//
-// TEST(LoggerTest, LevelSpecificSink) {
-//     std::stringstream s1;
-//     std::stringstream s2;
-//
-//     Logger log("TestLogger", "{level} - {message}");
-//     log.set_sink(LogLevel::Info, s1);
-//     log.set_sink(LogLevel::Debug, s2);
-//
-//     LOG_INFO(log) << "message1";
-//     ASSERT_EQ(s1.str(), "INFO - message1\n");
-//     ASSERT_TRUE(s2.str().empty());
-//     LOG_DEBUG(log) << "message2";
-//     ASSERT_EQ(s1.str(), "INFO - message1\n");
-//     ASSERT_EQ(s2.str(), "DEBUG - message2\n");
-// }
-//
-// TEST(LoggerTest, PatternParsing) {
-//     std::stringstream s;
-//     Logger log("TestLogger", s);
-//
-//     log.set_pattern("[{logger}]({level}) {message}");
-//     LOG_WARN(log) << "Warning message";
-//     ASSERT_EQ(s.str(), "[TestLogger](WARN) Warning message\n");
-//
-//     s.str("");
-//
-//     log.set_pattern(
-//         "Prefix: {logger} - {level} - {message} - [{elapsed_time}]");
-//     LOG_INFO(log) << "Complex test";
-//
-//     std::regex pattern(
-//         R"(Prefix: TestLogger - INFO - Complex test - \[\d+ms\]\n)");
-//     ASSERT_TRUE(std::regex_match(s.str(), pattern));
-// }
-//
-// TEST(LoggerTest, LevelSpecificPattern) {
-//     std::stringstream s;
-//     Logger log("TestLogger", s);
-//
-//     log.set_pattern("{message}");
-//     log.set_pattern(LogLevel::Warn, "Warning: {message} ({logger})");
-//
-//     LOG_INFO(log) << "Regular message";
-//     ASSERT_EQ(s.str(), "Regular message\n");
-//     s.str("");
-//
-//     LOG_WARN(log) << "Important message";
-//     ASSERT_EQ(s.str(), "Warning: Important message (TestLogger)\n");
-// }
-//
-// TEST(LoggerTest, ColorCodes) {
-//     std::stringstream s;
-//     Logger log("TestLogger", s);
-//
-//     log.set_pattern("{fg_red}{level}{fg_reset}: {message}");
-//     LOG_INFO(log) << "Colored message";
-//
-//     std::string expected = "\033[31mINFO\033[0m: Colored message\n";
-//     ASSERT_EQ(s.str(), expected);
-// }
-//
-// TEST(LoggerTest, EscapingBraces) {
-//     std::stringstream s;
-//     Logger log("TestLogger", s);
-//
-//     log.set_pattern("{{ {level}");
-//     LOG_INFO(log) << "Test message";
-//
-//     ASSERT_EQ(s.str(), "{ INFO\n");
-//
-//     s.str("");
-//     log.set_pattern("{{{{");
-//     LOG_INFO(log) << "Test";
-//     ASSERT_EQ(s.str(), "{{\n");
-// }
-//
-// TEST(LoggerTest, EnablingAndDisablingLevels) {
-//     std::stringstream s;
-//     Logger log("TestLogger", s, "{level}");
-//
-//     auto log_all = [&log]() {
-//         LOG_DEBUG(log) << "";
-//         LOG_INFO(log) << "";
-//         LOG_WARN(log) << "";
-//         LOG_ERROR(log) << "";
-//     };
-//
-//     log_all();
-//     ASSERT_EQ(s.str(), "DEBUG\nINFO\nWARN\nERROR\n");
-//     s.str("");
-//
-//     log.disable(LogLevel::Debug);
-//     log_all();
-//     ASSERT_EQ(s.str(), "INFO\nWARN\nERROR\n");
-//     s.str("");
-//
-//     log.disable(LogLevel::Warn);
-//     log_all();
-//     ASSERT_EQ(s.str(), "INFO\nERROR\n");
-//     s.str("");
-//
-//     log.enable(LogLevel::Debug);
-//     log_all();
-//     ASSERT_EQ(s.str(), "DEBUG\nINFO\nERROR\n");
-//     s.str("");
-//
-//     log.enable(LogLevel::Warn);
-//     log_all();
-//     ASSERT_EQ(s.str(), "DEBUG\nINFO\nWARN\nERROR\n");
-//     s.str("");
-//
-//     auto fail = []() {
-//         assert(false);
-//         return "never return";
-//     };
-//     log.disable(LogLevel::Debug);
-//     LOG_DEBUG(log) << fail();
-// }
+
+TEST_F(LoggerTest, LevelFiltering) {
+    auto* sink = Logger::get().set_sink<StoreSink>();
+    Logger::get().disable(LogLevel::Debug);
+    LOG(DEBUG) << "Shouldn't appear";
+    LOG(INFO) << "Should appear";
+    auto messages = sink->get_messages();
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages[0].message, "Should appear");
+    EXPECT_EQ(messages[0].level, LogLevel::Info);
+}
+
+TEST_F(LoggerTest, FatalAborts) {
+    Logger::get().set_sink<ConsoleSink>();
+    ASSERT_DEATH({ LOG(FATAL) << "Abort!"; }, "Abort!");
+}
+
+TEST_F(LoggerTest, CheckMacro) {
+    Logger::get().set_sink<ConsoleSink>();
+    ASSERT_DEATH(
+        { CHECK(2 + 2 == 5) << "Math broken"; },
+        "Check failed: 2 \\+ 2 == 5 Math broken");
+}
+
+TEST_F(LoggerTest, SinkReplacement) {
+    auto* sink = Logger::get().set_sink<StoreSink>();
+    LOG(INFO) << "New sink";
+    ASSERT_EQ(sink->get_messages().size(), 1);
+}
+
+TEST_F(LoggerTest, EnableUpToLevel) {
+    auto* sink = Logger::get().set_sink<StoreSink>();
+    Logger::get().max_level(LogLevel::Info);
+
+    EXPECT_FALSE(Logger::get().is_enabled(LogLevel::Trace));
+    EXPECT_FALSE(Logger::get().is_enabled(LogLevel::Debug));
+    EXPECT_TRUE(Logger::get().is_enabled(LogLevel::Info));
+    EXPECT_TRUE(Logger::get().is_enabled(LogLevel::Warning));
+    EXPECT_TRUE(Logger::get().is_enabled(LogLevel::Error));
+    EXPECT_TRUE(Logger::get().is_enabled(LogLevel::Fatal));
+
+    LOG(TRACE) << "1";
+    LOG(DEBUG) << "2";
+    LOG(INFO) << "3";
+    LOG(WARN) << "4";
+
+    auto messages = sink->get_messages();
+    ASSERT_EQ(messages.size(), 2);
+    EXPECT_EQ(messages[0].message, "3");
+    EXPECT_EQ(messages[1].message, "4");
+}

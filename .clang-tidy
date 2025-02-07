@@ -1,0 +1,24 @@
+---
+Checks:  '-*,
+          bugprone-*,
+          clang-analyzer-*,
+          cppcoreguidelines-*,
+          google-default-arguments,
+          google-explicit-constructor,
+          google-runtime-operator,
+          hicpp-exception-baseclass,
+          hicpp-multiway-paths-covered,
+          modernize-*,
+          performance-*,
+          readability-*,
+          -modernize-use-ranges,
+          -modernize-use-trailing-return-type,
+          -readability-identifier-length,
+          -readability-magic-numbers,
+          '
+CheckOptions:
+  # https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five
+  # https://google.github.io/styleguide/cppguide.html#Copyable_Movable_Types
+  cppcoreguidelines-special-member-functions: 'AllowMissingMoveFunctionsWhenCopyIsDeleted'
+
+UseColor: true

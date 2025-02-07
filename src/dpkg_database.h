@@ -1,7 +1,6 @@
 #ifndef DPKG_DATABASE_H
 #define DPKG_DATABASE_H
 
-#include "common.h"
 #include "filesystem_trie.h"
 #include "logger.h"
 #include "process.h"
@@ -39,12 +38,12 @@ using DebPackages =
 
 class DpkgParser {
   public:
-    DpkgParser(std::istream& dpkg_output) : dpkg_output_{dpkg_output} {}
+    explicit DpkgParser(std::istream& dpkg_output)
+        : dpkg_output_{dpkg_output} {}
 
     DebPackages parse();
 
   private:
-    static inline Logger& log_{LogManager::logger("dpkg-parser")};
     std::istream& dpkg_output_;
 };
 
@@ -61,7 +60,9 @@ inline DebPackages DpkgParser::parse() {
 
     while (std::getline(dpkg_output_, line)) {
         std::istringstream line_stream(line);
-        std::string status, name, version;
+        std::string status;
+        std::string name;
+        std::string version;
 
         if (line_stream >> status >> std::ws >> name >> std::ws >> version) {
             if (status == "ii") { // only consider installed packages
@@ -69,7 +70,7 @@ inline DebPackages DpkgParser::parse() {
                                  std::make_unique<DebPackage>(name, version));
             }
         } else {
-            LOG_WARN(log_) << "Unexpected line from dpkg: " << line;
+            LOG(WARN) << "Unexpected line from dpkg: " << line;
         }
     }
 
@@ -98,7 +99,6 @@ class DpkgDatabase {
     process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
                               fs::path const& file, DebPackage const* pkg);
 
-    static inline Logger& log_ = LogManager::logger("dpkg-database");
     DebPackages packages_;
     FileSystemTrie<DebPackage const*> files_;
 };
@@ -142,8 +142,8 @@ inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
         if (fs::is_regular_file(list_file)) {
             process_package_list_file(trie, list_file, pkg.get());
         } else {
-            LOG_WARN(log_) << "Package " << pkg_name << " list file "
-                           << list_file << " does not exist";
+            LOG(WARN) << "Package " << pkg_name << " list file " << list_file
+                      << " does not exist";
         }
     }
 
@@ -152,8 +152,8 @@ inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
 
 inline DebPackage const*
 DpkgDatabase::lookup_by_path(fs::path const& path) const {
-    auto r = files_.find(path);
-    return r ? *r : nullptr;
+    auto const* r = files_.find(path);
+    return r != nullptr ? *r : nullptr;
 }
 
 inline DebPackage const*

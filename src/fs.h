@@ -1,14 +1,22 @@
 #ifndef FS_H
 #define FS_H
 
-#include "util.h"
+#include "common.h"
 #include <filesystem>
+#include <fstream>
 #include <queue>
 #include <random>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
+
+inline bool is_sub_path(fs::path const& path, fs::path const& base) {
+    auto const mismatch =
+        std::mismatch(path.begin(), path.end(), base.begin(), base.end());
+    return mismatch.second == base.end();
+}
 
 class SymlinkResolver {
   public:
@@ -72,7 +80,7 @@ class SymlinkResolver {
     populate_symlinks(fs::path const& root) {
         std::unordered_map<fs::path, fs::path> symlinks;
 
-        for (auto& entry : fs::directory_iterator(root)) {
+        for (auto const& entry : fs::directory_iterator(root)) {
             if (entry.is_symlink()) {
                 std::error_code ec;
                 fs::path target = fs::read_symlink(entry.path(), ec);
@@ -210,5 +218,38 @@ class AbsolutePathSet {
   private:
     std::unordered_set<fs::path> paths_;
 };
+
+template <typename T>
+inline void write_to_file(fs::path const& path, T const& data) {
+    std::ofstream outfile(path, std::ios::trunc);
+
+    if (!outfile) {
+        throw make_system_error(
+            errno, STR("Failed to open file for writing: " << path));
+    }
+
+    if (!(outfile << data)) {
+        auto e =
+            make_system_error(errno, STR("Failed to write to file: " << path));
+        outfile.close();
+        throw e;
+    }
+}
+
+inline std::string read_from_file(fs::path const& path) {
+    std::ifstream infile(path);
+    if (!infile) {
+        throw make_system_error(
+            errno, STR("Failed to open file for reading: " << path));
+    }
+
+    std::ostringstream buffer;
+    buffer << infile.rdbuf();
+    if (infile.fail() && !infile.eof()) {
+        throw make_system_error(errno,
+                                STR("Failed to read from file: " << path));
+    }
+    return buffer.str();
+}
 
 #endif // FS_H

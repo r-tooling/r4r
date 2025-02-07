@@ -54,8 +54,6 @@ class DebPackageResolver : public Resolver {
     void add_to_manifest(Manifest& manifest) const override;
 
   private:
-    static inline Logger& log_ = LogManager::logger("manifest.dpkg");
-
     std::shared_ptr<DpkgDatabase const> dpkg_database_;
     std::unordered_map<fs::path, DebPackage const*> files_;
     std::unordered_set<DebPackage const*> packages_;
@@ -70,10 +68,10 @@ inline void DebPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     auto resolved = [&](FileInfo const& info) {
         auto path = info.path;
         for (auto const& p : symlink_resolver.resolve_symlinks(path)) {
-            LOG_TRACE(log_) << "resolving " << path;
+            LOG(TRACE) << "resolving " << path;
 
             if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
-                LOG_DEBUG(log_) << "resolved: " << path << " to: " << pkg->name;
+                LOG(DEBUG) << "resolved: " << path << " to: " << pkg->name;
 
                 auto it = packages_.insert(pkg);
                 files_.insert_or_assign(p, *it.first);
@@ -87,8 +85,8 @@ inline void DebPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     };
 
     std::erase_if(files, resolved);
-    LOG_INFO(log_) << "Resolved " << files_.size() << " files to "
-                   << packages_.size() << " debian packages";
+    LOG(INFO) << "Resolved " << files_.size() << " files to "
+              << packages_.size() << " debian packages";
 }
 
 inline void DebPackageResolver::add_to_manifest(Manifest& manifest) const {
@@ -107,7 +105,6 @@ class CopyFileResolver : public Resolver {
     void add_to_manifest(Manifest& manifest) const override;
 
   private:
-    static inline Logger& log_ = LogManager::logger("resolver.copy");
     fs::path const& cwd_;
     AbsolutePathSet const& result_files_;
     std::map<fs::path, FileStatus> files_;
@@ -138,7 +135,7 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
             }
         }
 
-        LOG_DEBUG(log_) << "resolved: " << path << " to: " << status;
+        LOG(DEBUG) << "resolved: " << path << " to: " << status;
 
         // TODO: check size / sha1
 
@@ -164,8 +161,6 @@ class CRANPackageResolver : public Resolver {
     void add_to_manifest(Manifest& manifest) const override;
 
   private:
-    static inline Logger& log_ = LogManager::logger("manifest.rpkg");
-
     std::shared_ptr<RpkgDatabase const> rpkg_database_;
     std::shared_ptr<DpkgDatabase const> dpkg_database_;
     std::unordered_map<fs::path, RPackage const*> files_;
@@ -180,7 +175,7 @@ inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
         for (auto const& p : symlink_resolved.resolve_symlinks(path)) {
             if (auto const* pkg = rpkg_database_->lookup_by_path(p); pkg) {
 
-                LOG_DEBUG(log_) << "resolved: " << path << " to: " << pkg->name;
+                LOG(DEBUG) << "resolved: " << path << " to: " << pkg->name;
 
                 auto it = packages_.insert(pkg);
                 files_.insert_or_assign(p, *it.first);
@@ -192,8 +187,8 @@ inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     };
 
     std::erase_if(files, resolved);
-    LOG_INFO(log_) << "Resolved " << files_.size() << " files to "
-                   << packages_.size() << " R packages";
+    LOG(INFO) << "Resolved " << files_.size() << " files to "
+              << packages_.size() << " R packages";
 };
 
 inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
@@ -214,9 +209,9 @@ inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
         for (auto const& name : {"build-essential", "r-base-dev"}) {
             auto const* pkg = dpkg_database_->lookup_by_name(name);
             if (pkg == nullptr) {
-                LOG_WARN(log_) << "Failed to find " << name
-                               << " package needed "
-                                  "by R packages to be built from source";
+                LOG(WARN) << "Failed to find " << name
+                          << " package needed "
+                             "by R packages to be built from source";
             }
             manifest.add_deb_package(*pkg);
         }
@@ -229,7 +224,6 @@ class IgnoreFileResolver : public Resolver {
 
   private:
     static FileSystemTrie<ImageFileInfo> load_default_files();
-    static inline Logger& log_ = LogManager::logger("manifest.ignore");
     static inline std::string const kImageName = "ubuntu:22.04";
 
     static inline fs::path const kImageFileCache = []() {
@@ -265,7 +259,7 @@ inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
     std::erase_if(files, [&](FileInfo const& info) {
         auto const& path = info.path;
         if (*kIgnoredFiles.find_last_matching(path)) {
-            LOG_DEBUG(log_) << "resolving: " << path << " to: ignored";
+            LOG(DEBUG) << "resolving: " << path << " to: ignored";
             return true;
         }
         return false;
@@ -277,8 +271,8 @@ inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
         for (auto const& p : resolver.resolve_symlinks(path)) {
             if (auto const* f = kDefaultImageFiles.find(p); f) {
                 // TODO: check the size, perm, ...
-                LOG_DEBUG(log_)
-                    << "resolving: " << path << " to: ignored - image default";
+                LOG(DEBUG) << "resolving: " << path
+                           << " to: ignored - image default";
                 return true;
             }
         }
@@ -294,7 +288,7 @@ inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
         for (auto const& d : fontconfig_dirs) {
             if (is_sub_path(path, d)) {
                 if (path.filename() == ".uuid") {
-                    LOG_DEBUG(log_) << "resolving: " << path << " to: ignored";
+                    LOG(DEBUG) << "resolving: " << path << " to: ignored";
                     return true;
                 }
             }
@@ -309,9 +303,8 @@ inline FileSystemTrie<ImageFileInfo> IgnoreFileResolver::load_default_files() {
             return DefaultImageFiles::from_file(kImageFileCache);
         }
 
-        LOG_INFO(log_) << "Default image file cache " << kImageFileCache
-                       << " does not exists, creating from image "
-                       << kImageName;
+        LOG(INFO) << "Default image file cache " << kImageFileCache
+                  << " does not exists, creating from image " << kImageName;
 
         auto files =
             DefaultImageFiles::from_image(kImageName, kBlacklistPatterns);
@@ -320,13 +313,13 @@ inline FileSystemTrie<ImageFileInfo> IgnoreFileResolver::load_default_files() {
             std::ofstream out{kImageFileCache};
             files.save(out);
         } catch (std::exception const& e) {
-            LOG_WARN(log_) << "Unable to store default image file list to "
-                           << kImageFileCache << ": " << e.what();
+            LOG(WARN) << "Unable to store default image file list to "
+                      << kImageFileCache << ": " << e.what();
         }
         return files;
     }();
 
-    LOG_DEBUG(log_) << "Loaded " << default_files.size() << " default files";
+    LOG(DEBUG) << "Loaded " << default_files.size() << " default files";
 
     FileSystemTrie<ImageFileInfo> trie;
     for (auto const& info : default_files.files()) {

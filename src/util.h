@@ -9,7 +9,6 @@
 #include <sstream>
 #include <string>
 #include <sys/wait.h>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -27,10 +26,10 @@ inline std::string escape_cmd_arg(std::string const& arg,
     bool needs_quoting = false;
     std::string quoted_arg;
     for (char c : arg) {
-        if (std::isspace(c) || c == '\'' || c == '\\' || c == '"' || c == '$' ||
-            c == '`' || c == ';' || c == '&' || c == '|' || c == '*' ||
-            c == '?' || c == '[' || c == ']' || c == '(' || c == ')' ||
-            c == '<' || c == '>' || c == '#' || c == '!') {
+        if ((std::isspace(c) != 0) || c == '\'' || c == '\\' || c == '"' ||
+            c == '$' || c == '`' || c == ';' || c == '&' || c == '|' ||
+            c == '*' || c == '?' || c == '[' || c == ']' || c == '(' ||
+            c == ')' || c == '<' || c == '>' || c == '#' || c == '!') {
             needs_quoting = true;
         }
 
@@ -46,54 +45,6 @@ inline std::string escape_cmd_arg(std::string const& arg,
     }
 
     return quoted_arg;
-}
-
-inline bool is_sub_path(fs::path const& path, fs::path const& base) {
-    auto const mismatch =
-        std::mismatch(path.begin(), path.end(), base.begin(), base.end());
-    return mismatch.second == base.end();
-}
-
-inline bool is_executable(fs::path const& p) {
-    if (!fs::exists(p) || !fs::is_regular_file(p)) {
-        return false;
-    }
-
-    if (access(p.c_str(), X_OK) == 0) {
-        return true;
-    }
-
-    return false;
-}
-
-inline std::optional<fs::path> get_process_cwd(pid_t pid) {
-    if (pid <= 0) {
-        throw std::invalid_argument("Invalid PID.");
-    }
-
-    std::string path = "/proc/" + std::to_string(pid) + "/cwd";
-    char buffer[PATH_MAX];
-    ssize_t len = readlink(path.c_str(), buffer, sizeof(buffer) - 1);
-    if (len == -1) {
-        return {};
-    }
-    buffer[len] = '\0';
-    return fs::path(buffer);
-}
-
-inline std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
-    fs::path path =
-        fs::path("/proc") / std::to_string(pid) / "fd" / std::to_string(fd);
-
-    char resolved_path[PATH_MAX];
-    ssize_t len =
-        readlink(path.c_str(), resolved_path, sizeof(resolved_path) - 1);
-    if (len == -1) {
-        return {};
-    }
-
-    resolved_path[len] = '\0'; // readlink does not null-terminate
-    return {std::string(resolved_path)};
 }
 
 inline std::vector<std::string> string_split(std::string const& str,
@@ -132,37 +83,35 @@ inline std::string remove_ansi(std::string const& input) {
 
 inline fs::path get_user_cache_dir() {
     // assume Linux/Unix
-    char const* xdgCacheHome = std::getenv("XDG_CACHE_HOME");
+    char const* xdg = std::getenv("XDG_CACHE_HOME");
 
-    if (xdgCacheHome) {
-        return {xdgCacheHome};
+    if (xdg != nullptr) {
+        return {xdg};
     }
 
     char const* home = std::getenv("HOME");
-    if (home) {
+    if (home != nullptr) {
         return fs::path(home) / ".cache";
-    } else {
-        throw std::runtime_error("Unable to get user HOME directory");
     }
+    throw std::runtime_error("Unable to get user HOME directory");
 }
 
 inline std::string string_trim(std::string const& s) {
     auto start = s.begin();
     auto end = s.end();
 
-    while (start != end && std::isspace(*start)) {
+    while (start != end && (std::isspace(*start) != 0)) {
         ++start;
     }
 
-    while (end > start && std::isspace(*(end - 1))) {
+    while (end > start && (std::isspace(*(end - 1)) != 0)) {
         --end;
     }
 
     if (start < end) {
         return {start, end};
-    } else {
-        return {};
     }
+    return {};
 }
 
 template <typename T, typename S>
@@ -175,7 +124,6 @@ inline void print_collection(std::ostream& os, T const& collection,
     auto it = std::begin(collection);
     auto end = std::end(collection);
 
-    // print the first element without a separator
     os << *it++;
     for (; it != end; ++it) {
         os << sep << *it;
@@ -208,49 +156,6 @@ inline std::vector<char*> collection_to_c_array(Collection const& container) {
     xs.push_back(nullptr);
 
     return xs;
-}
-
-struct WaitForSignalResult {
-    enum Status { Success, Timeout, Exit, Signal } status;
-    std::optional<int> detail;
-};
-
-inline WaitForSignalResult wait_for_signal(pid_t pid, int sig,
-                                           std::chrono::milliseconds timeout) {
-    using clock = std::chrono::steady_clock;
-    auto start_time = clock::now();
-
-    while (true) {
-        int status = 0;
-        pid_t w = waitpid(pid, &status, WNOHANG);
-
-        if (w < 0) {
-            throw make_system_error(errno, "waitpid");
-        }
-
-        if (w == pid) {
-            if (WIFSTOPPED(status) && WSTOPSIG(status) == sig) {
-                return {WaitForSignalResult::Success, {}};
-            }
-
-            if (WIFEXITED(status)) {
-                return {WaitForSignalResult::Exit, WEXITSTATUS(status)};
-            }
-
-            if (WIFSIGNALED(status)) {
-                return {
-                    WaitForSignalResult::Signal,
-                    WTERMSIG(status),
-                };
-            }
-        }
-
-        if (clock::now() - start_time > timeout) {
-            return {WaitForSignalResult::Timeout, {}};
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
 }
 
 template <typename Duration>
@@ -318,39 +223,6 @@ std::optional<std::array<std::string, N>> inline string_split_n(
     }
 
     return result;
-}
-
-template <typename T>
-inline void write_to_file(fs::path const& path, T const& data) {
-    std::ofstream outfile(path, std::ios::trunc);
-
-    if (!outfile) {
-        throw make_system_error(
-            errno, STR("Failed to open file for writing: " << path));
-    }
-
-    if (!(outfile << data)) {
-        auto e =
-            make_system_error(errno, STR("Failed to write to file: " << path));
-        outfile.close();
-        throw e;
-    }
-}
-
-inline std::string read_from_file(fs::path const& path) {
-    std::ifstream infile(path);
-    if (!infile) {
-        throw make_system_error(
-            errno, STR("Failed to open file for reading: " << path));
-    }
-
-    std::ostringstream buffer;
-    buffer << infile.rdbuf();
-    if (infile.fail() && !infile.eof()) {
-        throw make_system_error(errno,
-                                STR("Failed to read from file: " << path));
-    }
-    return buffer.str();
 }
 
 #endif // UTIL_H

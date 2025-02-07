@@ -2,10 +2,10 @@
 #define MANIFEST_H
 
 #include "archive.h"
-#include "cli.h"
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "rpkg_database.h"
+#include "util_io.h"
 #include <algorithm>
 #include <bits/types/struct_sched_param.h>
 #include <filesystem>
@@ -130,7 +130,7 @@ void Manifest::write_deb_packages(DockerFileBuilder& builder) const {
 
 inline void Manifest::write_files(DockerFileBuilder& builder) const {
     std::vector<fs::path> copy_files;
-    for (auto& [path, status] : files_) {
+    for (auto const& [path, status] : files_) {
         if (status != FileStatus::Copy) {
             continue;
         }
@@ -316,15 +316,16 @@ class ManifestFormat {
     static bool is_valid_section_name(std::string_view name) {
         if (name.empty()) {
             return false;
-        } else if (!std::isalpha(name[0]) && name[0] != '_') {
+        }
+        if ((std::isalpha(name[0]) == 0) && name[0] != '_') {
             return false;
-        } else {
-            for (char ch : name) {
-                if (!std::isalnum(ch) && ch != '_') {
-                    return false;
-                }
+        }
+        for (char ch : name) {
+            if ((std::isalnum(ch) == 0) && ch != '_') {
+                return false;
             }
         }
+
         return true;
     }
 

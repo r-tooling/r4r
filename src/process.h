@@ -6,6 +6,7 @@
 #include "util.h"
 #include <optional>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -80,7 +81,7 @@ class Output {
 };
 
 inline void Output::check_success(std::string const& message) const {
-    if (exit_code) {
+    if (exit_code != 0) {
         throw std::runtime_error(STR(message << " (exit code: " << exit_code
                                              << ")\nstderr:\n"
                                              << stderr_data));
@@ -212,7 +213,6 @@ class Command {
     Output output(bool redirect_stderr_to_stdout = false);
 
   private:
-    static inline Logger& log_ = LogManager::logger("command");
     std::vector<std::string> args_;
     std::map<std::string, std::string> envs_;
     std::optional<std::string> working_dir_;
@@ -230,7 +230,7 @@ inline Command& Command::arg(std::string const& arg) {
 }
 
 inline Command& Command::args(std::vector<std::string> const& args) {
-    for (auto& a : args) {
+    for (auto const& a : args) {
         args_.push_back(a);
     }
     return *this;
@@ -301,7 +301,7 @@ inline Child Command::spawn() {
         out.close();
         err.close();
 
-        LOG_TRACE(log_) << "Running a command " << string_join(args_, ' ');
+        LOG(TRACE) << "Running a command " << string_join(args_, ' ');
 
         std::vector<char*> argv = collection_to_c_array(args_);
 
@@ -333,6 +333,79 @@ inline Output Command::output(bool redirect_stderr_to_stdout) {
     int exit_code = child.wait();
 
     return {std::move(out), std::move(err), exit_code};
+}
+
+struct WaitForSignalResult {
+    enum Status { Success, Timeout, Exit, Signal } status;
+    std::optional<int> detail;
+};
+
+inline WaitForSignalResult wait_for_signal(pid_t pid, int sig,
+                                           std::chrono::milliseconds timeout) {
+    using clock = std::chrono::steady_clock;
+    auto start_time = clock::now();
+
+    while (true) {
+        int status = 0;
+        pid_t w = waitpid(pid, &status, WNOHANG);
+
+        if (w < 0) {
+            throw make_system_error(errno, "waitpid");
+        }
+
+        if (w == pid) {
+            if (WIFSTOPPED(status) && WSTOPSIG(status) == sig) {
+                return {WaitForSignalResult::Success, {}};
+            }
+
+            if (WIFEXITED(status)) {
+                return {WaitForSignalResult::Exit, WEXITSTATUS(status)};
+            }
+
+            if (WIFSIGNALED(status)) {
+                return {
+                    WaitForSignalResult::Signal,
+                    WTERMSIG(status),
+                };
+            }
+        }
+
+        if (clock::now() - start_time > timeout) {
+            return {WaitForSignalResult::Timeout, {}};
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+inline std::optional<fs::path> get_process_cwd(pid_t pid) {
+    if (pid <= 0) {
+        throw std::invalid_argument("Invalid PID.");
+    }
+
+    std::string path = "/proc/" + std::to_string(pid) + "/cwd";
+    char buffer[PATH_MAX];
+    ssize_t len = readlink(path.c_str(), buffer, sizeof(buffer) - 1);
+    if (len == -1) {
+        return {};
+    }
+    buffer[len] = '\0';
+    return fs::path(buffer);
+}
+
+inline std::optional<fs::path> resolve_fd_filename(pid_t pid, int fd) {
+    fs::path path =
+        fs::path("/proc") / std::to_string(pid) / "fd" / std::to_string(fd);
+
+    char resolved_path[PATH_MAX];
+    ssize_t len =
+        readlink(path.c_str(), resolved_path, sizeof(resolved_path) - 1);
+    if (len == -1) {
+        return {};
+    }
+
+    resolved_path[len] = '\0'; // readlink does not null-terminate
+    return {std::string(resolved_path)};
 }
 
 #endif // PROCESS_H

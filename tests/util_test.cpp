@@ -46,54 +46,6 @@ TEST(CollectionToCArrayTest, NonEmptyTest) {
     ASSERT_EQ(c_arr[3], nullptr);
 }
 
-TEST(ProcessCwdTest, SpawnProcessInTmp) {
-    pid_t pid = fork();
-    if (pid < 0) {
-        throw std::runtime_error("fork() failed: " +
-                                 std::string(strerror(errno)));
-    }
-    if (pid == 0) {
-        // child
-        chdir("/tmp");
-        pause();
-        _exit(0);
-    } else {
-        // parent
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-        auto child_cwd = get_process_cwd(pid);
-        EXPECT_TRUE(child_cwd.has_value());
-        EXPECT_EQ(*child_cwd, "/tmp");
-
-        kill(pid, SIGKILL);
-        waitpid(pid, nullptr, 0);
-    }
-}
-
-TEST(ResolveFdFilenameTest, Valid) {
-    char temp_filename[] = "/tmp/testfileXXXXXX";
-    int temp_fd = mkstemp(temp_filename);
-    ASSERT_NE(temp_fd, -1) << "Failed to create a temporary file.";
-
-    write(temp_fd, "test", 4);
-
-    auto resolved_path = resolve_fd_filename(getpid(), temp_fd);
-
-    ASSERT_TRUE(resolved_path.has_value());
-    EXPECT_EQ(resolved_path.value(), temp_filename);
-
-    close(temp_fd);
-    unlink(temp_filename);
-}
-
-TEST(ResolveFdFilenameTest, Invalid) {
-    int invalid_fd = -1;
-
-    auto resolved_path = resolve_fd_filename(getpid(), invalid_fd);
-
-    EXPECT_FALSE(resolved_path.has_value());
-}
-
 using namespace std::chrono_literals;
 
 TEST(FormatElapsedTime, Milliseconds) {

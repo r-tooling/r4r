@@ -93,7 +93,6 @@ class SyscallMonitor {
     static std::function<int()>
     spawn_process(std::vector<std::string> const& cmd);
 
-    static inline Logger& log_ = LogManager::logger("syscall-monitor");
     std::function<int()> tracee_;
     SyscallListener& listener_;
     std::ostream* stdout_{&std::cout};
@@ -119,9 +118,8 @@ inline SyscallMonitor::Result SyscallMonitor::start() {
 
     if (tracee_pid_ != 0) {
         return process_tracer(out, err);
-    } else {
-        process_tracee(out, err);
     }
+    process_tracee(out, err);
 }
 
 inline void SyscallMonitor::process_tracee(Pipe& out, Pipe& err) const {
@@ -216,10 +214,10 @@ SyscallMonitor::read_string_from_process(pid_t pid, uint64_t remote_addr,
             read_next -= page_offset;
         }
 
-        auto local_start = buffer + read_total;
+        auto* local_start = buffer + read_total;
         iovec local_iov{.iov_base = local_start, .iov_len = read_next};
 
-        auto remote_start = reinterpret_cast<void*>(remote_addr + read_total);
+        auto* remote_start = reinterpret_cast<void*>(remote_addr + read_total);
         iovec remote_iov{.iov_base = remote_start, .iov_len = read_next};
 
         errno = 0;
@@ -231,12 +229,14 @@ SyscallMonitor::read_string_from_process(pid_t pid, uint64_t remote_addr,
                 // peekdata that is however pretty slow as you can read just
                 // 8 bytes at a time
                 throw make_system_error(errno, "process_vm_readv");
-            } else if (errno == EFAULT) {
+            }
+
+            if (errno == EFAULT) {
                 // we can't read further; return what we have so far
                 break;
-            } else {
-                throw make_system_error(errno, "process_vm_readv");
             }
+
+            throw make_system_error(errno, "process_vm_readv");
         }
         read_total += read;
 
@@ -352,8 +352,8 @@ inline void SyscallMonitor::handle_stop(pid_t pid, int status) {
         // try to set up tracing
         pid_t child_pid = 0;
         if (ptrace(PTRACE_GETEVENTMSG, pid, nullptr, &child_pid) == -1) {
-            LOG_WARN(log_) << "Failed to get pid of the new child: "
-                           << strerror(errno);
+            LOG(WARN) << "Failed to get pid of the new child: "
+                      << strerror(errno);
         } else {
             set_ptrace_options(child_pid);
         }
@@ -381,7 +381,7 @@ inline void SyscallMonitor::handle_syscall(pid_t pid) {
     if (si.op == PTRACE_SYSCALL_INFO_ENTRY) {
         listener_.on_syscall_entry(pid, si.entry.nr, si.entry.args);
     } else if (si.op == PTRACE_SYSCALL_INFO_EXIT) {
-        listener_.on_syscall_exit(pid, si.exit.rval, si.exit.is_error);
+        listener_.on_syscall_exit(pid, si.exit.rval, si.exit.is_error != 0U);
     }
 }
 
@@ -393,7 +393,8 @@ inline void SyscallMonitor::forward_output(int read_fd, std::ostream& os,
         ssize_t bytes = ::read(read_fd, buffer.data(), buffer.size());
         if (bytes == 0) {
             break; // EOF
-        } else if (bytes < 0) {
+        }
+        if (bytes < 0) {
             if (errno == EINTR) {
                 continue; // retry
             }
@@ -410,7 +411,7 @@ inline std::function<int()>
 SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
     return [&cmd]() -> int {
         auto c_args = collection_to_c_array(cmd);
-        auto& program = cmd.front();
+        const auto& program = cmd.front();
         execvp(program.c_str(), c_args.data());
 
         std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";

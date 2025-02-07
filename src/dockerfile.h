@@ -2,6 +2,7 @@
 #define DOCKERFILE_H
 
 #include "common.h"
+#include "fs.h"
 #include "util.h"
 #include <sstream>
 #include <string>
@@ -16,11 +17,13 @@ class DockerFile {
           dockerfile_{std::move(dockerfile)},
           copied_files_{std::move(copied_files)} {}
 
-    std::string const& dockerfile() const { return dockerfile_; }
+    [[nodiscard]] std::string const& dockerfile() const { return dockerfile_; }
 
-    std::vector<fs::path> const& copied_files() const { return copied_files_; }
+    [[nodiscard]] std::vector<fs::path> const& copied_files() const {
+        return copied_files_;
+    }
 
-    fs::path const& context_dir() const { return context_dir_; }
+    [[nodiscard]] fs::path const& context_dir() const { return context_dir_; }
 
     void save(fs::path const& path) const {
         std::ofstream file{path};
@@ -38,7 +41,8 @@ class DockerFile {
 class DockerFileBuilder {
   public:
     explicit DockerFileBuilder(std::string base_image, fs::path context_dir)
-        : base_image_{std::move(base_image)}, context_dir_{context_dir} {}
+        : base_image_{std::move(base_image)},
+          context_dir_{std::move(context_dir)} {}
 
     DockerFileBuilder& run(std::string const& command) {
         commands_.emplace_back("RUN " + command);
@@ -53,7 +57,7 @@ class DockerFileBuilder {
 
     DockerFileBuilder& cmd(std::vector<std::string> const& commands) {
         std::string cmd;
-        for (size_t i = 0; auto& c : commands) {
+        for (size_t i = 0; auto const& c : commands) {
             cmd += escape_cmd_arg(c, false, true);
             if (++i < commands.size()) {
                 cmd += ", ";

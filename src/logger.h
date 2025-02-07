@@ -1,452 +1,214 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include "common.h"
-#include <algorithm>
 #include <array>
-#include <cassert>
-#include <chrono>
-#include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
-#include <optional>
-#include <ostream>
+#include <mutex>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
-using namespace std::string_view_literals;
-using namespace std::string_literals;
+enum class LogLevel { Trace, Debug, Info, Warning, Error, Fatal };
 
-using logger_clock = std::chrono::steady_clock;
+inline LogLevel& operator++(LogLevel& level) {
+    if (level < LogLevel::Fatal) {
+        level = static_cast<LogLevel>(static_cast<int>(level) + 1);
+    }
+    return level;
+}
 
-#define LOG_LEVELS                                                             \
-    X(Trace, "TRC")                                                            \
-    X(Debug, "DBG")                                                            \
-    X(Info, "INF")                                                             \
-    X(Warn, "WRN")                                                             \
-    X(Error, "ERR")
-
-enum class LogLevel {
-#define X(a, b) a,
-    LOG_LEVELS
-#undef X
-};
-
-inline auto operator--(LogLevel& level) -> LogLevel& {
-    if (level != LogLevel::Trace) {
+inline LogLevel& operator--(LogLevel& level) {
+    if (level > LogLevel::Trace) {
         level = static_cast<LogLevel>(static_cast<int>(level) - 1);
     }
     return level;
 }
 
-constexpr size_t kLogLevels = static_cast<size_t>(LogLevel::Error) + 1;
-
 struct LogEvent {
-    std::string_view logger_name;
     LogLevel level;
-    logger_clock::time_point timestamp;
-    std::string message;
+    std::string_view message;
+    std::string_view filename;
+    int line;
 };
 
-#define LOG_PATTER_TOKEN_KINDS                                                 \
-    X(Text, text)                                                              \
-    X(Logger, logger)                                                          \
-    X(Level, level)                                                            \
-    X(ElapsedTime, elapsed_time)                                               \
-    X(Message, message)                                                        \
-    X(Color, color)
-
-class LogPatternToken {
-  public:
-    enum class Kind {
-#define X(a, b) a,
-        LOG_PATTER_TOKEN_KINDS
-#undef X
+namespace std {
+inline std::ostream& operator<<(std::ostream& os, LogLevel level) {
+    switch (level) {
+    case LogLevel::Trace:
+        os << "TRACE";
+        break;
+    case LogLevel::Debug:
+        os << "DEBUG";
+        break;
+    case LogLevel::Info:
+        os << "INFO";
+        break;
+    case LogLevel::Warning:
+        os << "WARN";
+        break;
+    case LogLevel::Error:
+        os << "ERROR";
+        break;
+    case LogLevel::Fatal:
+        os << "FATAL";
+        break;
     };
-
-    explicit LogPatternToken(Kind kind) : kind_{kind} {}
-    explicit LogPatternToken(Kind kind, std::string payload)
-        : kind_{kind}, payload_{std::move(payload)} {}
-
-    static std::optional<LogPatternToken> from_string(std::string_view str) {
-        if (str.starts_with("fg_")) {
-            auto color = str.substr(3);
-            auto it = fg_colors_.find(color);
-            if (it != fg_colors_.end()) {
-                return LogPatternToken{Kind::Color, std::string(it->second)};
-            }
-        }
-
-        auto const* it = std::find(keywords_.begin(), keywords_.end(), str);
-        if (it != keywords_.end() && *it != "color"sv) {
-            auto kind = static_cast<Kind>(std::distance(keywords_.begin(), it));
-            return LogPatternToken{kind};
-        }
-
-        return {};
-    }
-
-    [[nodiscard]] Kind kind() const { return kind_; }
-
-    [[nodiscard]] std::string payload() const {
-        if (payload_.has_value()) {
-            return *payload_;
-        }
-        throw std::runtime_error("Token does not have payload");
-    }
-
-  private:
-    Kind kind_;
-
-    // the TEXT, COLOR kind has content
-    std::optional<std::string> payload_;
-
-    inline static std::array const keywords_ = {
-#define X(a, b) #b##sv,
-        LOG_PATTER_TOKEN_KINDS
-#
-#undef X
-    };
-
-    inline static std::unordered_map<std::string_view, std::string_view> const
-        fg_colors_ = {{"red", "\033[31m"},    {"green", "\033[32m"},
-                      {"blue", "\033[34m"},   {"cyan", "\033[36m"},
-                      {"yellow", "\033[33m"}, {"magenta", "\033[35m"},
-                      {"white", "\033[37m"},  {"reset", "\033[0m"}};
-
-    friend std::ostream& operator<<(std::ostream& os,
-                                    LogPatternToken const& token) {
-        os << "LogPatternToken { kind: "
-           << keywords_[static_cast<size_t>(token.kind_)];
-        if (token.kind_ == Kind::Text && token.payload_.has_value()) {
-            os << ", payload: \"" << *token.payload_ << "\"";
-        }
-        os << " }";
-        return os;
-    }
-};
-
-class LogPatternParser {
-  public:
-    explicit LogPatternParser(std::string_view pattern)
-        : pos{pattern.begin()}, end{pattern.end()} {}
-
-    std::vector<LogPatternToken> parse() {
-        std::vector<LogPatternToken> tokens;
-        while (auto token = next_token()) {
-            tokens.push_back(*token);
-        }
-        return tokens;
-    }
-
-    std::optional<LogPatternToken> next_token() {
-        char const* start = pos;
-
-        while (!eof()) {
-            char c = *pos;
-            if (c == '{') {
-                if (start != pos) {
-                    break;
-                }
-
-                pos++;
-
-                if (pos < end && *pos == '{') {
-                    pos++;
-                    return LogPatternToken{LogPatternToken::Kind::Text, "{"s};
-                }
-                return LogPatternToken{keyword()};
-            }
-            pos++;
-        }
-
-        if (start != pos) {
-            return text(start);
-        }
-        return {};
-    }
-
-  private:
-    LogPatternToken text(char const* start) {
-        return LogPatternToken{LogPatternToken::Kind::Text,
-                               std::string{start, pos}};
-    }
-
-    LogPatternToken keyword() {
-        // start at the character after the '{'
-        char const* start = pos;
-        while (!eof() && *pos != '}') {
-            pos++;
-        }
-
-        if (eof()) {
-            throw std::runtime_error("Unexpected end of pattern");
-        }
-
-        std::string_view kw(start, pos - start);
-        auto kind = LogPatternToken::from_string(kw);
-        if (kind) {
-            // past the closing '}'
-            pos++;
-            return *kind;
-        }
-        throw std::runtime_error(STR("Unknown keyword: " << kw));
-    }
-
-    [[nodiscard]] bool eof() const { return pos == end; }
-
-    char const* pos;
-    char const* const end;
-};
-
-class LogFormatter {
-  public:
-    virtual ~LogFormatter() = default;
-    virtual void format(LogEvent const& event, std::ostream& dst) = 0;
-};
-
-class PatternLogFormatter : public LogFormatter {
-  public:
-    explicit PatternLogFormatter(std::string_view const pattern)
-        : pattern_{LogPatternParser(pattern).parse()} {}
-
-    void format(LogEvent const& event, std::ostream& dst) override;
-
-  private:
-    std::vector<LogPatternToken> pattern_;
-};
+    return os;
+}
+} // namespace std
 
 class LogSink {
   public:
     virtual ~LogSink() = default;
-    LogSink(LogSink&&) = default;
-    LogSink() = default;
     virtual void sink(LogEvent const& event) = 0;
 };
 
-class OutputStreamSink : public LogSink {
+class ConsoleSink : public LogSink {
   public:
-    OutputStreamSink(OutputStreamSink&&) = default;
-    OutputStreamSink(std::shared_ptr<LogFormatter> formatter, std::ostream& dst)
-        : formatter_{std::move(formatter)}, dst_{dst} {}
-
     void sink(LogEvent const& event) override {
-        formatter_->format(event, dst_);
+        std::ostream& os =
+            (event.level >= LogLevel::Warning) ? std::cerr : std::cout;
+        os << "[" << event.level << "] "
+           << " - " << event.message << "\n";
+    }
+};
+
+class StoreSink : public LogSink {
+  public:
+    struct StoredEvent {
+        LogLevel level;
+        std::string message;
+        std::string filename;
+        int line;
+
+        explicit StoredEvent(LogEvent const& ev)
+            : level(ev.level), message(ev.message), filename(ev.filename),
+              line(ev.line) {}
     };
 
+    void sink(LogEvent const& event) override {
+        std::lock_guard lock(mutex_);
+        messages_.emplace_back(event);
+    }
+
+    std::vector<StoredEvent> get_messages() const {
+        std::lock_guard lock(mutex_);
+        return messages_;
+    }
+
   private:
-    std::shared_ptr<LogFormatter> formatter_;
-    std::ostream& dst_;
+    std::vector<StoredEvent> messages_;
+    mutable std::mutex mutex_;
 };
 
 class Logger {
   public:
-    [[nodiscard]] bool is_enabled(LogLevel level) const {
-        std::uint8_t n = 1 << static_cast<int>(level);
-        return (enabled_levels_ & n) == n;
-    }
-
-    [[nodiscard]] std::string_view name() const { return name_; }
-
-    Logger(Logger&) = delete;
-    Logger& operator=(Logger&) = delete;
-
-    Logger(Logger&&) = default;
-    Logger& operator=(Logger&&) = default;
-
-    void set_sink(LogLevel level, std::shared_ptr<LogSink> const& sink) {
-        sinks_[static_cast<int>(level)] = sink;
-        for (auto& [_, child] : children_) {
-            child->set_sink(level, sink);
-        }
-    }
-
-    void set_sink(std::shared_ptr<LogSink> const& sink) {
-        for (size_t i = 0; i < kLogLevels; i++) {
-            sinks_[i] = sink;
-        }
-        for (auto& [_, child] : children_) {
-            child->set_sink(sink);
-        }
-    }
-
-    void enable(LogLevel level) {
-        enabled_levels_ |= 1 << static_cast<int>(level);
-        for (auto& [_, child] : children_) {
-            child->enable(level);
-        }
-    }
-
-    void disable(LogLevel level) {
-        enabled_levels_ ^= 1 << static_cast<int>(level);
-        for (auto& [_, child] : children_) {
-            child->disable(level);
-        }
-    }
-
-  private:
-    explicit Logger(std::string name) : name_(std::move(name)) {}
-
-    void log(LogEvent const& event) {
-        if (!is_enabled(event.level)) {
-            return;
-        }
-        sinks_[static_cast<int>(event.level)]->sink(event);
-    }
-
-    Logger& get_or_create_logger(std::string const& name) {
-        auto pos = name.find('.');
-        Logger* log;
-
-        auto name_part = pos == std::string::npos ? name : name.substr(0, pos);
-
-        if (auto it1 = children_.find(name_part); it1 != children_.end()) {
-            log = it1->second.get();
-        } else {
-            auto it2 = children_.emplace(
-                name_part, std::unique_ptr<Logger>(new Logger(name_part)));
-
-            log = it2.first->second.get();
-            log->sinks_ = sinks_;
-            log->enabled_levels_ = enabled_levels_;
-        }
-
-        if (pos == std::string::npos) {
-            return *log;
-        }
-        return log->get_or_create_logger(name.substr(pos + 1));
-    }
-
-    std::string name_;
-    std::array<std::shared_ptr<LogSink>, kLogLevels> sinks_{};
-    std::uint8_t enabled_levels_{(1 << kLogLevels) - 1};
-    std::unordered_map<std::string, std::unique_ptr<Logger>> children_;
-
-    friend class LogStream;
-    friend class LogManager;
-};
-
-class LogStream {
-  public:
-    LogStream(Logger& logger, LogLevel level)
-        : logger_{logger}, level_{level}, timestamp_{logger_clock::now()} {}
-
-    ~LogStream() {
-        LogEvent entry = {.logger_name = logger_.name(),
-                          .level = level_,
-                          .timestamp = timestamp_,
-                          .message = stream_.str()};
-        logger_.log(entry);
-    }
-
-    bool operator!() const { return !logged_ && logger_.is_enabled(level_); }
-
-    template <typename T>
-    LogStream& operator<<(T const& value) {
-        stream_ << value;
-        logged_ = true;
-        return *this;
-    }
-
-  private:
-    Logger& logger_;
-    LogLevel level_;
-    logger_clock::time_point timestamp_;
-    std::ostringstream stream_;
-    bool logged_{false};
-};
-
-#define LOG(logger, level)                                                     \
-    for (auto _log_stream = LogStream((logger), (level)); !_log_stream;)       \
-    _log_stream
-
-#define LOG_TRACE(logger) LOG(logger, LogLevel::Trace)
-#define LOG_DEBUG(logger) LOG(logger, LogLevel::Debug)
-#define LOG_INFO(logger) LOG(logger, LogLevel::Info)
-#define LOG_WARN(logger) LOG(logger, LogLevel::Warn)
-#define LOG_ERROR(logger) LOG(logger, LogLevel::Error)
-
-class LogManager {
-  public:
-    static LogManager& instance() {
-        static LogManager instance;
+    static Logger& get() {
+        static Logger instance;
         return instance;
     }
 
-    static Logger& logger(std::string const& name) {
-        return instance().get_or_create_logger(name);
+    void enable(LogLevel level) { set_level(level, true); }
+    void disable(LogLevel level) { set_level(level, false); }
+    void max_level(LogLevel max_level) {
+        for (size_t i = 0; i < kLevelsCount; ++i) {
+            set_level(static_cast<LogLevel>(i),
+                      i >= static_cast<size_t>(max_level));
+        }
     }
 
-    static Logger& root_logger() { return instance().root_logger_; }
+    [[nodiscard]] bool is_enabled(LogLevel level) const {
+        if (level == LogLevel::Fatal) {
+            return true;
+        }
 
-    static std::chrono::steady_clock::time_point logger_start() {
-        return logger_start_;
+        return levels_enabled_[static_cast<size_t>(level)];
+    }
+
+    template <std::derived_from<LogSink> T, typename... Args>
+    T* set_sink(Args&&... args) {
+        std::lock_guard lock(mutex_);
+        auto unique = std::make_unique<T>(std::forward<Args>(args)...);
+        auto* raw = unique.get();
+        sink_ = std::move(unique);
+        return raw;
+    }
+
+    void log(LogEvent event) {
+        std::lock_guard lock(mutex_);
+        if (!is_enabled(event.level)) {
+            return;
+        }
+
+        if (sink_) {
+            sink_->sink(event);
+        }
+
+        if (event.level == LogLevel::Fatal) {
+            std::abort();
+        }
     }
 
   private:
-    LogManager() { configure_root_logger(); }
+    Logger() { set_sink<ConsoleSink>(); }
 
-    void configure_root_logger();
+    void set_level(LogLevel level, bool enabled) {
+        if (level == LogLevel::Fatal) {
+            return;
+        }
 
-    Logger& get_or_create_logger(std::string const& name) {
-        return root_logger_.get_or_create_logger(name);
+        std::lock_guard lock(mutex_);
+        levels_enabled_[static_cast<size_t>(level)] = enabled;
     }
 
-    // the root logger has empty name
-    static inline std::string const kRootLoggerName = "";
-    static inline std::chrono::steady_clock::time_point const logger_start_ =
-        std::chrono::steady_clock::now();
+    static size_t constexpr kLevelsCount =
+        static_cast<size_t>(LogLevel::Fatal) + 1;
 
-    Logger root_logger_{kRootLoggerName};
+    std::unique_ptr<LogSink> sink_;
+    std::array<bool, kLevelsCount> levels_enabled_{false, false, true,
+                                                   true,  true,  true};
+    std::mutex mutex_;
 };
 
-inline void LogManager::configure_root_logger() {
-    auto sink = std::make_shared<OutputStreamSink>(
-        std::make_shared<PatternLogFormatter>("[{level}] {logger}: {message}"),
-        std::cout);
-    root_logger_.set_sink(sink);
-    root_logger_.disable(LogLevel::Trace);
-}
+class LogMessage {
+  public:
+    LogMessage(LogLevel level, char const* filename, int line)
+        : level_(level), filename_(filename), line_(line) {}
 
-inline void PatternLogFormatter::format(LogEvent const& event,
-                                        std::ostream& dst) {
-    static std::array const levels = {
-#define X(a, b) b,
-        LOG_LEVELS
-#undef X
-    };
-
-    for (auto const& token : pattern_) {
-        switch (token.kind()) {
-        case LogPatternToken::Kind::Text:
-        case LogPatternToken::Kind::Color:
-            dst << token.payload();
-            break;
-        case LogPatternToken::Kind::Logger:
-            dst << event.logger_name;
-            break;
-        case LogPatternToken::Kind::Level:
-            dst << levels[static_cast<int>(event.level)];
-            break;
-        case LogPatternToken::Kind::ElapsedTime: {
-            auto d = event.timestamp - LogManager::logger_start();
-            dst << std::chrono::duration_cast<std::chrono::milliseconds>(d)
-                       .count()
-                << "ms";
-            break;
-        }
-        case LogPatternToken::Kind::Message:
-            dst << event.message;
-            break;
-        }
+    ~LogMessage() {
+        Logger::get().log({.level = level_,
+                           .message = stream_.str(),
+                           .filename = filename_,
+                           .line = line_});
     }
 
-    dst << "\n";
-}
+    std::ostream& stream() { return stream_; }
+
+  private:
+    LogLevel level_;
+    char const* filename_;
+    int line_;
+    std::ostringstream stream_;
+};
+
+#define TRACE LogLevel::Trace
+#define DEBUG LogLevel::Debug
+#define INFO LogLevel::Info
+#define WARN LogLevel::Warning
+#define ERROR LogLevel::Error
+#define FATAL LogLevel::Fatal
+
+#define LOG(level)                                                             \
+    for (bool enabled = Logger::get().is_enabled(level); enabled;              \
+         enabled = false)                                                      \
+    LogMessage(level, __FILE__, __LINE__).stream()
+
+#define CHECK(condition)                                                       \
+    if (!(condition))                                                          \
+    LogMessage(LogLevel::Fatal, __FILE__, __LINE__).stream()                   \
+        << "Check failed: " #condition " "
 
 #endif // LOGGER_H

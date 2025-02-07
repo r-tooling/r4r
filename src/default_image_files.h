@@ -48,7 +48,7 @@ class DefaultImageFiles {
         : files_{std::move(files)} {}
 
     static DefaultImageFiles from_file(fs::path const& path) {
-        LOG_DEBUG(log_) << "Loading default file list from file: " << path;
+        LOG(DEBUG) << "Loading default file list from file: " << path;
 
         std::ifstream file(path);
 
@@ -62,20 +62,18 @@ class DefaultImageFiles {
     static DefaultImageFiles
     from_image(std::string const& image_name,
                std::vector<std::string> const& blacklist_patterns) {
-        LOG_DEBUG(log_) << "Loading default file list from image: "
-                        << image_name;
+        LOG(DEBUG) << "Loading default file list from image: " << image_name;
 
         std::string bf_pattern = string_join(blacklist_patterns, '|');
 
-        auto out =
-            Command("docker")
-                .arg("docker")
-                .arg("run")
-                .arg("--rm")
-                .arg(image_name)
-                .arg("bash")
-                .arg("-c")
-                // clang-format off
+        auto out = Command("docker")
+                       .arg("docker")
+                       .arg("run")
+                       .arg("--rm")
+                       .arg(image_name)
+                       .arg("bash")
+                       .arg("-c")
+                       // clang-format off
                 .arg(STR(
                    "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
                     R""(
@@ -85,8 +83,8 @@ class DefaultImageFiles {
                         echo "$file${DELIM}${stat}${DELIM}${sha1}"
                     done
                 )""))
-                // clang-format on
-                .output();
+                       // clang-format on
+                       .output();
 
         out.check_success("Unable to initialize default file list for " +
                           image_name);
@@ -108,15 +106,14 @@ class DefaultImageFiles {
                     if (pos == std::string::npos) {
                         tokens.push_back(line.substr(start));
                         break;
-                    } else {
-                        tokens.push_back(line.substr(start, pos - start));
-                        start = pos + kDelimUtf8.size();
                     }
+                    tokens.push_back(line.substr(start, pos - start));
+                    start = pos + kDelimUtf8.size();
                 }
             }
 
             if (tokens.size() < 6) {
-                LOG_WARN(log_) << "WARNING: Could not parse line: " << line;
+                LOG(WARN) << "Failed not parse line: " << line;
                 continue;
             }
             std::string const& path = tokens[0];
@@ -127,16 +124,17 @@ class DefaultImageFiles {
             std::string const& sha1 = tokens[5];
 
             if (size_str == "error" || sha1 == "error") {
-                LOG_WARN(log_) << "WARNING: " << path << ": error getting data";
+                LOG(WARN) << "Failed to get data for " << path;
                 continue;
             }
 
             std::uintmax_t size;
             try {
+                // FIXME: is there some C++ way std::error_code
                 size = static_cast<std::uintmax_t>(std::stoull(size_str));
             } catch (...) {
-                LOG_WARN(log_) << "WARNING: " << path
-                               << ": size not convertable " << size_str;
+                LOG(WARN) << "Failed to get size: " << path
+                          << " not convertible" << size_str;
                 continue;
             }
 
@@ -144,8 +142,8 @@ class DefaultImageFiles {
             try {
                 perm = static_cast<unsigned>(std::stoul(perm_str));
             } catch (...) {
-                LOG_WARN(log_) << "WARNING: " << path
-                               << ": permission not convertable " << perm_str;
+                LOG(WARN) << "WARNING: " << path
+                          << ": permission not convertable " << perm_str;
                 continue;
             }
 
@@ -162,10 +160,10 @@ class DefaultImageFiles {
         return files_;
     }
 
-    size_t size() const { return files_.size(); }
+    [[nodiscard]] size_t size() const { return files_.size(); }
 
     void save(std::ostream& dst) const {
-        for (auto& info : files_) {
+        for (auto const& info : files_) {
             dst << info.path << kDelimUtf8;
             dst << info.user << kDelimUtf8;
             dst << info.group << kDelimUtf8;
@@ -176,7 +174,6 @@ class DefaultImageFiles {
     }
 
   private:
-    static inline Logger& log_ = LogManager::logger("default-image-files");
     std::vector<ImageFileInfo> files_;
 };
 
