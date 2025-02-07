@@ -10,8 +10,8 @@
 #include <stdexcept>
 #include <string>
 
-#include "fs.h"
 #include "syscall_monitor.h"
+#include "util_fs.h"
 
 // Global test string in the child process.
 //
