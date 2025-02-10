@@ -23,6 +23,9 @@ Checks:  '-*,
 CheckOptions:
   # https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five
   # https://google.github.io/styleguide/cppguide.html#Copyable_Movable_Types
-  cppcoreguidelines-special-member-functions: 'AllowMissingMoveFunctionsWhenCopyIsDeleted'
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
+
+  readability-implicit-bool-conversion.AllowIntegerConditions: true
+  readability-implicit-bool-conversion.AllowPointerConditions: true
 
 UseColor: true
