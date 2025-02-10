@@ -64,12 +64,16 @@ class TaskException : public std::runtime_error {
         : std::runtime_error{message} {}
 };
 
-class TracingTask : public Task<std::vector<FileInfo>> {
+using TracingResult = std::vector<FileInfo>;
+
+class TracingTask : public Task<TracingResult> {
   public:
     explicit TracingTask(std::vector<std::string> const& cmd) : cmd_(cmd) {}
 
-    std::vector<FileInfo> run() override {
+    TracingResult run() override {
         LOG(INFO) << "Tracing program: " << string_join(cmd_, ' ');
+
+        auto old_log_sink = Logger::get().set_sink(std::make_unique<StoreSink>());
 
         FileTracer tracer;
         SyscallMonitor monitor{cmd_, tracer};
@@ -79,9 +83,21 @@ class TracingTask : public Task<std::vector<FileInfo>> {
         // this is just to support the stop()
         monitor_ = &monitor;
 
+        auto start = std::chrono::steady_clock::now();
         auto result = monitor_->start();
-
         monitor_ = nullptr;
+
+        LOG(INFO) << "Finished tracing in " << format_elapsed_time(start - std::chrono::steady_clock::now());
+
+        // print the postponed messages
+        auto sink = Logger::get().set_sink(std::move(old_log_sink));
+        auto const& events = dynamic_cast<StoreSink*>(sink.get())->get_messages();
+        if (!events.empty()) {
+            LOG(INFO) << "There were " << events.size() << " log event(s) captured during tracing";
+            for (auto const& e : events) {
+                Logger::get().log(e.to_log_event());
+            }
+        }
 
         switch (result.kind) {
         case SyscallMonitor::Result::Failure:
@@ -116,7 +132,7 @@ class TracingTask : public Task<std::vector<FileInfo>> {
     }
 
     void stop() override {
-        if (monitor_ != nullptr) {
+        if (monitor_) {
             monitor_->stop();
         }
     }
@@ -161,6 +177,12 @@ class CaptureEnvironmentTask : public Task<Environment> {
 
 class ResolveTask : public Task<Resolvers> {
   public:
+  ResolveTask(ResolveTask const&) = delete;
+  ResolveTask& operator=(ResolveTask const&) = delete;
+  ~ResolveTask() override = default;
+  ResolveTask(ResolveTask&&) = delete;
+  ResolveTask& operator=(ResolveTask&&) = delete;
+
     explicit ResolveTask(std::vector<FileInfo>& files,
                          AbsolutePathSet const& result_files, fs::path cwd,
                          fs::path R_bin)
@@ -283,7 +305,7 @@ class ManifestTask : public Task<Manifest> {
         copy_files.clear();
 
         while (std::getline(stream, line)) {
-            bool copy = false;
+            bool copy;
 
             if (line.starts_with("C")) {
                 copy = true;
@@ -526,11 +548,6 @@ class DockerFileBuilderTask : public Task<DockerFile> {
     Manifest const& manifest_;
 };
 
-struct DockerImage {
-    std::string tag;
-};
-
-// FIXME: return void
 class MakefileBuilderTask : public Task<fs::path> {
   public:
     explicit MakefileBuilderTask(Options const& options) : options_{options} {}
@@ -672,27 +689,19 @@ class Tracer {
     }
 
     template <typename T>
-    auto run(Task<T>&& task) -> std::conditional_t<std::is_void_v<T>, void, T> {
-        return run(task);
+    T run(Task<T>&& task) {
+        return run(std::move(task));
     }
 
     template <typename T>
-    auto run(Task<T>& task) -> std::conditional_t<std::is_void_v<T>, void, T> {
+    T run(Task<T>& task) {
         current_task_ = &task;
 
         auto before = std::chrono::steady_clock::now();
         LOG(INFO) << " starting";
 
+        // TODO: how to deal with an ownership?
         // auto* log_sink = Logger::get().set_sink<StoreSink>();
-
-        if constexpr (std::is_void_v<T>) {
-            task.run();
-            current_task_ = nullptr;
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = now - before;
-            LOG(INFO) << " finished in " << format_elapsed_time(elapsed);
-            return;
-        }
 
         T result = task.run();
         current_task_ = nullptr;

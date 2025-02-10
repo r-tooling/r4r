@@ -6,3 +6,4 @@ CMakePresets.json
 out/*
 ref/*
 .cache/clangd/index
+.gdb_history

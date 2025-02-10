@@ -89,6 +89,10 @@ class StoreSink : public LogSink {
         explicit StoredEvent(LogEvent const& ev)
             : level(ev.level), message(ev.message), filename(ev.filename),
               line(ev.line) {}
+
+        [[nodiscard]] LogEvent to_log_event() const {
+            return {.level=level, .message=message, .filename=filename, .line=line};
+        }
     };
 
     void sink(LogEvent const& event) override {
@@ -130,16 +134,12 @@ class Logger {
         return levels_enabled_.at(static_cast<size_t>(level));
     }
 
-    template <std::derived_from<LogSink> T, typename... Args>
-    T* set_sink(Args&&... args) {
-        std::lock_guard lock(mutex_);
-        auto unique = std::make_unique<T>(std::forward<Args>(args)...);
-        auto* raw = unique.get();
-        sink_ = std::move(unique);
-        return raw;
+    std::unique_ptr<LogSink> set_sink(std::unique_ptr<LogSink> sink) {
+        sink_.swap(sink);
+        return sink;
     }
 
-    LogSink* get_sink() { return sink_.get(); }
+    LogSink& get_sink() { return *sink_; }
 
     void log(LogEvent event) {
         std::lock_guard lock(mutex_);
@@ -157,7 +157,7 @@ class Logger {
     }
 
   private:
-    Logger() { set_sink<ConsoleSink>(); }
+    Logger() { set_sink(std::make_unique<ConsoleSink>()); }
 
     void set_level(LogLevel level, bool enabled) {
         if (level == LogLevel::Fatal) {

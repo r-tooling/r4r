@@ -30,4 +30,5 @@ target_include_directories(${R4R_BIN}
 
 install(TARGETS ${R4R_BIN})
 
+enable_testing()
 add_subdirectory(tests)

@@ -37,7 +37,7 @@ build: configure ## Build the project
 	$(CMAKE) --build $(BUILD_DIR)
 
 test: build ## Run tests
-	cd $(BUILD_DIR) && $(CTEST) --test-dir $(TEST_DIR) --output-on-failure
+	cd $(BUILD_DIR) && $(CTEST) --output-on-failure
 
 install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
