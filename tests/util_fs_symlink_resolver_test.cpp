@@ -111,7 +111,7 @@ TEST_F(SymlinkResolverTest, DoesNotAddNonexistentCandidate) {
 }
 
 TEST_F(SymlinkResolverTest, NoSymlinksReturnOriginalFile) {
-    SymlinkResolver resolver{};
+    SymlinkResolver resolver;
     auto results = resolver.resolve_symlinks(test_file);
 
     ASSERT_EQ(results.size(), 1u);

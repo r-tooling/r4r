@@ -127,3 +127,27 @@ TEST(RPackagesTest, TopologicalSorting) {
         EXPECT_TRUE(posB < posA);
     }
 }
+
+TEST(RPackagesTest, SystemDependencies) {
+    // clang-format off
+    char const* data =
+        "RPostgres"      NBSP "/home/user/R/library/4.1" NBSP "1.1"   NBSP "NA" NBSP ""   NBSP "NA" NBSP "NA" NBSP "yes\n"
+        "Matrix"         NBSP "/usr/lib/R/library"       NBSP "1.4-0" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "yes\n"
+        "UnknownPackage" NBSP "/usr/lib/R/library"       NBSP "1.0"   NBSP "NA" NBSP "NA" NBSP "NA" NBSP "NA" NBSP "yes\n";
+    // clang-format on
+
+    std::istringstream iss(data);
+    auto packages = RpkgDatabase::from_stream(iss);
+
+    ASSERT_EQ(packages.size(), 3u);
+
+    std::unordered_set<RPackage const*> pkgs;
+    pkgs.insert(packages.find("RPostgres"));
+    pkgs.insert(packages.find("Matrix"));
+    pkgs.insert(packages.find("UnknownPackage"));
+    auto res = packages.get_system_dependencies(pkgs);
+
+    // TODO: assert no warnings
+    ASSERT_EQ(res.size(), 1);
+    ASSERT_EQ(res[0], "libpq-dev");
+}

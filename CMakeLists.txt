@@ -22,11 +22,14 @@ add_executable(
     ${R4R_BIN_SOURCES}
 )
 
+find_package(CURL REQUIRED)
+
 target_compile_options(${R4R_BIN} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(${R4R_BIN}
     PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
+target_link_libraries(${R4R_BIN} PRIVATE CURL::libcurl)
 
 install(TARGETS ${R4R_BIN})
 

@@ -73,7 +73,8 @@ class TracingTask : public Task<TracingResult> {
     TracingResult run() override {
         LOG(INFO) << "Tracing program: " << string_join(cmd_, ' ');
 
-        auto old_log_sink = Logger::get().set_sink(std::make_unique<StoreSink>());
+        auto old_log_sink =
+            Logger::get().set_sink(std::make_unique<StoreSink>());
 
         FileTracer tracer;
         SyscallMonitor monitor{cmd_, tracer};
@@ -87,13 +88,17 @@ class TracingTask : public Task<TracingResult> {
         auto result = monitor_->start();
         monitor_ = nullptr;
 
-        LOG(INFO) << "Finished tracing in " << format_elapsed_time(start - std::chrono::steady_clock::now());
+        LOG(INFO) << "Finished tracing in "
+                  << format_elapsed_time(start -
+                                         std::chrono::steady_clock::now());
 
         // print the postponed messages
         auto sink = Logger::get().set_sink(std::move(old_log_sink));
-        auto const& events = dynamic_cast<StoreSink*>(sink.get())->get_messages();
+        auto const& events =
+            dynamic_cast<StoreSink*>(sink.get())->get_messages();
         if (!events.empty()) {
-            LOG(INFO) << "There were " << events.size() << " log event(s) captured during tracing";
+            LOG(INFO) << "There were " << events.size()
+                      << " log event(s) captured during tracing";
             for (auto const& e : events) {
                 Logger::get().log(e.to_log_event());
             }
@@ -139,7 +144,7 @@ class TracingTask : public Task<TracingResult> {
 
   private:
     std::vector<std::string> const& cmd_;
-    SyscallMonitor* monitor_{};
+    SyscallMonitor* monitor_;
 };
 
 struct Environment {
@@ -151,7 +156,7 @@ struct Environment {
 class CaptureEnvironmentTask : public Task<Environment> {
   public:
     Environment run() override {
-        Environment envir{};
+        Environment envir;
 
         envir.cwd = std::filesystem::current_path();
         envir.user = UserInfo::get_current_user_info();
@@ -177,11 +182,11 @@ class CaptureEnvironmentTask : public Task<Environment> {
 
 class ResolveTask : public Task<Resolvers> {
   public:
-  ResolveTask(ResolveTask const&) = delete;
-  ResolveTask& operator=(ResolveTask const&) = delete;
-  ~ResolveTask() override = default;
-  ResolveTask(ResolveTask&&) = delete;
-  ResolveTask& operator=(ResolveTask&&) = delete;
+    ResolveTask(ResolveTask const&) = delete;
+    ResolveTask& operator=(ResolveTask const&) = delete;
+    ~ResolveTask() override = default;
+    ResolveTask(ResolveTask&&) = delete;
+    ResolveTask& operator=(ResolveTask&&) = delete;
 
     explicit ResolveTask(std::vector<FileInfo>& files,
                          AbsolutePathSet const& result_files, fs::path cwd,
@@ -623,14 +628,17 @@ class MakefileBuilderTask : public Task<fs::path> {
 
 class RunMakefileTask : public Task<int> {
   public:
-    explicit RunMakefileTask(Options const& options) : options_{options} {}
+    explicit RunMakefileTask(fs::path const& makefile) : makefile_{makefile} {}
+
+    RunMakefileTask(RunMakefileTask const&) = delete;
+    RunMakefileTask& operator=(RunMakefileTask const&) = delete;
 
     int run() override {
-        LOG(INFO) << "Running Makefile: " << options_.makefile;
+        LOG(INFO) << "Running Makefile: " << makefile_;
         auto exit_code = Command("make")
                              .arg("-f")
-                             .arg(options_.makefile.filename())
-                             .current_dir(options_.makefile.parent_path())
+                             .arg(makefile_.filename())
+                             .current_dir(makefile_.parent_path())
                              .spawn()
                              .wait();
 
@@ -642,8 +650,7 @@ class RunMakefileTask : public Task<int> {
     }
 
   private:
-    // FIXME: cherry-pick options
-    Options const& options_;
+    fs::path const& makefile_;
 };
 
 class Tracer {
@@ -663,16 +670,23 @@ class Tracer {
 
   private:
     void run_pipeline() {
-        auto envir = run(CaptureEnvironmentTask{});
-        auto files = run(TracingTask{options_.cmd});
-        auto resolvers = run(
-            ResolveTask{files, options_.results, envir.cwd, options_.R_bin});
-        auto manifest =
-            run(ManifestTask{resolvers, options_.output_dir, options_.results});
+        auto envir = run("capture environment", CaptureEnvironmentTask{});
 
-        run(DockerFileBuilderTask{options_, envir, manifest});
-        run(MakefileBuilderTask{options_});
-        run(RunMakefileTask{options_});
+        auto files = run("tracer", TracingTask{options_.cmd});
+
+        auto resolvers =
+            run("resolver", ResolveTask{files, options_.results, envir.cwd,
+                                        options_.R_bin});
+        auto manifest =
+            run("manifest",
+                ManifestTask{resolvers, options_.output_dir, options_.results});
+
+        run("dokcer file builder",
+            DockerFileBuilderTask{options_, envir, manifest});
+
+        run("makefile builder", MakefileBuilderTask{options_});
+
+        run("make", RunMakefileTask{options_.makefile});
     }
 
     void configure() {
@@ -688,26 +702,31 @@ class Tracer {
         }
     }
 
-    template <typename T>
-    T run(Task<T>&& task) {
-        return run(std::move(task));
+    template <typename Func>
+    auto stopwatch(Func&& func) {
+        using clock = std::chrono::steady_clock;
+
+        auto start = clock::now();
+        auto result = std::forward<Func>(func)();
+        auto end = clock::now();
+
+        return std::make_pair(std::move(result), end - start);
     }
 
     template <typename T>
-    T run(Task<T>& task) {
+    T run(std::string const& name, Task<T>&& task) {
+        return run(name, task);
+    }
+
+    template <typename T>
+    T run(std::string const& name, Task<T>& task) {
         current_task_ = &task;
 
-        auto before = std::chrono::steady_clock::now();
-        LOG(INFO) << " starting";
+        LOG(INFO) << name << " starting";
 
-        // TODO: how to deal with an ownership?
-        // auto* log_sink = Logger::get().set_sink<StoreSink>();
-
-        T result = task.run();
+        auto [result, elapsed] = stopwatch([&] { return task.run(); });
         current_task_ = nullptr;
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = now - before;
-        LOG(INFO) << " finished in " << format_elapsed_time(elapsed);
+        LOG(INFO) << name << " finished in " << format_elapsed_time(elapsed);
         return result;
     }
 

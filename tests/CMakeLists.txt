@@ -21,6 +21,10 @@ target_link_libraries(
         ${PROJECT_NAME}_test
         GTest::gtest_main
 )
+target_link_libraries(
+        ${PROJECT_NAME}_test
+        CURL::libcurl
+)
 
 target_include_directories(
         ${PROJECT_NAME}_test

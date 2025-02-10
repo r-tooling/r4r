@@ -3,6 +3,7 @@
 
 #include "common.h"
 
+#include <charconv>
 #include <filesystem>
 #include <ranges>
 #include <regex>
@@ -225,6 +226,16 @@ std::optional<std::array<std::string, N>> inline string_split_n(
     }
 
     return result;
+}
+
+template <typename T>
+inline std::optional<T> to_number(std::string_view const& s) {
+    T num;
+    auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), num);
+    if (ec == std::errc() && ptr == s.end()) {
+        return num;
+    }
+    return {};
 }
 
 #endif // UTIL_H

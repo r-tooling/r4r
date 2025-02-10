@@ -4,9 +4,9 @@
 #include "default_image_files.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
-#include "util_fs.h"
 #include "manifest.h"
 #include "rpkg_database.h"
+#include "util_fs.h"
 #include <memory>
 #include <string>
 #include <utility>
@@ -60,7 +60,7 @@ class DebPackageResolver : public Resolver {
 };
 
 inline void DebPackageResolver::load_from_files(std::vector<FileInfo>& files) {
-    SymlinkResolver symlink_resolver{};
+    SymlinkResolver symlink_resolver;
 
     packages_.clear();
     files_.clear();
@@ -168,7 +168,7 @@ class CRANPackageResolver : public Resolver {
 };
 
 inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
-    SymlinkResolver symlink_resolved{};
+    SymlinkResolver symlink_resolved;
 
     auto resolved = [&](FileInfo const& info) {
         auto path = info.path;
@@ -192,28 +192,36 @@ inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
 };
 
 inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
-    bool needs_compilation = false;
+    std::unordered_set<RPackage const*> compiled_packages;
     for (auto const* pkg : rpkg_database_->get_dependencies(packages_)) {
         if (pkg->is_base) {
             continue;
         }
 
-        needs_compilation = needs_compilation || pkg->needs_compilation;
+        if (pkg->needs_compilation) {
+            compiled_packages.insert(pkg);
+        }
+
         manifest.add_cran_package(*pkg);
     }
 
-    if (needs_compilation) {
-        // TODO: this is a massive simplification, but in general there is no
-        // way to figure what are the built requirements for a given package,
-        // cf. https://github.com/r-tooling/r4r/issues/6
-        for (auto const& name : {"build-essential", "r-base-dev"}) {
+    if (!compiled_packages.empty()) {
+        auto deb_packages =
+            rpkg_database_->get_system_dependencies(compiled_packages);
+
+        // bring in R headers and R development dependencies (includes
+        // build-essential)
+        deb_packages.push_back("r-base-dev");
+
+        for (auto const& name : deb_packages) {
             auto const* pkg = dpkg_database_->lookup_by_name(name);
             if (pkg == nullptr) {
                 LOG(WARN) << "Failed to find " << name
                           << " package needed "
                              "by R packages to be built from source";
+            } else {
+                manifest.add_deb_package(*pkg);
             }
-            manifest.add_deb_package(*pkg);
         }
     }
 }

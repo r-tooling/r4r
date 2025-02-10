@@ -2,9 +2,12 @@
 #define JSON_H
 
 #include "common.h"
+#include "util.h"
 #include <cctype>
 #include <charconv>
+#include <iomanip>
 #include <map>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -34,6 +37,58 @@ struct JsonObject : std::map<std::string, JsonValue> {
     using map::map;
 };
 
+template <typename T>
+inline T json_query(JsonValue const& json, std::string_view path) {
+    JsonValue const* v = &json;
+
+    while (!path.empty()) {
+        auto end = path.find('.');
+        std::string_view part;
+
+        if (end != std::string::npos) {
+            part = path.substr(0, end);
+        } else {
+            part = path;
+        }
+
+        if (part.empty()) {
+            throw std::invalid_argument("Invalid path");
+        }
+
+        if (auto idx = to_number<long>(part); idx) {
+            if (auto* arr = std::get_if<JsonArray>(v)) {
+                if (idx >= arr->size()) {
+                    throw std::out_of_range("Array index out of range");
+                }
+                v = &(*arr)[*idx];
+            } else {
+                throw std::invalid_argument("Expected array");
+            }
+        } else {
+            std::string key{part};
+            if (auto* obj = std::get_if<JsonObject>(v);
+                obj && obj->contains(key)) {
+                v = &obj->at(key);
+            } else {
+                throw std::invalid_argument("Expected object");
+            }
+        }
+
+        if (end != std::string::npos) {
+            path = path.substr(end + 1);
+            continue;
+        }
+
+        break;
+    }
+
+    if (!std::holds_alternative<T>(*v)) {
+        throw std::invalid_argument("Invalid type");
+    }
+
+    return std::get<T>(*v);
+}
+
 class JsonParser {
   public:
     static JsonValue parse(std::string const& input) {
@@ -42,7 +97,7 @@ class JsonParser {
     }
 
   private:
-    explicit JsonParser(std::string const& input) : input_{input} {}
+    explicit JsonParser(std::string const& input) : input_{input}, pos_{0} {}
 
     JsonValue parse() {
         JsonValue value = parse_value();
@@ -271,7 +326,7 @@ class JsonParser {
 
         std::string_view const str = input_.substr(start, pos_ - start);
         if (!is_dbl) {
-            int res{};
+            int res;
             auto [end, ec] =
                 std::from_chars(str.data(), str.data() + str.size(), res);
 
@@ -285,7 +340,7 @@ class JsonParser {
             // out of range should fall to the double case
         }
 
-        double res{};
+        double res;
         auto [end, ec] =
             std::from_chars(str.data(), str.data() + str.size(), res);
 
@@ -297,7 +352,87 @@ class JsonParser {
     }
 
     std::string_view input_;
-    size_t pos_{};
+    size_t pos_;
 };
+
+std::ostream& operator<<(std::ostream& os, JsonValue const& jv);
+
+struct JsonValuePrinter {
+    std::ostream& os;
+
+    void operator()(std::nullptr_t) const { os << "null"; }
+
+    void operator()(bool b) const { os << (b ? "true" : "false"); }
+
+    void operator()(int i) const { os << i; }
+
+    void operator()(double d) const { os << d; }
+
+    void operator()(std::string const& s) const {
+        os << '"';
+        for (char c : s) {
+            switch (c) {
+            case '"':
+                os << "\\\"";
+                break;
+            case '\\':
+                os << "\\\\";
+                break;
+            case '\b':
+                os << "\\b";
+                break;
+            case '\f':
+                os << "\\f";
+                break;
+            case '\n':
+                os << "\\n";
+                break;
+            case '\r':
+                os << "\\r";
+                break;
+            case '\t':
+                os << "\\t";
+                break;
+            default:
+                os << c;
+                break;
+            }
+        }
+        os << '"';
+    }
+
+    void operator()(JsonArray const& arr) const {
+        os << '[';
+        bool first = true;
+        for (auto const& elem : arr) {
+            if (!first) {
+                os << ',';
+            }
+            first = false;
+            std::visit(JsonValuePrinter{os}, elem);
+        }
+        os << ']';
+    }
+
+    void operator()(JsonObject const& obj) const {
+        os << '{';
+        bool first = true;
+        for (auto const& [key, value] : obj) {
+            if (!first) {
+                os << ',';
+            }
+            first = false;
+            (*this)(key);
+            os << ':';
+            std::visit(JsonValuePrinter{os}, value);
+        }
+        os << '}';
+    }
+};
+
+inline std::ostream& operator<<(std::ostream& os, JsonValue const& jv) {
+    std::visit(JsonValuePrinter{os}, jv);
+    return os;
+}
 
 #endif // JSON_H

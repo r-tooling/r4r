@@ -2,7 +2,9 @@
 #define RPKG_DATABASE_
 
 #include "common.h"
+#include "curl.h"
 #include "filesystem_trie.h"
+#include "json.h"
 #include "logger.h"
 #include "process.h"
 #include "util.h"
@@ -13,6 +15,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 struct RPackage {
@@ -87,6 +90,57 @@ class RpkgDatabase {
         auto const* r = files_.find_last_matching(path);
         return r != nullptr ? *r : nullptr;
     }
+
+    std::vector<std::string> get_system_dependencies(
+        std::unordered_set<RPackage const*> const& pkgs) const {
+        std::vector<std::string> dependencies;
+
+        CURLMultipleTransfer<RPackage const*> curl{10};
+
+        for (auto const* p : pkgs) {
+            // TODO: parameterize distribution and release
+            std::string url =
+                STR("https://packagemanager.posit.co"
+                    << "/__api__/repos/" << "cran"
+                    << "/sysreqs?all=false&pkgname=" << p->name
+                    << "&distribution=" << "ubuntu" << "&release=" << "22.04");
+            curl.add(p, url);
+        }
+
+        auto res = curl.run();
+
+        for (auto& [p, r] : res) {
+            try {
+                auto* hr = std::get_if<HttpResult>(&r);
+                if (!hr) {
+                    throw std::runtime_error(
+                        STR("Failed to query: " << std::get<std::string>(r)));
+                }
+
+                if (hr->http_code != 200) {
+                    throw std::runtime_error(
+                        STR("Unexpected HTTP error: " << hr->http_code << "\n"
+                                                      << hr->message));
+                }
+
+                auto json = JsonParser::parse(hr->message);
+                auto reqs = json_query<JsonArray>(json, "requirements");
+                if (reqs.empty()) {
+                    continue;
+                }
+
+                auto deps =
+                    json_query<JsonArray>(reqs, "0.requirements.packages");
+                for (auto const& dep : deps) {
+                    dependencies.push_back(std::get<std::string>(dep));
+                }
+            } catch (std::exception const& e) {
+                LOG(WARN) << "Unable to get system dependencies for " << p->name
+                          << " : " << e.what();
+            }
+        }
+        return dependencies;
+    };
 
     // Return all dependencies (recursively) of the given set of packages
     // in a topologically sorted order. The packages themselves are included.

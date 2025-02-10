@@ -14,6 +14,8 @@ Checks:  '-*,
           readability-*,
           -bugprone-easily-swappable-parameters,
           -cppcoreguidelines-avoid-magic-numbers,
+          -cppcoreguidelines-special-member-functions,
+          -cppcoreguidelines-pro-type-union-access,
           -modernize-use-ranges,
           -modernize-use-trailing-return-type,
           -readability-identifier-length,
@@ -21,6 +23,7 @@ Checks:  '-*,
           -performance-enum-size
           '
 CheckOptions:
+  # FIXME: enable this one at some point
   # https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five
   # https://google.github.io/styleguide/cppguide.html#Copyable_Movable_Types
   cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true

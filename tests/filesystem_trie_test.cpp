@@ -113,7 +113,7 @@ TEST_F(FileSystemTrieTest, FindLastMatching) {
 }
 
 TEST_F(FileSystemTrieTest, FindWithNull) {
-    FileSystemTrie<std::string> trie{};
+    FileSystemTrie<std::string> trie;
 
     trie.insert("/dev", "a");
     trie.insert("/dev/null", "b");

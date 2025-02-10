@@ -87,3 +87,14 @@ TEST(JsonParserTest, InvalidNumbers) {
 
     EXPECT_THROW(JsonParser::parse("1.2e3.4"), JsonParseError);
 }
+
+TEST(JsonQuery, SimpleQuery) {
+    auto json = JsonParser::parse(
+        "{\"requirements\":[{\"name\":\"RPostgres\",\"requirements\":{"
+        "\"packages\":[\"libpq-dev\"],\"install_scripts\":[\"apt-get install "
+        "-y libpq-dev\"]}}]}");
+
+    auto res =
+        json_query<std::string>(json, "requirements.0.requirements.packages.0");
+    EXPECT_EQ(res, "libpq-dev");
+}
