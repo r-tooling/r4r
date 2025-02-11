@@ -13,6 +13,12 @@
 #include "syscall_monitor.h"
 #include "util_fs.h"
 
+#ifdef CODE_COVERAGE_ENABLED
+#define SKIP_ON_COVERAGE(message) GTEST_SKIP() << message
+#else
+#define SKIP_ON_COVERAGE(message) (void)0
+#endif
+
 // Global test string in the child process.
 //
 // NOTE: Must be 'static' or 'extern "C"' to avoid name mangling if you
@@ -99,6 +105,8 @@ class TestSyscallListener : public SyscallListener {
 };
 
 TEST(SyscallMonitorTest, OpenSyscall) {
+    SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
+
     TempFile temp_file{"r4r-test", ".delete"};
 
     ASSERT_FALSE(fs::exists(*temp_file));
@@ -124,6 +132,8 @@ TEST(SyscallMonitorTest, OpenSyscall) {
 }
 
 TEST(SyscallMonitorTest, CreatSyscall) {
+    SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
+
     // creat is essentially open(..., O_CREAT|O_WRONLY, mode)
     // and on linux, it is implemented using open,
     // but it should have it own syscall number
@@ -154,6 +164,8 @@ TEST(SyscallMonitorTest, CreatSyscall) {
 }
 
 TEST(SyscallMonitorTest, OpenSyscallFromChild) {
+    SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
+
     TempFile temp_file{"r4r-test-child", ".delete"};
 
     ASSERT_FALSE(fs::exists(*temp_file));
