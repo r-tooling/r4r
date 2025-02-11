@@ -23,8 +23,8 @@ TEST_DIR         = tests
 FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
 FORMAT_EXCLUDE  = 
 
-COVERAGE_REPORT_HTML     = $(BUILD_DIR)/coverage.html
-COVRAGE_REPORT_SONARCUBE = $(BUILD_DIR)/coverage.sonarcube
+COVERAGE_REPORT_HTML     = $(BUILD_DIR)/coverage
+COVRAGE_REPORT_SONARCUBE = $(BUILD_DIR)/coverage-sonarcube.xml
 
 #-------------------------------------------------------------------------------
 # Targets
@@ -47,8 +47,8 @@ coverage: ## Run tests with code coverage
 	cd $(BUILD_DIR) && \
 		$(CTEST) --output-on-failure -T Test -T Coverage
 	gcovr -r $(SOURCE_DIR) \
-			--html-details $(COVERAGE_REPORT_HTML) \
-			--html-single-page js-enabled \
+			--html $(COVERAGE_REPORT_HTML) \
+			--html-details \
 			--sonarqube $(COVRAGE_REPORT_SONARCUBE) \
 			--exclude-directories "_deps" \
 			$(BUILD_DIR)
