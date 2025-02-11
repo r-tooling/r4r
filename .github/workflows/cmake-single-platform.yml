@@ -42,7 +42,6 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: .devcontainer
-          file: ./Dockerfile
           push: true
           # Use the defined Docker image variable
           tags: |
