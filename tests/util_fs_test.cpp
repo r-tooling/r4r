@@ -1,13 +1,73 @@
 #include "util_fs.h"
 #include <gtest/gtest.h>
 
-TEST(CheckAccessibility, BasciTest) {
-    EXPECT_EQ(check_accessibility("/etc/passwd"), AccessStatus::Accessible);
-    EXPECT_EQ(check_accessibility("/etc/shadow"),
-              AccessStatus::InsufficientPermission);
-    EXPECT_EQ(check_accessibility("/etc"), AccessStatus::Accessible);
-    EXPECT_EQ(check_accessibility("/root"),
-              AccessStatus::InsufficientPermission);
-    EXPECT_EQ(check_accessibility("/this/path/does/not/exist"),
-              AccessStatus::DoesNotExist);
+#include <filesystem>
+#include <fstream>
+
+class CheckAccessibilityTest : public ::testing::Test {
+  public:
+    fs::path temp_dir;
+
+  protected:
+    void SetUp() override {
+        temp_dir = fs::temp_directory_path() / "check_accessibility_test";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+    }
+
+    void TearDown() override { fs::remove_all(temp_dir); }
+};
+
+TEST_F(CheckAccessibilityTest, non_existent_file) {
+    fs::path nonexistent_file = temp_dir / "nonexistent.txt";
+    auto status = check_accessibility(nonexistent_file);
+    EXPECT_EQ(status, AccessStatus::DoesNotExist);
+}
+
+TEST_F(CheckAccessibilityTest, existing_file_readable) {
+    fs::path readable_file = temp_dir / "readable.txt";
+    {
+        std::ofstream ofs(readable_file);
+    }
+    auto status = check_accessibility(readable_file);
+    EXPECT_EQ(status, AccessStatus::Accessible);
+}
+
+TEST_F(CheckAccessibilityTest, directory_readable) {
+    fs::path readable_dir = temp_dir / "readable_dir";
+    fs::create_directories(readable_dir);
+
+    auto status = check_accessibility(readable_dir);
+    EXPECT_EQ(status, AccessStatus::Accessible);
+}
+
+TEST_F(CheckAccessibilityTest, file_insufficient_permission) {
+    fs::path unreadable_file = temp_dir / "unreadable.txt";
+    {
+        std::ofstream ofs(unreadable_file);
+    }
+
+    fs::permissions(unreadable_file, fs::perms::owner_read,
+                    fs::perm_options::remove);
+
+    auto status = check_accessibility(unreadable_file);
+    EXPECT_EQ(status, AccessStatus::InsufficientPermission);
+
+    fs::permissions(unreadable_file, fs::perms::owner_read,
+                    fs::perm_options::add);
+}
+
+TEST_F(CheckAccessibilityTest, directory_insufficient_permission) {
+    fs::path unreadable_dir = temp_dir / "unreadable_dir";
+    fs::create_directories(unreadable_dir);
+
+    // Remove read permissions from the owner
+    fs::permissions(unreadable_dir, fs::perms::owner_read,
+                    fs::perm_options::remove);
+
+    auto status = check_accessibility(unreadable_dir);
+    EXPECT_EQ(status, AccessStatus::InsufficientPermission);
+
+    fs::permissions(unreadable_dir, fs::perms::owner_read,
+                    fs::perm_options::add);
 }

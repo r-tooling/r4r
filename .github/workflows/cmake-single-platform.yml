@@ -62,21 +62,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      - name: Configure CMake
+      - name: Configure cmake
         run: make configure
       - name: Build project
         run: make build
-
-  # ─── JOB 3: Run tests ─────────────────────────────────────────────────────
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    needs: build
-    container: ghcr.io/${{ github.repository }}:latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - name: Execute tests
+      - name: Run tests
         run: make test
 
   # # ─── JOB 4: Generate coverage and run SonarCloud analysis ────────────────
