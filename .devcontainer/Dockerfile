@@ -12,8 +12,9 @@ RUN apt-get update -y  && \
   build-essential \
   cmake \
   gdb \
+  lcov \
   libcurl4-openssl-dev \
   ninja-build \
   pip \
   rr && \
-  pip install gcovr==5.0
+  pip install gcovr

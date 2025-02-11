@@ -23,8 +23,10 @@ TEST_DIR         = tests
 FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
 FORMAT_EXCLUDE  = 
 
-COVERAGE_REPORT_HTML     = $(BUILD_DIR)/coverage
-COVRAGE_REPORT_SONARCUBE = $(BUILD_DIR)/coverage-sonarcube.xml
+COVERAGE_REPORT_GCOVR_HTML = $(BUILD_DIR)/coverage-gcovr.html
+COVERAGE_REPORT_SONARCUBE  = $(BUILD_DIR)/coverage-sonarcube.xml
+COVERAGE_REPORT_LCOV       = $(BUILD_DIR)/coverage.lcov
+COVERAGE_REPORT_LCOV_HTML  = $(BUILD_DIR)/coverage-lcov
 
 #-------------------------------------------------------------------------------
 # Targets
@@ -46,12 +48,23 @@ coverage: ## Run tests with code coverage
 	$(MAKE) build CMAKE_ARGS='$(CMAKE_ARGS) -DENABLE_COVERAGE=ON'
 	cd $(BUILD_DIR) && \
 		$(CTEST) --output-on-failure -T Test -T Coverage
-	gcovr -r $(SOURCE_DIR) \
-			--html $(COVERAGE_REPORT_HTML) \
-			--html-details \
-			--sonarqube $(COVRAGE_REPORT_SONARCUBE) \
+	if command -v gcovr > /dev/null 2>&1; then \
+		gcovr -r $(SOURCE_DIR) \
+			--html-details $(COVERAGE_REPORT_GCOVR_HTML) \
+			--html-single-page js-enabled \
+			--sonarqube $(COVERAGE_REPORT_SONARCUBE) \
 			--exclude-directories "_deps" \
-			$(BUILD_DIR)
+			$(BUILD_DIR); \
+	fi
+	if command -v lcov > /dev/null 2>&1; then \
+		lcov --directory build \
+			--exclude '/usr/*' \
+			--exclude '**/_deps/*' \
+			--exclude '**/tests/*' \
+			--capture \
+			--output-file $(COVERAGE_REPORT_LCOV) && \
+			genhtml -o $(COVERAGE_REPORT_LCOV_HTML) $(COVERAGE_REPORT_LCOV); \
+	fi
 
 install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
