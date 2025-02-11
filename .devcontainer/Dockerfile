@@ -6,11 +6,12 @@ FROM mcr.microsoft.com/devcontainers/base:$BASE_IMAGE
 ENV LANG=en_US.UTF-8
 
 # install build time dependencies
-RUN apt update -y \
-  && apt install -y \
-    build-essential \
-    cmake \
-    gdb \
-    ninja-build \
-    rr
+RUN apt-get update -y  && \ 
+  apt-get install -y \
+  build-essential \
+  cmake \
+  libcurl4-openssl-dev \
+  gdb \
+  ninja-build \
+  rr
 

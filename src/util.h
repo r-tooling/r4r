@@ -239,7 +239,7 @@ inline std::optional<T> to_number(std::string_view const& s) {
 }
 
 template <typename Func>
-auto stopwatch(Func&& func) {
+inline auto stopwatch(Func&& func) {
     using clock = std::chrono::steady_clock;
 
     auto start = clock::now();
