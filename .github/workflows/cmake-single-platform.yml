@@ -81,14 +81,11 @@ jobs:
       - name: Generate coverage report
         run: make coverage
       - name: Run SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@master
+        uses: SonarSource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=$SONAR_PROJECT_KEY
-            -Dsonar.organization=$SONAR_ORGANIZATION
-            -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.cfamily.compile-commands=build/compile_commands.json
             -Dsonar.coverageReportPaths=build/coverage.sonarcube
 
