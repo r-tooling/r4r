@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<meta name="author" content="Jamie Lentin" />
+
+
+<title>Implementing a Work Queue using RPostgres</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+<script>// Hide empty <a> tag within highlighted CodeBlock for screen reader accessibility (see https://github.com/jgm/pandoc/issues/6352#issuecomment-626106786) -->
+// v0.0.1
+// Written by JooYoung Seo (jooyoung@psu.edu) and Atsushi Yasumoto on June 1st, 2020.
+
+document.addEventListener('DOMContentLoaded', function() {
+  const codeList = document.getElementsByClassName("sourceCode");
+  for (var i = 0; i < codeList.length; i++) {
+    var linkList = codeList[i].getElementsByTagName('a');
+    for (var j = 0; j < linkList.length; j++) {
+      if (linkList[j].innerHTML === "") {
+        linkList[j].setAttribute('aria-hidden', 'true');
+      }
+    }
+  }
+});
+</script>
+
+<style type="text/css">
+  code{white-space: pre-wrap;}
+  span.smallcaps{font-variant: small-caps;}
+  span.underline{text-decoration: underline;}
+  div.column{display: inline-block; vertical-align: top; width: 50%;}
+  div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+  ul.task-list{list-style: none;}
+    </style>
+
+
+
+<style type="text/css">
+  code {
+    white-space: pre;
+  }
+  .sourceCode {
+    overflow: visible;
+  }
+</style>
+<style type="text/css" data-origin="pandoc">
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+    color: #aaaaaa;
+  }
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code span.at { color: #7d9029; } /* Attribute */
+code span.bn { color: #40a070; } /* BaseN */
+code span.bu { } /* BuiltIn */
+code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code span.ch { color: #4070a0; } /* Char */
+code span.cn { color: #880000; } /* Constant */
+code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code span.dt { color: #902000; } /* DataType */
+code span.dv { color: #40a070; } /* DecVal */
+code span.er { color: #ff0000; font-weight: bold; } /* Error */
+code span.ex { } /* Extension */
+code span.fl { color: #40a070; } /* Float */
+code span.fu { color: #06287e; } /* Function */
+code span.im { } /* Import */
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code span.op { color: #666666; } /* Operator */
+code span.ot { color: #007020; } /* Other */
+code span.pp { color: #bc7a00; } /* Preprocessor */
+code span.sc { color: #4070a0; } /* SpecialChar */
+code span.ss { color: #bb6688; } /* SpecialString */
+code span.st { color: #4070a0; } /* String */
+code span.va { color: #19177c; } /* Variable */
+code span.vs { color: #4070a0; } /* VerbatimString */
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Implementing a Work Queue using RPostgres</h1>
+<h4 class="author">Jamie Lentin</h4>
+
+
+
+<pre><code>## Could not initialise default postgres database. If postgres is running
+## check that the environment variables PGHOST, PGPORT, 
+## PGUSER, PGPASSWORD, and PGDATABASE, are defined and
+## point to your database.</code></pre>
+<p>Imagine you have an R process that is relatively intensive, based on user input.</p>
+<p>To keep things as fast as possible, you may want to use several servers to all process incoming requests for square roots. However, to do this you need to co-ordinate between all of your servers (or workers). How do you decide which server works on what? What if one server dies mid-way? To decide this, we need a work queue, also known as a job queue or task queue. This document will show show you how to build a work queue system using R and PostgreSQL that would ordinarily require an external tool, like <a href="https://www.rabbitmq.com/">RabbitMQ</a>.</p>
+<p>In this example, our work will be generating square roots. We’ll keep track of the results in a table:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="kw">library</span>(DBI)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true"></a>con &lt;-<span class="st"> </span><span class="kw">dbConnect</span>(RPostgres<span class="op">::</span><span class="kw">Postgres</span>())</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true"></a><span class="kw">dbExecute</span>(con, <span class="st">&quot;DROP TABLE IF EXISTS sqroot_vignette_example;&quot;</span>)</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true"></a><span class="kw">dbExecute</span>(con, <span class="st">&quot;</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true"></a><span class="st">    CREATE TABLE sqroot_vignette_example (</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true"></a><span class="st">        in_val INTEGER PRIMARY KEY,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true"></a><span class="st">        out_val DOUBLE PRECISION NULL</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true"></a><span class="st">    )</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true"></a><span class="st">&quot;</span>)</span></code></pre></div>
+<p>When a client wants a square root value, it can insert a new row into a table, filling <code>in_val</code>. We’ll then have a bunch of workers that will calculate the results for the client, and fill in <code>out_val</code>.</p>
+<p>To manage these workers, we will combine 2 PostgreSQL concepts:</p>
+<div id="listen-notify" class="section level2">
+<h2>LISTEN / NOTIFY</h2>
+<p>The Postgres <code>LISTEN</code> and <code>NOTIFY</code> commands allow you to send and receive messages between clients connected to a PostgreSQL database. This is known as a publish/subscribe architecture.</p>
+<p>We tell Postgres that we are interested in receiving messages using <code>LISTEN</code>. For example:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true"></a>con &lt;-<span class="st"> </span><span class="kw">dbConnect</span>(RPostgres<span class="op">::</span><span class="kw">Postgres</span>())</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true"></a><span class="kw">dbExecute</span>(con, <span class="st">&quot;LISTEN grapevine&quot;</span>)</span></code></pre></div>
+<p>…in this case, “grapevine” is arbitrary, we don’t need to create channels ahead of time. To make sure we have something to receive, we can start a separate R process using <a href="https://CRAN.R-project.org/package=callr">callr</a>. Ordinarily this would be part of another R script, maybe on another computer. This will wait a bit, and use <code>NOTIFY</code> to send a message, then finish:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a>rp &lt;-<span class="st"> </span>callr<span class="op">::</span><span class="kw">r_bg</span>(<span class="cf">function</span>() {</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a>  <span class="kw">library</span>(DBI)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true"></a>  <span class="kw">Sys.sleep</span>(<span class="fl">0.3</span>)</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true"></a>  db_notify &lt;-<span class="st"> </span><span class="kw">dbConnect</span>(RPostgres<span class="op">::</span><span class="kw">Postgres</span>())</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true"></a>  <span class="kw">dbExecute</span>(db_notify, <span class="st">&quot;NOTIFY grapevine, &#39;psst&#39;&quot;</span>)</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true"></a>  <span class="kw">dbDisconnect</span>(db_notify)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true"></a>})</span></code></pre></div>
+<p>Finally, we should wait for any incoming messages. To do this, use <code>postgresWaitForNotify</code>. The payload will contain the message from the other R process:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="co"># Sleep until we get the message</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true"></a>n &lt;-<span class="st"> </span><span class="ot">NULL</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true"></a><span class="cf">while</span> (<span class="kw">is.null</span>(n)) {</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true"></a>  n &lt;-<span class="st"> </span>RPostgres<span class="op">::</span><span class="kw">postgresWaitForNotify</span>(con)</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true"></a>}</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true"></a>n<span class="op">$</span>payload</span></code></pre></div>
+</div>
+<div id="skip-locked" class="section level2">
+<h2>SKIP LOCKED</h2>
+<p>We can use LISTEN/NOTIFY to inform all workers that there is something to be done, but how do we decide which worker actually does the work? This is done using <code>SKIP LOCKED</code>.</p>
+<p>We notify all workers that the input <code>99</code> is ready for processing. After receiving this, they all do the following:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true"></a>rs &lt;-<span class="st"> </span><span class="kw">dbSendQuery</span>(con, <span class="st">&quot;</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true"></a><span class="st">    SELECT in_val</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true"></a><span class="st">      FROM sqroot_vignette_example</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true"></a><span class="st">     WHERE in_val = $1</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true"></a><span class="st">       FOR UPDATE</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true"></a><span class="st">      SKIP LOCKED</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true"></a><span class="st">&quot;</span>, <span class="dt">params =</span> <span class="kw">list</span>(<span class="dv">99</span>))</span></code></pre></div>
+<p>One lucky worker will get a row back, but thanks to <code>FOR UPDATE</code>, the row is now locked. For any other worker, as the row is now locked, they will skip over it (<code>SKIP LOCKED</code>) and find something else to do. If there are no other jobs available, then nothing will be returned.</p>
+<p>Using SKIP LOCKED is discussed in more detail <a href="https://www.2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5/">in this article</a>.</p>
+</div>
+<div id="implementing-our-worker" class="section level2">
+<h2>Implementing our worker</h2>
+<p>Now we can put the concepts together. The following implements our worker as a function (again, this would be running as a script on several servers):</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true"></a>worker &lt;-<span class="st"> </span><span class="cf">function</span>() {</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true"></a>  <span class="kw">library</span>(DBI)</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true"></a>  db_worker &lt;-<span class="st"> </span><span class="kw">dbConnect</span>(RPostgres<span class="op">::</span><span class="kw">Postgres</span>())</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true"></a>  <span class="kw">on.exit</span>(<span class="kw">dbDisconnect</span>(db_worker))</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true"></a>  <span class="kw">dbExecute</span>(db_worker, <span class="st">&quot;LISTEN sqroot&quot;</span>)</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true"></a>  <span class="kw">dbExecute</span>(db_worker, <span class="st">&quot;LISTEN sqroot_shutdown&quot;</span>)</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true"></a></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true"></a>  <span class="cf">while</span> (<span class="ot">TRUE</span>) {</span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true"></a>    <span class="co"># Wait for new work to do</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true"></a>    n &lt;-<span class="st"> </span>RPostgres<span class="op">::</span><span class="kw">postgresWaitForNotify</span>(db_worker, <span class="dv">60</span>)</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true"></a>    <span class="cf">if</span> (<span class="kw">is.null</span>(n)) {</span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true"></a>      <span class="co"># If nothing to do, send notifications of any not up-to-date work</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true"></a>      <span class="kw">dbExecute</span>(db_worker, <span class="st">&quot;</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true"></a><span class="st">                SELECT pg_notify(&#39;sqroot&#39;, in_val::TEXT)</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true"></a><span class="st">                  FROM sqroot_vignette_example</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true"></a><span class="st">                 WHERE out_val IS NULL</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true"></a><span class="st">            &quot;</span>)</span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true"></a>      <span class="cf">next</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true"></a>    }</span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true"></a></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true"></a>    <span class="co"># If we&#39;ve been told to shutdown, stop right away</span></span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true"></a>    <span class="cf">if</span> (n<span class="op">$</span>channel <span class="op">==</span><span class="st"> &#39;sqroot_shutdown&#39;</span>) {</span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true"></a>      <span class="kw">writeLines</span>(<span class="st">&quot;Shutting down.&quot;</span>)</span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true"></a>      <span class="cf">break</span></span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true"></a>    }</span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true"></a></span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true"></a>    in_val &lt;-<span class="st"> </span><span class="kw">strtoi</span>(n<span class="op">$</span>payload)</span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true"></a>    <span class="kw">tryCatch</span>(</span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true"></a>      {</span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true"></a>        <span class="kw">dbWithTransaction</span>(db_worker, {</span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true"></a>          <span class="co"># Try and fetch the item we got notified about</span></span>
+<span id="cb7-32"><a href="#cb7-32" aria-hidden="true"></a>          rs &lt;-<span class="st"> </span><span class="kw">dbSendQuery</span>(db_worker, <span class="st">&quot;</span></span>
+<span id="cb7-33"><a href="#cb7-33" aria-hidden="true"></a><span class="st">                    SELECT in_val</span></span>
+<span id="cb7-34"><a href="#cb7-34" aria-hidden="true"></a><span class="st">                      FROM sqroot_vignette_example</span></span>
+<span id="cb7-35"><a href="#cb7-35" aria-hidden="true"></a><span class="st">                     WHERE out_val IS NULL -- if another worker already finished, don&#39;t reprocess</span></span>
+<span id="cb7-36"><a href="#cb7-36" aria-hidden="true"></a><span class="st">                       AND in_val = $1</span></span>
+<span id="cb7-37"><a href="#cb7-37" aria-hidden="true"></a><span class="st">                       FOR UPDATE SKIP LOCKED -- Don&#39;t let another worker work on this at the same time</span></span>
+<span id="cb7-38"><a href="#cb7-38" aria-hidden="true"></a><span class="st">                &quot;</span>, <span class="dt">params =</span> <span class="kw">list</span>(in_val))</span>
+<span id="cb7-39"><a href="#cb7-39" aria-hidden="true"></a>          in_val &lt;-<span class="st"> </span><span class="kw">dbFetch</span>(rs)[<span class="dv">1</span>, <span class="dv">1</span>]</span>
+<span id="cb7-40"><a href="#cb7-40" aria-hidden="true"></a>          <span class="kw">dbClearResult</span>(rs)</span>
+<span id="cb7-41"><a href="#cb7-41" aria-hidden="true"></a></span>
+<span id="cb7-42"><a href="#cb7-42" aria-hidden="true"></a>          <span class="cf">if</span> (<span class="op">!</span><span class="kw">is.na</span>(in_val)) {</span>
+<span id="cb7-43"><a href="#cb7-43" aria-hidden="true"></a>            <span class="co"># Actually do the sqrt</span></span>
+<span id="cb7-44"><a href="#cb7-44" aria-hidden="true"></a>            <span class="kw">writeLines</span>(<span class="kw">paste</span>(<span class="st">&quot;Sqroot-ing&quot;</span>, in_val, <span class="st">&quot;... &quot;</span>))</span>
+<span id="cb7-45"><a href="#cb7-45" aria-hidden="true"></a>            <span class="kw">Sys.sleep</span>(in_val <span class="op">*</span><span class="st"> </span><span class="fl">0.1</span>)</span>
+<span id="cb7-46"><a href="#cb7-46" aria-hidden="true"></a>            out_val &lt;-<span class="st"> </span><span class="kw">sqrt</span>(in_val)</span>
+<span id="cb7-47"><a href="#cb7-47" aria-hidden="true"></a></span>
+<span id="cb7-48"><a href="#cb7-48" aria-hidden="true"></a>            <span class="co"># Update the datbase with the result</span></span>
+<span id="cb7-49"><a href="#cb7-49" aria-hidden="true"></a>            <span class="kw">dbExecute</span>(db_worker, <span class="st">&quot;</span></span>
+<span id="cb7-50"><a href="#cb7-50" aria-hidden="true"></a><span class="st">                      UPDATE sqroot_vignette_example</span></span>
+<span id="cb7-51"><a href="#cb7-51" aria-hidden="true"></a><span class="st">                         SET out_val = $1</span></span>
+<span id="cb7-52"><a href="#cb7-52" aria-hidden="true"></a><span class="st">                       WHERE in_val = $2</span></span>
+<span id="cb7-53"><a href="#cb7-53" aria-hidden="true"></a><span class="st">                  &quot;</span>, <span class="dt">params =</span> <span class="kw">list</span>(out_val, in_val))</span>
+<span id="cb7-54"><a href="#cb7-54" aria-hidden="true"></a>          } <span class="cf">else</span> {</span>
+<span id="cb7-55"><a href="#cb7-55" aria-hidden="true"></a>            <span class="kw">writeLines</span>(<span class="kw">paste</span>(<span class="st">&quot;Not sqroot-ing as another worker got there first&quot;</span>))</span>
+<span id="cb7-56"><a href="#cb7-56" aria-hidden="true"></a>          }</span>
+<span id="cb7-57"><a href="#cb7-57" aria-hidden="true"></a>        })</span>
+<span id="cb7-58"><a href="#cb7-58" aria-hidden="true"></a>      },</span>
+<span id="cb7-59"><a href="#cb7-59" aria-hidden="true"></a>      <span class="dt">error =</span> <span class="cf">function</span>(e) {</span>
+<span id="cb7-60"><a href="#cb7-60" aria-hidden="true"></a>        <span class="co"># Something went wrong. Report error and carry on</span></span>
+<span id="cb7-61"><a href="#cb7-61" aria-hidden="true"></a>        <span class="kw">writeLines</span>(<span class="kw">paste</span>(<span class="st">&quot;Failed to sqroot:&quot;</span>, e<span class="op">$</span>message))</span>
+<span id="cb7-62"><a href="#cb7-62" aria-hidden="true"></a>      })</span>
+<span id="cb7-63"><a href="#cb7-63" aria-hidden="true"></a>  }</span>
+<span id="cb7-64"><a href="#cb7-64" aria-hidden="true"></a>}</span></code></pre></div>
+<p>The worker connects to the database, starts listening and loops indefinitely.</p>
+<ul>
+<li>First, we wait for new notifications.</li>
+<li>If there aren’t any notifications, then we search for any old items and generate new notifications. This allows items to be picked up again if they didn’t get processed the first time around, e.g. because there were no workers listening.</li>
+<li>If we got a shutdown message, stop.</li>
+<li>Try to grab the row for the new item, if we win, and only one worker will, then fill in the square root.</li>
+</ul>
+<p>Let’s use callr again to start 2 workers:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true"></a>stdout_<span class="dv">1</span> &lt;-<span class="st"> </span><span class="kw">tempfile</span>()</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true"></a>stdout_<span class="dv">2</span> &lt;-<span class="st"> </span><span class="kw">tempfile</span>()</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true"></a>rp &lt;-<span class="st"> </span>callr<span class="op">::</span><span class="kw">r_bg</span>(worker, <span class="dt">stdout =</span> stdout_<span class="dv">1</span>, <span class="dt">stderr =</span> stdout_<span class="dv">1</span>)</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true"></a>rp &lt;-<span class="st"> </span>callr<span class="op">::</span><span class="kw">r_bg</span>(worker, <span class="dt">stdout =</span> stdout_<span class="dv">2</span>, <span class="dt">stderr =</span> stdout_<span class="dv">2</span>)</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true"></a><span class="kw">Sys.sleep</span>(<span class="dv">1</span>)  <span class="co"># Give workers a chance to set themselves up</span></span></code></pre></div>
+<p>Now our client can add some values to our table and notify the workers that there’s something to do:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true"></a>con &lt;-<span class="st"> </span><span class="kw">dbConnect</span>(RPostgres<span class="op">::</span><span class="kw">Postgres</span>())</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true"></a></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true"></a>add_sqroot &lt;-<span class="st"> </span><span class="cf">function</span>(in_val) {</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true"></a>  <span class="kw">dbExecute</span>(con, <span class="st">&quot;</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true"></a><span class="st">        INSERT INTO sqroot_vignette_example (in_val) VALUES ($1)</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true"></a><span class="st">    &quot;</span>, <span class="dt">params =</span> <span class="kw">list</span>(in_val))</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true"></a>  <span class="kw">dbExecute</span>(con, <span class="st">&quot;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true"></a><span class="st">        SELECT pg_notify(&#39;sqroot&#39;, $1)</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true"></a><span class="st">    &quot;</span>, <span class="dt">params =</span> <span class="kw">list</span>(in_val))</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true"></a>}</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true"></a></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true"></a><span class="kw">add_sqroot</span>(<span class="dv">7</span>)</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true"></a><span class="kw">add_sqroot</span>(<span class="dv">8</span>)</span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true"></a><span class="kw">add_sqroot</span>(<span class="dv">9</span>)</span></code></pre></div>
+<p>…after a wait, the answers should have been populated by the workers for us:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true"></a><span class="kw">Sys.sleep</span>(<span class="dv">3</span>)</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true"></a>rs &lt;-<span class="st"> </span><span class="kw">dbSendQuery</span>(con, <span class="st">&quot;SELECT * FROM sqroot_vignette_example ORDER BY in_val&quot;</span>)</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true"></a><span class="kw">dbFetch</span>(rs)</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true"></a><span class="kw">dbClearResult</span>(rs) ; rs &lt;-<span class="st"> </span><span class="ot">NULL</span></span></code></pre></div>
+<p>Finally, we can use <code>NOTIFY</code> to stop all the workers:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true"></a><span class="kw">dbExecute</span>(con, <span class="st">&quot;NOTIFY sqroot_shutdown, &#39;&#39;&quot;</span>)</span></code></pre></div>
+<p>And see what messages were printed as they run:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true"></a><span class="co"># We can&#39;t control which worker will process the first entry,</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true"></a><span class="co"># so we sort the results so the vignette output stays the same.</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true"></a>outputs &lt;-<span class="st"> </span><span class="kw">sort</span>(<span class="kw">c</span>(</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true"></a>  <span class="kw">paste</span>(<span class="kw">readLines</span>(<span class="dt">con =</span> stdout_<span class="dv">1</span>), <span class="dt">collapse =</span> <span class="st">&quot;</span><span class="ch">\n</span><span class="st">&quot;</span>),</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true"></a>  <span class="kw">paste</span>(<span class="kw">readLines</span>(<span class="dt">con =</span> stdout_<span class="dv">2</span>), <span class="dt">collapse =</span> <span class="st">&quot;</span><span class="ch">\n</span><span class="st">&quot;</span>)))</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true"></a></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true"></a><span class="kw">writeLines</span>(outputs[[<span class="dv">1</span>]])</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true"></a><span class="kw">writeLines</span>(outputs[[<span class="dv">2</span>]])</span></code></pre></div>
+<p>Notice that the work has been shared between the 2 workers. If these 2 weren’t enough, we could happily add more to keep the system going.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

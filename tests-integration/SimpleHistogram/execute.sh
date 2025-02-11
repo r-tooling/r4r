@@ -1,1 +1,0 @@
-'Rscript' '-e' 'rmarkdown::render("./sampleHist.Rmd", "pdf_document")' 

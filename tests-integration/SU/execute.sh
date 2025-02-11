@@ -1,1 +1,0 @@
-su 'adamep' '-c' 'whoami'

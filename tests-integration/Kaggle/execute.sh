@@ -1,1 +1,0 @@
-bash -c "cd code && Rscript -e \"rmarkdown::render('./titanic-2nd-degree-families-and-majority-voting.Rmd')\""

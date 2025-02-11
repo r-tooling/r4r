@@ -1,1 +1,0 @@
-ls -l '/usr/bin/c++' '/bin/c++' 

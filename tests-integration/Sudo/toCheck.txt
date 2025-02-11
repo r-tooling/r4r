@@ -1,2 +1,0 @@
-See if there is a way to make sudo work. AS of now it fails due to unknown reasons and puts the process into background.
-maybe see what strace does?
