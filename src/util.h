@@ -238,4 +238,15 @@ inline std::optional<T> to_number(std::string_view const& s) {
     return {};
 }
 
+template <typename Func>
+auto stopwatch(Func&& func) {
+    using clock = std::chrono::steady_clock;
+
+    auto start = clock::now();
+    auto result = std::forward<Func>(func)();
+    auto end = clock::now();
+
+    return std::make_pair(std::move(result), end - start);
+}
+
 #endif // UTIL_H

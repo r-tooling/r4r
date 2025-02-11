@@ -91,7 +91,10 @@ class StoreSink : public LogSink {
               line(ev.line) {}
 
         [[nodiscard]] LogEvent to_log_event() const {
-            return {.level=level, .message=message, .filename=filename, .line=line};
+            return {.level = level,
+                    .message = message,
+                    .filename = filename,
+                    .line = line};
         }
     };
 
@@ -115,6 +118,10 @@ class Logger {
     static Logger& get() {
         static Logger instance;
         return instance;
+    }
+
+    static bool is_level_enabled(LogLevel level) {
+        return get().is_enabled(level);
     }
 
     void enable(LogLevel level) { set_level(level, true); }

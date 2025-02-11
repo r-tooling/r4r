@@ -286,17 +286,17 @@ class ManifestFormat {
     void write(std::ostream& out) const {
         // TODO: use kCommentChar
         if (!preamble_.empty()) {
-            prefixed_ostream(out, "# ", [&] { out << preamble_; });
+            with_prefixed_ostream(out, "# ", [&] { out << preamble_; });
             out << "\n\n";
         }
 
         for (auto const& [name, content, preamble] : sections_) {
             if (!preamble.empty()) {
-                prefixed_ostream(out, "# ", [&] { out << preamble; });
+                with_prefixed_ostream(out, "# ", [&] { out << preamble; });
                 out << '\n';
             }
             out << name << ':' << '\n';
-            prefixed_ostream(out, "  ", [&] { out << content; });
+            with_prefixed_ostream(out, "  ", [&] { out << content; });
             out << "\n\n";
         }
     }
@@ -337,121 +337,5 @@ class ManifestFormat {
         return is_valid_section_name(name);
     }
 };
-
-// inline void CopyFileManifest::load_from_manifest(std::istream& stream) {
-//     files_.clear();
-//
-//     std::string line;
-//     while (std::getline(stream, line)) {
-//         line = string_trim(line);
-//         bool copy;
-//
-//         if (line.starts_with("C")) {
-//             copy = true;
-//         } else if (line.starts_with("R")) {
-//             copy = false;
-//         } else {
-//             LOG_WARN(log_) << "Invalid line: " << line;
-//             continue;
-//         }
-//
-//         line = line.substr(1);
-//         line = string_trim(line);
-//         if (line.starts_with('"')) {
-//             if (line.ends_with('"')) {
-//                 line = line.substr(1, line.size() - 2);
-//             } else {
-//                 LOG_WARN(log_) << "Invalid path: " << line;
-//                 continue;
-//             }
-//         }
-//
-//         if (copy) {
-//             files_.emplace(line, Status::Copy);
-//         } else {
-//             results_.insert(line);
-//         }
-//     }
-//
-//     LOG_INFO(log_) << "Loaded " << files_.size() << " files from manifest";
-// }
-//
-// inline void
-// CopyFileManifest::write_to_manifest(ManifestFormat::Section& section) const {
-//     if (files_.empty()) {
-//         section.preamble = "No files will be copies";
-//         return;
-//     }
-//
-//     section.preamble =
-//         STR("The following "
-//             << files_.size() << " files has not been resolved.\n"
-//             << "By default, they will be copied, unless explicitly
-//             ignored.\n"
-//             << "C - mark file to be copied into the image.\n"
-//             << "R - mark as additional result file.");
-//
-//     std::ostringstream content;
-//     for (auto& [path, status] : files_) {
-//         if (status == Status::Copy) {
-//             content << "C " << path << "\n";
-//         } else {
-//             content << ManifestFormat::comment() << " " << path << " "
-//                     << ManifestFormat::comment() << " " << status << "\n";
-//         }
-//     }
-//     section.content = content.str();
-// }
-
-// class Manifest {
-//   public:
-//     template <std::derived_from<ManifestPart> T, typename... Args>
-//     void add(std::string const& key, Args&&... args) {
-//         parts_.emplace(key,
-//         std::make_unique<T>(std::forward<Args>(args)...));
-//         index_.emplace_back(key);
-//     }
-//
-//     void load_from_files(std::vector<FileInfo>& files) {
-//         for (auto& name : index_) {
-//             parts_.at(name)->load_from_files(files);
-//         }
-//     }
-//
-//     void load_from_manifest(std::istream& stream) {
-//         auto format = ManifestFormat::from_stream(stream);
-//         for (auto& [name, content, _] : format) {
-//             auto it = parts_.find(name);
-//             if (it == parts_.end()) {
-//                 throw std::runtime_error("Unknown section: " + name);
-//             }
-//             auto& m = *(it->second);
-//             std::istringstream section_stream{content};
-//             m.load_from_manifest(section_stream);
-//         }
-//     };
-//
-//     void write_to_manifest(ManifestFormat& format) const {
-//         for (auto& name : index_) {
-//             ManifestFormat::Section section{name};
-//             parts_.at(name)->write_to_manifest(section);
-//             if (!section.content.empty()) {
-//                 format.add_section(section);
-//             }
-//         }
-//     };
-//
-//     void write_to_docker(DockerFileBuilder& builder) const {
-//         for (auto& name : index_) {
-//             builder.nl();
-//             parts_.at(name)->write_to_docker(builder);
-//         }
-//     };
-//
-//   private:
-//     static inline Logger& log_ = LogManager::logger("composed-manifest");
-//     std::unordered_map<std::string, std::unique_ptr<ManifestPart>> parts_;
-//     std::vector<std::string> index_;
-// };
 
 #endif // MANIFEST_H

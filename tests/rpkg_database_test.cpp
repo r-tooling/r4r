@@ -149,5 +149,5 @@ TEST(RPackagesTest, SystemDependencies) {
 
     // TODO: assert no warnings
     ASSERT_EQ(res.size(), 1);
-    ASSERT_EQ(res[0], "libpq-dev");
+    ASSERT_TRUE(res.contains("libpq-dev"));
 }

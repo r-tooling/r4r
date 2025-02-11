@@ -15,6 +15,7 @@
 #include "user.h"
 #include "util.h"
 #include "util_fs.h"
+#include "util_io.h"
 
 #include <fcntl.h>
 #include <filesystem>
@@ -33,7 +34,7 @@
 #include <vector>
 
 struct Options {
-    LogLevel log_level = LogLevel::Info;
+    LogLevel log_level = LogLevel::Warning;
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
     std::string docker_base_image{"ubuntu:22.04"};
@@ -83,21 +84,21 @@ class TracingTask : public Task<TracingResult> {
 
         // this is just to support the stop()
         monitor_ = &monitor;
-
-        auto start = std::chrono::steady_clock::now();
-        auto result = monitor_->start();
+        auto [result, elapsed] = stopwatch([&] { return monitor_->start(); });
         monitor_ = nullptr;
 
-        LOG(INFO) << "Finished tracing in "
-                  << format_elapsed_time(start -
-                                         std::chrono::steady_clock::now());
+        LOG(INFO) << "Finished tracing in " << format_elapsed_time(elapsed);
 
         // print the postponed messages
         auto sink = Logger::get().set_sink(std::move(old_log_sink));
         auto const& events =
             dynamic_cast<StoreSink*>(sink.get())->get_messages();
+
+        LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls and "
+                  << tracer.files().size() << " files";
+
         if (!events.empty()) {
-            LOG(INFO) << "There were " << events.size()
+            LOG(INFO) << "While tracing, there were " << events.size()
                       << " log event(s) captured during tracing";
             for (auto const& e : events) {
                 Logger::get().log(e.to_log_event());
@@ -144,7 +145,7 @@ class TracingTask : public Task<TracingResult> {
 
   private:
     std::vector<std::string> const& cmd_;
-    SyscallMonitor* monitor_;
+    SyscallMonitor* monitor_{};
 };
 
 struct Environment {
@@ -159,7 +160,9 @@ class CaptureEnvironmentTask : public Task<Environment> {
         Environment envir;
 
         envir.cwd = std::filesystem::current_path();
+        LOG(DEBUG) << "Current working directory: " << envir.cwd;
         envir.user = UserInfo::get_current_user_info();
+        LOG(DEBUG) << "Current user: " << envir.user.username;
 
         if (environ != nullptr) {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
@@ -173,7 +176,7 @@ class CaptureEnvironmentTask : public Task<Environment> {
                 }
             }
         } else {
-            LOG(WARN) << "Unable to get environment variables";
+            LOG(WARN) << "Failed to get environment variables";
         }
 
         return envir;
@@ -208,7 +211,6 @@ class ResolveTask : public Task<Resolvers> {
                                            dpkg_database);
         resolvers.add<CopyFileResolver>("copy", cwd_, result_files_);
 
-        LOG(INFO) << "Resolving " << files_.size() << " files";
         resolvers.load_from_files(files_);
 
         return resolvers;
@@ -317,7 +319,7 @@ class ManifestTask : public Task<Manifest> {
             } else if (line.starts_with("R")) {
                 copy = false;
             } else {
-                LOG(WARN) << "Invalid line: " << line;
+                LOG(WARN) << "Invalid manifest line: " << line;
                 continue;
             }
 
@@ -373,25 +375,12 @@ class ManifestTask : public Task<Manifest> {
             return false;
         }
 
-        std::string command = STR(editor << " " << path.string());
-
-        LOG(DEBUG) << "Opening the manifest file: " << command;
-        int status = std::system(command.c_str());
-        if (status == -1) {
-            LOG(ERROR) << "Failed to open the manifest file: " << command;
-            return false;
-        }
-
-        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-            int exit_code = WEXITSTATUS(status);
-            LOG(DEBUG) << "Editor: " << command << " exit code: " << exit_code;
-            return false;
-        }
-
-        if (WIFSIGNALED(status)) {
-            int signal = WTERMSIG(status);
-            LOG(DEBUG) << "Editor: " << command
-                       << " terminated by signal: " << signal;
+        LOG(DEBUG) << "Opening the manifest file: " << path << " using "
+                   << editor;
+        auto exit_code = Command{editor}.arg(path).spawn().wait();
+        if (exit_code == -1) {
+            LOG(ERROR) << "Failed to open the manifest file. Exit code: "
+                       << exit_code;
             return false;
         }
 
@@ -569,56 +558,69 @@ class MakefileBuilderTask : public Task<fs::path> {
     void generate_makefile(std::ostream& makefile) {
         // TODO: make sure it executes in the same dir as the makefile
         // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
-        makefile
-            << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
-            << "CONTAINER_NAME = " << options_.docker_container_name
-            << "\n"
-            // TODO: add to settings
-            << "TARGET_DIR = out"
-            << "\n\n"
 
-            << "fg_blue  = \033[1;34m\n"
-            << "fg_reset = \033[0m\n"
+        makefile << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
+                 << "CONTAINER_NAME = " << options_.docker_container_name
+                 << "\n"
+                 // TODO: add to settings
+                 << "TARGET_DIR = result"
+                 << "\n\n"
 
-            << "docker_build = [$(fg_blue)docker-build$(fg_reset)]\n"
-            << "docker_run   = [$(fg_blue)docker-run$(fg_reset)]\n"
-            << "docker_copy  = [$(fg_blue)docker-copy$(fg_reset)]\n"
+                 << "fg_blue  = \033[1;34m\n"
+                 << "fg_reset = \033[0m\n"
 
-            << ".PHONY: all build run copy clean\n\n"
+                 << "log_build = [$(fg_blue)build$(fg_reset)]\n"
+                 << "log_run   = [$(fg_blue)run$(fg_reset)]\n"
+                 << "log_copy  = [$(fg_blue)copy$(fg_reset)]\n"
+                 << "log_clean = [$(fg_blue)clean$(fg_reset)]\n"
 
-            << "all: clean copy\n\n"
+                 << ".PHONY: all build run copy clean\n\n"
 
-            << "build:\n"
-            << "\t@echo '$(docker_build) build image $(IMAGE_TAG)'\n"
-            << "\t@docker build --progress=plain -t $(IMAGE_TAG) ."
-            << " 2>&1 | tee docker-build.log"
-            << " | sed 's/^/$(docker_build) /'\n\n"
+                 << "all: clean copy\n\n"
 
-            << "run: build\n"
-            << "\t@echo '$(docker_run) running container $(CONTAINER_NAME)'\n"
-            << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) "
-            << " 2>&1 | tee docker-run.log"
-            << " | sed 's/^/$(docker_run) /'\n\n"
+                 // clang-format off
+                 << "build:\n"
+                 << "\t@echo '$(log_build) build image $(IMAGE_TAG)'\n"
+                 << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
+                 << " | tee docker-build.log"
+                 << " | fold"
+                 << " | sed 's/^/$(log_build) /'"
+                 << "\n\n"
+                 // clang-format on
 
-            << "copy: run\n"
-            << "\t@echo '$(docker_copy) copying files'\n"
-            << "\t@rm -f docker-copy.log\n"
-            << "\t@mkdir -p $(TARGET_DIR)\n";
+                 // clang-format off
+                 << "run: build\n"
+                 << "\t@echo '$(log_run) running container $(CONTAINER_NAME)'\n"
+                 << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
+                 << " | tee docker-run.log"
+                 << " | fold"
+                 << " | sed 's/^/$(log_run) /'"
+                 << "\n\n"
+                 // clang-format on
+
+                 << "copy: run\n"
+                 << "\t@echo\n" // add a new line in case the docker run did not
+                                // finish with one
+                 << "\t@echo '$(log_copy) copying files'\n"
+                 << "\t@mkdir -p $(TARGET_DIR)\n";
 
         for (auto const& file : options_.results) {
-            makefile << "\t@echo -n '$(docker_copy)' copying file: " << file
-                     << "...\n"
+            makefile << "\t@echo -n '$(log_copy)' - " << file << "...\n"
                      << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
                      << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
                         "failed'"
                      << "\n";
         }
 
-        makefile << "\n"
-                 << "clean:\n"
-                 << "\t-docker rm $(CONTAINER_NAME)\n"
-                 << "\t-docker rmi $(IMAGE_TAG)\n"
-                 << "\trm -rf $(TARGET_DIR)\n\n";
+        makefile
+            << "\n"
+            << "clean:\n"
+            << "\t@echo '$(log_clean) cleaning previous container (if any)'\n"
+            << "\t-docker rm $(CONTAINER_NAME)\n"
+            << "\t@echo '$(log_clean) cleaning previous image (if any)'\n"
+            << "\t-docker rmi $(IMAGE_TAG)\n"
+            << "\t@echo '$(log_clean) cleaning previous result (if any)'\n"
+            << "\trm -rf $(TARGET_DIR)\n\n";
     }
 
   private:
@@ -635,12 +637,19 @@ class RunMakefileTask : public Task<int> {
 
     int run() override {
         LOG(INFO) << "Running Makefile: " << makefile_;
-        auto exit_code = Command("make")
-                             .arg("-f")
-                             .arg(makefile_.filename())
-                             .current_dir(makefile_.parent_path())
-                             .spawn()
-                             .wait();
+        auto proc = Command("make")
+                        .arg("-f")
+                        .arg(makefile_.filename())
+                        .current_dir(makefile_.parent_path())
+                        .set_stderr(Stdio::Merge)
+                        .set_stdout(Stdio::Pipe)
+                        .spawn();
+
+        int fd = proc.stdout_fd();
+        with_prefixed_ostream(std::cout, "make> ",
+                              [fd] { forward_output(fd, std::cout, ""); });
+
+        auto exit_code = proc.wait();
 
         if (exit_code != 0) {
             throw TaskException("Failed to run make");
@@ -670,23 +679,23 @@ class Tracer {
 
   private:
     void run_pipeline() {
-        auto envir = run("capture environment", CaptureEnvironmentTask{});
+        auto envir = run("Capture environment", CaptureEnvironmentTask{});
 
-        auto files = run("tracer", TracingTask{options_.cmd});
+        auto files = run("File tracer", TracingTask{options_.cmd});
 
         auto resolvers =
-            run("resolver", ResolveTask{files, options_.results, envir.cwd,
-                                        options_.R_bin});
+            run("File resolver", ResolveTask{files, options_.results, envir.cwd,
+                                             options_.R_bin});
         auto manifest =
-            run("manifest",
+            run("Manifest builder",
                 ManifestTask{resolvers, options_.output_dir, options_.results});
 
-        run("dokcer file builder",
+        run("Docker file builder",
             DockerFileBuilderTask{options_, envir, manifest});
 
-        run("makefile builder", MakefileBuilderTask{options_});
+        run("Makefile builder", MakefileBuilderTask{options_});
 
-        run("make", RunMakefileTask{options_.makefile});
+        run("Make runner", RunMakefileTask{options_.makefile});
     }
 
     void configure() {
@@ -700,17 +709,6 @@ class Tracer {
         if (options_.makefile.empty()) {
             options_.makefile = options_.output_dir / "Makefile";
         }
-    }
-
-    template <typename Func>
-    auto stopwatch(Func&& func) {
-        using clock = std::chrono::steady_clock;
-
-        auto start = clock::now();
-        auto result = std::forward<Func>(func)();
-        auto end = clock::now();
-
-        return std::make_pair(std::move(result), end - start);
     }
 
     template <typename T>

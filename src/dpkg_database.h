@@ -70,7 +70,7 @@ inline DebPackages DpkgParser::parse() {
                                  std::make_unique<DebPackage>(name, version));
             }
         } else {
-            LOG(WARN) << "Unexpected line from dpkg: " << line;
+            LOG(WARN) << "Failed to parse line from dpkg: " << line;
         }
     }
 

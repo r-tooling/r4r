@@ -66,14 +66,15 @@ class DefaultImageFiles {
 
         std::string bf_pattern = string_join(blacklist_patterns, '|');
 
-        auto out = Command("docker")
-                       .arg("docker")
-                       .arg("run")
-                       .arg("--rm")
-                       .arg(image_name)
-                       .arg("bash")
-                       .arg("-c")
-                       // clang-format off
+        auto out =
+            Command("docker")
+                .arg("docker")
+                .arg("run")
+                .arg("--rm")
+                .arg(image_name)
+                .arg("bash")
+                .arg("-c")
+                // clang-format off
                 .arg(STR(
                    "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
                     R""(
@@ -83,8 +84,8 @@ class DefaultImageFiles {
                         echo "$file${DELIM}${stat}${DELIM}${sha1}"
                     done
                 )""))
-                       // clang-format on
-                       .output();
+                // clang-format on
+                .output();
 
         out.check_success("Unable to initialize default file list for " +
                           image_name);
@@ -113,7 +114,7 @@ class DefaultImageFiles {
             }
 
             if (tokens.size() < 6) {
-                LOG(WARN) << "Failed not parse line: " << line;
+                LOG(WARN) << "Failed to parse line: " << line;
                 continue;
             }
             std::string const& path = tokens[0];
@@ -124,26 +125,25 @@ class DefaultImageFiles {
             std::string const& sha1 = tokens[5];
 
             if (size_str == "error" || sha1 == "error") {
-                LOG(WARN) << "Failed to get data for " << path;
+                LOG(WARN) << "Failed to get data: " << path;
                 continue;
             }
 
-            std::uintmax_t size;
+            std::uintmax_t size{};
             try {
-                // FIXME: is there some C++ way std::error_code
                 size = static_cast<std::uintmax_t>(std::stoull(size_str));
-            } catch (...) {
-                LOG(WARN) << "Failed to get size: " << path
-                          << " not convertible" << size_str;
+            } catch (std::exception const& e) {
+                LOG(WARN) << "Failed to get size: " << path << " - " << size_str
+                          << " - not convertible: " << e.what();
                 continue;
             }
 
-            unsigned perm;
+            unsigned perm{};
             try {
                 perm = static_cast<unsigned>(std::stoul(perm_str));
-            } catch (...) {
-                LOG(WARN) << "WARNING: " << path
-                          << ": permission not convertable " << perm_str;
+            } catch (std::exception const& e) {
+                LOG(WARN) << "Failed to get permissions: " << path << " - "
+                          << perm_str << " - not convertible: " << e.what();
                 continue;
             }
 

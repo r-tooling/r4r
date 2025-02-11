@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "process.h"
 #include "util.h"
+#include "util_io.h"
 
 #include <cstdint>
 #include <cstring>
@@ -89,8 +90,6 @@ class SyscallMonitor {
     void handle_stop(pid_t pid, int status);
 
     void handle_syscall(pid_t pid);
-
-    static void forward_output(int read_fd, std::ostream& os, char const* tag);
 
     static std::function<int()>
     spawn_process(std::vector<std::string> const& cmd);
@@ -326,13 +325,13 @@ inline SyscallMonitor::Result SyscallMonitor::monitor() {
             if (wpid == tracee_pid_) {
                 auto exit_code = WEXITSTATUS(status);
                 if (exit_code == kSpawnErrorExitCode) {
-                    return {Result::Failure, {}};
+                    return {.kind = Result::Failure, .detail = {}};
                 }
-                return {Result::Exit, WEXITSTATUS(status)};
+                return {.kind = Result::Exit, .detail = WEXITSTATUS(status)};
             }
         } else if (WIFSIGNALED(status)) {
             if (wpid == tracee_pid_) {
-                return {Result::Signal, WTERMSIG(status)};
+                return {.kind = Result::Signal, .detail = WTERMSIG(status)};
             }
         } else if (WIFSTOPPED(status)) {
             handle_stop(wpid, status);
@@ -377,7 +376,7 @@ inline void SyscallMonitor::handle_syscall(pid_t pid) {
     size_t size = sizeof(si);
     if (ptrace(PTRACE_GET_SYSCALL_INFO, pid, (void*)size, &si) == -1) {
         std::cerr << "Failed to PTRACE_GET_SYSCALL_INFO: " << strerror(errno)
-                  << std::endl;
+                  << '\n';
     }
 
     if (si.op == PTRACE_SYSCALL_INFO_ENTRY) {
@@ -387,33 +386,11 @@ inline void SyscallMonitor::handle_syscall(pid_t pid) {
     }
 }
 
-inline void SyscallMonitor::forward_output(int read_fd, std::ostream& os,
-                                           char const* tag) {
-    constexpr size_t BUFFER_SIZE = 1024;
-    std::array<char, BUFFER_SIZE> buffer{};
-    while (true) {
-        ssize_t bytes = ::read(read_fd, buffer.data(), buffer.size());
-        if (bytes == 0) {
-            break; // EOF
-        }
-        if (bytes < 0) {
-            if (errno == EINTR) {
-                continue; // retry
-            }
-            std::cerr << "[Tracer] " << tag
-                      << " read error: " << strerror(errno) << std::endl;
-            break;
-        }
-        os.write(buffer.data(), bytes);
-        os.flush();
-    }
-}
-
 inline std::function<int()>
 SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
     return [&cmd]() -> int {
         auto c_args = collection_to_c_array(cmd);
-        const auto& program = cmd.front();
+        auto const& program = cmd.front();
         execvp(program.c_str(), c_args.data());
 
         std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";

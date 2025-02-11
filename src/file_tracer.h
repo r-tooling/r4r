@@ -33,6 +33,8 @@ class FileTracer : public SyscallListener {
 
     Files const& files() const { return files_; }
 
+    std::uint64_t syscalls_count() const { return syscalls_count_; }
+
   private:
     void register_file(FileInfo info);
 
@@ -80,7 +82,7 @@ class FileTracer : public SyscallListener {
                 // it succeeded so it has to exist
                 info.existed_before = true;
 
-                LOG(DEBUG) << "execve " << info.path;
+                LOG(DEBUG) << "Syscall execve " << info.path;
 
                 register_file(info);
             } else {
@@ -107,6 +109,7 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
+    std::uint64_t syscalls_count_{0};
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
     Warnings warnings_;
@@ -114,7 +117,9 @@ class FileTracer : public SyscallListener {
 
 inline void FileTracer::on_syscall_entry(pid_t pid, std::uint64_t syscall,
                                          uint64_t* args) {
-    LOG(TRACE) << "syscall_entry: " << syscall << " pid: " << pid;
+    LOG(TRACE) << "Syscall entry: " << syscall << " pid: " << pid;
+
+    syscalls_count_++;
 
     auto it = kHandlers_.find(syscall);
     if (it == kHandlers_.end()) {
@@ -136,7 +141,7 @@ inline void FileTracer::on_syscall_entry(pid_t pid, std::uint64_t syscall,
 
 inline void FileTracer::on_syscall_exit(pid_t pid, SyscallRet ret_val,
                                         bool is_error) {
-    LOG(TRACE) << "syscall_exit: pid: " << pid;
+    LOG(TRACE) << "Syscall exit: pid: " << pid;
 
     auto node = state_.extract(pid);
     if (node) {
@@ -157,16 +162,16 @@ inline void FileTracer::register_file(FileInfo info) {
     if (!path.is_absolute()) {
         path = fs::absolute(path, ec);
         if (ec) {
-            LOG(WARN) << "Failed to resolve path to absolute:  " << info.path
-                      << ": " << ec.message();
+            LOG(WARN) << "Failed to resolve path:  " << info.path << " - "
+                      << ec.message();
         }
     }
 
-    if (info.existed_before) {
+    if (info.existed_before && fs::is_regular_file(path)) {
         auto size = fs::file_size(path, ec);
 
         if (ec) {
-            LOG(WARN) << "Failed to get file size of:  " << path << ": "
+            LOG(WARN) << "Failed to get file size of:  " << path << " - "
                       << ec.message();
         } else {
             info.size = size;
@@ -181,7 +186,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
                                            FileTracer::SyscallState& state) {
     fs::path result;
 
-    LOG(DEBUG) << "open " << pathname;
+    LOG(TRACE) << "Syscall open " << pathname;
 
     // the logic comes from the behavior of openat(2):
     if (pathname.is_absolute()) {
@@ -197,7 +202,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
         } else {
             auto d = resolve_fd_filename(pid, dirfd);
             if (!d) {
-                LOG(WARN) << "Failed to resolve dirfd: " << dirfd;
+                LOG(WARN) << "Failed to resolve dir fd: " << dirfd;
                 return;
             }
             result = *d;
@@ -208,7 +213,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
     std::error_code ec;
     bool exists = fs::exists(result, ec);
     if (ec) {
-        LOG(WARN) << "Failed to check if file exists: " << result << ": "
+        LOG(WARN) << "Failed to check if file exists: " << result << " - "
                   << ec.message();
         return;
     }
@@ -244,13 +249,11 @@ void FileTracer::generic_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                 resolve_fd_filename(pid, static_cast<int>(ret_val));
 
             if (!exit_file) {
-                LOG(WARN) << "Unable to resolve fd: " << ret_val
-                          << " to a path";
+                LOG(WARN) << "Failed to resolve fd to a path: " << ret_val;
             } else if (!fs::equivalent(*exit_file, entry_file, ec)) {
                 if (ec) {
-                    LOG(WARN)
-                        << "File entry/exit not-comparable: " << entry_file
-                        << " vs " << *exit_file << ": " << ec.message();
+                    LOG(WARN) << "Failed to comparable files: " << entry_file
+                              << " vs " << *exit_file << " - " << ec.message();
                 } else {
                     LOG(WARN) << "File entry/exit mismatch: " << entry_file
                               << " vs " << *exit_file;

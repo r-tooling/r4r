@@ -1,6 +1,8 @@
 #ifndef CURL_H
 #define CURL_H
 
+#include "logger.h"
+#include "util.h"
 #include <curl/curl.h>
 #include <curl/multi.h>
 #include <map>
@@ -56,6 +58,9 @@ class CURLMultipleTransfer {
 
         int is_running{1};
 
+        LOG(TRACE) << "Starting CURL batch, size: " << requests_.size()
+                   << " parallel: " << parallel_;
+
         while (is_running && !requests_.empty()) {
             curl_multi_perform(cm_, &is_running);
 
@@ -74,9 +79,26 @@ class CURLMultipleTransfer {
                     results.emplace(
                         req->key,
                         HttpResult{static_cast<int>(http_code), req->response});
+
+                    if (Logger::is_level_enabled(TRACE)) {
+                        char* url{};
+                        curl_easy_getinfo(msg->easy_handle,
+                                          CURLINFO_EFFECTIVE_URL, &url);
+                        curl_off_t total{};
+                        curl_easy_getinfo(msg->easy_handle,
+                                          CURLINFO_TOTAL_TIME_T, &total);
+                        std::chrono::microseconds total_chrono{total};
+                        LOG(TRACE) << "Finished CURL task: " << url << " in "
+                                   << format_elapsed_time(total_chrono);
+                    }
                 } else {
-                    results.emplace(req->key, std::string{curl_easy_strerror(
-                                                  msg->data.result)});
+                    char const* error = curl_easy_strerror(msg->data.result);
+                    results.emplace(req->key, std::string{error});
+
+                    char* url{};
+                    curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL,
+                                      &url);
+                    LOG(WARN) << "Failed CURL task: " << url << " in " << error;
                 }
 
                 curl_multi_remove_handle(cm_, msg->easy_handle);

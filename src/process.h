@@ -146,6 +146,10 @@ class Child {
         return data;
     }
 
+    [[nodiscard]] int stdout_fd() const { return stdout_.read(); }
+
+    [[nodiscard]] int stderr_fd() const { return stderr_.read(); }
+
     [[nodiscard]] pid_t pid() const { return pid_; }
 
   private:
@@ -282,7 +286,7 @@ inline Child Command::spawn() {
             }
         }
 
-        LOG(TRACE) << "Running command " << string_join(args_, ' ');
+        LOG(TRACE) << "Running command: " << string_join(args_, ' ');
 
         for (auto& [k, v] : envs_) {
             ::setenv(k.c_str(), v.c_str(), 1);

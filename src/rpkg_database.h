@@ -91,9 +91,9 @@ class RpkgDatabase {
         return r != nullptr ? *r : nullptr;
     }
 
-    std::vector<std::string> get_system_dependencies(
-        std::unordered_set<RPackage const*> const& pkgs) const {
-        std::vector<std::string> dependencies;
+    static std::unordered_set<std::string>
+    get_system_dependencies(std::unordered_set<RPackage const*> const& pkgs) {
+        std::unordered_set<std::string> dependencies;
 
         CURLMultipleTransfer<RPackage const*> curl{10};
 
@@ -130,15 +130,17 @@ class RpkgDatabase {
                 }
 
                 auto deps =
-                    json_query<JsonArray>(reqs, "0.requirements.packages");
+                    json_query<JsonArray>(reqs[0], "requirements.packages");
+
                 for (auto const& dep : deps) {
-                    dependencies.push_back(std::get<std::string>(dep));
+                    dependencies.insert(std::get<std::string>(dep));
                 }
             } catch (std::exception const& e) {
-                LOG(WARN) << "Unable to get system dependencies for " << p->name
+                LOG(WARN) << "Failed to get system dependencies for " << p->name
                           << " : " << e.what();
             }
         }
+
         return dependencies;
     };
 
@@ -204,7 +206,7 @@ class RpkgDatabase {
 
             auto tokens = string_split_n<8>(line, NBSP);
             if (!tokens) {
-                LOG(WARN) << "Unable to parse installed.package() output line: "
+                LOG(WARN) << "Failed to parse installed.package() output line: "
                           << line;
                 continue;
             }

@@ -1,8 +1,11 @@
 #ifndef UTIL_IO_H
 #define UTIL_IO_H
 
+#include <array>
+#include <cstring>
 #include <iostream>
 #include <streambuf>
+#include <unistd.h>
 template <typename Filter>
 class FilteringOutputStreamBuf : public std::streambuf {
   public:
@@ -44,17 +47,40 @@ class LinePrefixingFilter {
 
   private:
     std::string prefix_;
-    bool at_nl;
+    bool at_nl{true};
 };
 
 template <typename Fn>
-void prefixed_ostream(std::ostream& dst, std::string const& prefix, Fn fn) {
+inline void with_prefixed_ostream(std::ostream& dst, std::string const& prefix,
+                                  Fn fn) {
     auto* old = dst.rdbuf();
-    FilteringOutputStreamBuf prefix_buf(old, LinePrefixingFilter{prefix});
+    FilteringOutputStreamBuf prefix_buf(dst.rdbuf(),
+                                        LinePrefixingFilter{prefix});
     dst.rdbuf(&prefix_buf);
     fn();
     dst.flush();
     dst.rdbuf(old);
+}
+
+inline void forward_output(int read_fd, std::ostream& os, char const* tag) {
+    constexpr size_t BUFFER_SIZE = 1024;
+    std::array<char, BUFFER_SIZE> buffer{};
+    while (true) {
+        ssize_t bytes = ::read(read_fd, buffer.data(), buffer.size());
+        if (bytes == 0) {
+            break; // EOF
+        }
+        if (bytes < 0) {
+            if (errno == EINTR) {
+                continue; // retry
+            }
+            std::cerr << "[Tracer] " << tag
+                      << " read error: " << strerror(errno) << '\n';
+            break;
+        }
+        os.write(buffer.data(), bytes);
+        os.flush();
+    }
 }
 
 #endif // UTIL_IO_H
