@@ -1,6 +1,5 @@
 name: CI Pipeline
 
-# Workflow-level environment variables
 env:
   DOCKER_IMAGE: ghcr.io/${{ github.repository }}:latest
   SONAR_PROJECT_KEY: your_project_key
@@ -47,7 +46,7 @@ jobs:
           file: ./Dockerfile
           push: true
           # Use the defined Docker image variable
-          tags: ${{ env.DOCKER_IMAGE }}
+          tags: $DOCKER_IMAGE
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
 
@@ -56,8 +55,7 @@ jobs:
     name: Build Project
     runs-on: ubuntu-latest
     needs: build-image
-    container:
-      image: ${{ env.DOCKER_IMAGE }}
+    container: $DOCKER_IMAGE
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -71,8 +69,7 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     needs: build
-    container:
-      image: ${{ env.DOCKER_IMAGE }}
+    container: $DOCKER_IMAGE
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -84,8 +81,7 @@ jobs:
   #   name: Code Coverage & SonarCloud Analysis
   #   runs-on: ubuntu-latest
   #   needs: test
-  #   container:
-  #     image: ${{ env.DOCKER_IMAGE }}
+  #   container: $DOCKER_IMAGE
   #   steps:
   #     - name: Checkout repository
   #       uses: actions/checkout@v3
@@ -101,7 +97,7 @@ jobs:
   #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   #       with:
   #         args: >
-  #           -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
-  #           -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+  #           -Dsonar.projectKey=$SONAR_PROJECT_KEY
+  #           -Dsonar.organization=$SONAR_ORGANIZATION
   #           -Dsonar.host.url=https://sonarcloud.io
 
