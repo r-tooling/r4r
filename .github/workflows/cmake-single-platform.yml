@@ -27,7 +27,7 @@ jobs:
         with:
           # Adjust the cache path as needed
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-${{ github.sha }}
+          key: ${{ runner.os }}-docker-${{ hashFiles('.devcontainer/Dockerfile') }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
@@ -49,7 +49,7 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,new=true
 
   # ─── JOB 2: Build the project ─────────────────────────────────────────────
   build:
