@@ -23,6 +23,9 @@ TEST_DIR         = tests
 FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
 FORMAT_EXCLUDE  = 
 
+COVERAGE_REPORT_HTML     = $(BUILD_DIR)/coverage.html
+COVRAGE_REPORT_SONARCUBE = $(BUILD_DIR)/coverage.sonarcube
+
 #-------------------------------------------------------------------------------
 # Targets
 #-------------------------------------------------------------------------------
@@ -38,6 +41,17 @@ build: configure ## Build the project
 
 test: build ## Run tests
 	cd $(BUILD_DIR) && $(CTEST) --output-on-failure
+
+coverage: ## Run tests with code coverage
+	$(MAKE) build CMAKE_ARGS='$(CMAKE_ARGS) -DENABLE_COVERAGE=ON'
+	cd $(BUILD_DIR) && \
+		$(CTEST) --output-on-failure -T Test -T Coverage
+	gcovr -r $(SOURCE_DIR) \
+			--html-details $(COVERAGE_REPORT_HTML) \
+			--html-single-page js-enabled \
+			--sonarqube $(COVRAGE_REPORT_SONARCUBE) \
+			--exclude-directories "_deps" \
+			$(BUILD_DIR)
 
 install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
