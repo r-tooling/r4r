@@ -2,7 +2,7 @@ name: CI Pipeline
 
 env:
   SONAR_ORGANIZATION: r-tooling
-  SONAR_PROJECT_KEY: r4r
+  SONAR_PROJECT_KEY: r-tooling_r4r
 
 on:
   push:
