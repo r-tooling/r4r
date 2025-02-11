@@ -11,6 +11,7 @@ RUN apt-get update -y  && \
   build-essential \
   cmake \
   libcurl4-openssl-dev \
+  gcovr \
   gdb \
   ninja-build \
   rr
