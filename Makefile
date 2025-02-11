@@ -24,7 +24,6 @@ FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
 FORMAT_EXCLUDE  = 
 
 COVERAGE_REPORT_GCOVR_HTML = $(BUILD_DIR)/coverage-gcovr.html
-COVERAGE_REPORT_SONARCUBE  = $(BUILD_DIR)/coverage-sonarcube.xml
 COVERAGE_REPORT_LCOV       = $(BUILD_DIR)/coverage.lcov
 COVERAGE_REPORT_LCOV_HTML  = $(BUILD_DIR)/coverage-lcov
 
@@ -52,7 +51,6 @@ coverage: ## Run tests with code coverage
 		gcovr -r $(SOURCE_DIR) \
 			--html-details $(COVERAGE_REPORT_GCOVR_HTML) \
 			--html-single-page js-enabled \
-			--sonarqube $(COVERAGE_REPORT_SONARCUBE) \
 			--exclude-directories "_deps" \
 			$(BUILD_DIR); \
 	fi

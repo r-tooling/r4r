@@ -13,7 +13,7 @@
 
 class ArgumentParserException : public std::runtime_error {
   public:
-    ArgumentParserException(std::string const& message)
+    explicit ArgumentParserException(std::string const& message)
         : std::runtime_error(message) {}
 };
 
@@ -38,7 +38,7 @@ class ArgumentParser {
             help = std::move(text);
             return *this;
         }
-        Option& with_argument(std::string metavar = "ARG") {
+        Option& with_argument(std::string const& metavar = "ARG") {
             has_arg = metavar;
             return *this;
         }
@@ -93,7 +93,7 @@ class ArgumentParser {
                     std::vector<Positional> const& pos)
             : options_(opts), positionals_(pos) {}
 
-        bool contains(std::string_view name) const {
+        [[nodiscard]] bool contains(std::string_view name) const {
             return std::any_of(
                 options_.begin(), options_.end(), [&](Option const& opt) {
                     return (opt.short_name == name || opt.long_name == name) &&
@@ -101,7 +101,8 @@ class ArgumentParser {
                 });
         }
 
-        std::optional<std::string> get(std::string_view name) const {
+        [[nodiscard]] std::optional<std::string>
+        get(std::string_view name) const {
             auto const it = std::find_if(
                 options_.begin(), options_.end(), [&](Option const& opt) {
                     return opt.short_name == name || opt.long_name == name;
@@ -110,7 +111,8 @@ class ArgumentParser {
                                         : std::optional<std::string>{};
         }
 
-        std::vector<std::string> get_positional(std::string_view name) const {
+        [[nodiscard]] std::vector<std::string>
+        get_positional(std::string_view name) const {
             auto const it = std::find_if(
                 positionals_.begin(), positionals_.end(),
                 [&](Positional const& p) { return p.name == name; });
@@ -119,7 +121,8 @@ class ArgumentParser {
         }
     };
 
-    ArgumentParser(std::string program_name, std::string description = "")
+    explicit ArgumentParser(std::string program_name,
+                            std::string description = "")
         : program_name_(std::move(program_name)),
           description_(std::move(description)) {}
 

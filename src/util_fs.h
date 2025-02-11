@@ -125,7 +125,7 @@ class TempFile {
 
     fs::path const& operator*() const noexcept { return path_; }
     fs::path const* operator->() const noexcept { return &path_; }
-    fs::path const& path() const noexcept { return path_; }
+    [[nodiscard]] fs::path const& path() const noexcept { return path_; }
 
     static fs::path create_temp_file(std::string const& prefix,
                                      std::string const& suffix);
@@ -165,11 +165,7 @@ inline AccessStatus check_accessibility(fs::path const& p) {
 
         if (fs::is_directory(p)) {
             try {
-                for (auto const& entry : fs::directory_iterator(p)) {
-                    // just try if it can list files
-                    (void)entry;
-                    break;
-                }
+                fs::directory_iterator it(p);
             } catch (std::exception const&) {
                 return AccessStatus::InsufficientPermission;
             }

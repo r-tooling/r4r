@@ -17,9 +17,9 @@ class FileSystemTrie {
 
         explicit Node(T const* value) : value(value) {};
         Node(Node const&) = delete;
-        Node(Node&&) = default;
+        Node(Node&&) noexcept = default;
         Node& operator=(Node const&) = delete;
-        Node& operator=(Node&&) = default;
+        Node& operator=(Node&&) noexcept = default;
     };
 
     std::unordered_set<T> unique_values_;
@@ -29,7 +29,7 @@ class FileSystemTrie {
   public:
     FileSystemTrie(FileSystemTrie const&) = delete;
 
-    FileSystemTrie(FileSystemTrie&&) = default;
+    FileSystemTrie(FileSystemTrie&&) noexcept = default;
 
     FileSystemTrie()
         : default_value_(nullptr), root_(std::make_unique<Node>(nullptr)) {}
@@ -41,14 +41,14 @@ class FileSystemTrie {
     }
 
     FileSystemTrie& operator=(FileSystemTrie const&) = delete;
-    FileSystemTrie& operator=(FileSystemTrie&&) = default;
+    FileSystemTrie& operator=(FileSystemTrie&&) noexcept = default;
 
     T const* default_value() const { return default_value_; }
 
     void insert(fs::path const& path, T const& value) {
         Node* node = root_.get();
 
-        for (auto& path_part : path) {
+        for (auto const& path_part : path) {
             auto part = path_part.string();
             if (part.empty()) {
                 continue;
@@ -73,7 +73,7 @@ class FileSystemTrie {
     [[nodiscard]] T const* find(fs::path const& path) const {
         Node* node = root_.get();
 
-        for (auto& path_part : path) {
+        for (auto const& path_part : path) {
             auto part = path_part.string();
 
             if (part.empty()) {
