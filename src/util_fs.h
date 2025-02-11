@@ -175,7 +175,7 @@ inline AccessStatus check_accessibility(fs::path const& p) {
             }
         } else {
             std::ifstream f(p);
-            if (!f) {
+            if (!f.is_open()) {
                 return AccessStatus::InsufficientPermission;
             }
         }

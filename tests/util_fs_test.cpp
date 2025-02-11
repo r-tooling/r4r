@@ -66,10 +66,7 @@ TEST_F(CheckAccessibilityTest, file_insufficient_permission) {
 
     demo_perms(fs::status(unreadable_file).permissions());
 
-    fs::permissions(unreadable_file,
-                    fs::perms::owner_read | fs::perms::group_read |
-                        fs::perms::others_read,
-                    fs::perm_options::remove);
+    fs::permissions(unreadable_file, fs::perms::all, fs::perm_options::remove);
 
     demo_perms(fs::status(unreadable_file).permissions());
 
@@ -85,11 +82,9 @@ TEST_F(CheckAccessibilityTest, directory_insufficient_permission) {
     fs::create_directories(unreadable_dir);
 
     demo_perms(fs::status(unreadable_dir).permissions());
-    // Remove read permissions from the owner
-    fs::permissions(unreadable_dir, fs::perms::owner_read,
-                    fs::perm_options::remove);
-
+    fs::permissions(unreadable_dir, fs::perms::all, fs::perm_options::remove);
     demo_perms(fs::status(unreadable_dir).permissions());
+
     auto status = check_accessibility(unreadable_dir);
     EXPECT_EQ(status, AccessStatus::InsufficientPermission);
 
