@@ -1,19 +1,55 @@
-﻿# CMakeList.txt: Projekt CMake for ptraceBasedTracer, 
-# depend on  the system having. dpkg, grep,apt-cache,R
-#
-cmake_minimum_required (VERSION 3.12)
+﻿cmake_minimum_required(VERSION 3.14)
 
-project ("ptraceBasedTracer")
+set(CMAKE_COLOR_DIAGNOSTICS ON)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable (ptraceBasedTracer "ptraceBasedTracer.cpp" "frontend/ptraceMainLoop.cpp" "middleend/middleEnd.cpp" "backend/backEnd.cpp" "frontend/syscalls/syscallHandlerMapperInline.cpp" "frontend/syscalls/open.cpp" "frontend/syscalls/dup.cpp" "frontend/syscalls/read.cpp" "frontend/syscalls/clone.cpp" "frontend/syscalls/pipe.cpp" "frontend/syscalls/execve.cpp" "frontend/syscalls/fnctl.cpp" "frontend/syscalls/stat.cpp" "frontend/syscalls/socket.cpp" "frontend/syscalls/futex.cpp" "frontend/syscalls/mkdir.cpp" "frontend/syscalls/unlink.cpp" "frontend/syscalls/syscallHandlerMapper.cpp" "frontend/syscalls/timer.cpp" "frontend/syscalls/epoll.cpp" "backend/dpkgResolver.cpp" "frontend/syscalls/chroot.cpp" "frontend/syscalls/event.cpp" "backend/rpkgResolver.cpp" "backend/aptResolver.cpp" "frontend/syscalls/rename.cpp" "csv/serialisedFileInfo.cpp")
+project(r4r VERSION 0.1)
 
-set_property(TARGET ptraceBasedTracer PROPERTY CXX_STANDARD 20)
+set(R4R_BIN "r4r")
 
-if(MSVC)
-  target_compile_options(ptraceBasedTracer PRIVATE /W4 /WX)
-else()
-  target_compile_options(ptraceBasedTracer PRIVATE -Wall -Wextra -Wpedantic -Werror -g) #TODO: for actual release remove the -g
+configure_file(
+    src/config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/config.h
+    @ONLY
+)
+
+option(ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
+
+if(ENABLE_COVERAGE)
+  message(STATUS "Enabling code coverage")
+
+  if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Coverage enabled: forcing CMAKE_BUILD_TYPE to Debug.")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
+  endif()
+
+  # set compiler/linker flags for coverage
+  set(COVERAGE_FLAGS "-g --coverage")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COVERAGE_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COVERAGE_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${COVERAGE_FLAGS}")
+  add_compile_definitions(CODE_COVERAGE_ENABLED)
 endif()
 
-add_executable(generateMacro "dispatchMacro.cpp")
-set_property(TARGET generateMacro PROPERTY CXX_STANDARD 20)
+file(GLOB R4R_BIN_SOURCES "src/*.cpp" "src/*.h")
+
+add_executable(
+    ${R4R_BIN}
+    ${R4R_BIN_SOURCES}
+)
+
+find_package(CURL REQUIRED)
+
+target_compile_options(${R4R_BIN} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_include_directories(${R4R_BIN}
+    PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+target_link_libraries(${R4R_BIN} PRIVATE CURL::libcurl)
+
+install(TARGETS ${R4R_BIN})
+
+enable_testing()
+add_subdirectory(tests)

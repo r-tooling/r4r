@@ -1,0 +1,93 @@
+.DEFAULT_GOAL := all
+.PHONY: all configure build test install format lint clean help
+
+# configuration
+BUILD_DIR        ?= build
+GENERATOR        ?= Ninja
+BUILD_TYPE       ?= Debug
+INSTALL_PREFIX   ?= /usr/local
+CLANG_FORMAT     ?= clang-format
+CLANG_TIDY       ?= clang-tidy
+CMAKE            ?= cmake
+CTEST            ?= ctest
+
+# cmake configuration arguments
+CMAKE_ARGS += -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
+CMAKE_ARGS += -GNinja
+
+# project structure
+SOURCE_DIR       = src
+TEST_DIR         = tests
+
+# file patterns
+FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
+FORMAT_EXCLUDE  = 
+
+COVERAGE_REPORT_GCOVR_HTML = $(BUILD_DIR)/coverage-gcovr.html
+COVERAGE_REPORT_LCOV       = $(BUILD_DIR)/coverage.lcov
+COVERAGE_REPORT_LCOV_HTML  = $(BUILD_DIR)/coverage-lcov
+
+#-------------------------------------------------------------------------------
+# Targets
+#-------------------------------------------------------------------------------
+
+all: build test ## Build and test the project (default)
+
+configure: ## Configure CMake project
+	mkdir -p $(BUILD_DIR)
+	cd $(BUILD_DIR) && $(CMAKE) $(CMAKE_ARGS) -DCMAKE_INSTALL_PREFIX=$(INSTALL_PREFIX) ..
+
+build: configure ## Build the project
+	$(CMAKE) --build $(BUILD_DIR)
+
+test: build ## Run tests
+	cd $(BUILD_DIR) && $(CTEST) --output-on-failure
+
+coverage: ## Run tests with code coverage
+	$(MAKE) build CMAKE_ARGS='$(CMAKE_ARGS) -DENABLE_COVERAGE=ON'
+	cd $(BUILD_DIR) && \
+		$(CTEST) --output-on-failure -T Test -T Coverage
+	if command -v gcovr > /dev/null 2>&1; then \
+		gcovr -r $(SOURCE_DIR) \
+			--html-details $(COVERAGE_REPORT_GCOVR_HTML) \
+			--html-single-page js-enabled \
+			--exclude-directories "_deps" \
+			$(BUILD_DIR); \
+	fi
+	if command -v lcov > /dev/null 2>&1; then \
+		lcov --directory build \
+			--exclude '/usr/*' \
+			--exclude '**/_deps/*' \
+			--exclude '**/tests/*' \
+			--capture \
+			--output-file $(COVERAGE_REPORT_LCOV) && \
+			genhtml -o $(COVERAGE_REPORT_LCOV_HTML) $(COVERAGE_REPORT_LCOV); \
+	fi
+
+install: build ## Install the project
+	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
+
+format: ## Format source code
+	@find $(SOURCE_DIR) $(TEST_DIR) \
+		-type f \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \) \
+		-not -path "$(FORMAT_EXCLUDE)" \
+		-exec $(CLANG_FORMAT) -i {} +
+
+lint: build ## Run static analysis
+	@find $(SOURCE_DIR) $(TEST_DIR) \
+		-type f \( -name "*.cpp" -o -name "*.hpp" \) \
+		-not -path "$(FORMAT_EXCLUDE)" \
+		-exec $(CLANG_TIDY) -p $(BUILD_DIR) --warnings-as-errors='*' {} +
+
+clean: ## Clean build artifacts
+	@rm -rf $(BUILD_DIR)
+
+help: ## Show this help message
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# enable build ccache by default (if available)
+ifneq ($(shell command -v ccache),)
+  CMAKE_ARGS += -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+endif
+
+# TODO: Enable address sanitizer in debug builds

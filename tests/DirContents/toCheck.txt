@@ -1,3 +1,0 @@
-In the future this test should persist everything from /tmp
-
-As of now, it persists nothing.

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v clang-format >/dev/null 2>&1; then
+	echo "Error: clang-format not found in PATH" >&2
+	exit 1
+fi
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.cpp' '*.hpp' '*.c' '*.h')
+
+[ -z "$staged_files" ] && exit 0
+
+has_issues=0
+temp_file=$(mktemp)
+trap 'rm -f "$temp_file"' EXIT INT TERM
+
+for file in $staged_files; do
+	[ -f "$file" ] || continue
+
+	clang-format "$file" >"$temp_file"
+
+	if ! git diff --no-index --quiet "$file" "$temp_file"; then
+		echo "$file: is not properly formatted"
+		git diff --no-index --color=always "$file" "$temp_file" || true
+		has_issues=1
+	fi
+done
+
+if [ "$has_issues" -eq 1 ]; then
+	cat <<EOF
+	
+------------------------------------------------------------------
+Commit blocked: formatting issues detected.
+Run 'make format' to fix formatting, or use --no-verify to bypass.
+------------------------------------------------------------------
+EOF
+
+	exit 1
+fi
+
+exit 0

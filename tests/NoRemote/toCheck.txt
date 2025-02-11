@@ -1,4 +1,0 @@
-This file's package has no remote on my system. This should not break any scripts.
-
-
-In the future it should even be transferred as a plain file instead of being ignored.

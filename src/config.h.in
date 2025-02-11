@@ -1,0 +1,8 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#include <string_view>
+
+constexpr std::string_view const kBinaryName{"@R4R_BIN@"};
+
+#endif // CONFIG_H

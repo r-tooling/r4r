@@ -1,53 +1,51 @@
 # r4r
-Monorepo for everything linked to the r4r project
 
-# Usage:
-Make sure you are using a debian-based system with dpkg, apt and R installed. 
-Everything should work fine without the installed R but this has not been tested. The only result should be that no R packages will get resolved due to execve fails.
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=bugs&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=code_smells&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=coverage&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
 
-For reproduction, docker is also required.
+R4R is a tool for creating a reproducible environment from a dynamic program trace.
 
+## Usage
+
+```sh
+$ r4r --help
+Usage: r4r [OPTIONS] <command>
+
+Options:
+  -v, --verbose                   Make the tool more talkative (allow multiple)
+  --docker-image-tag NAME         The docker image tag [default: r4r/test]
+  --docker-container-name NAME    The docker container name [default: r4r-test]
+  --result PATH                   Path to a result file
+  --output PATH                   Path for the output
+  --help                          Print this message
+
+Positional arguments:
+  command    The program to trace
 ```
-mkdir build;
-cd build;
-cmake -DCMAKE_BUILD_TYPE=Release ..;
-make;
+
+## Build
+
+Look at the `Makefile`:
+
+```sh
+$ make help
+all                  Build and test the project (default)
+configure            Configure CMake project
+build                Build the project
+test                 Run tests
+coverage             Run tests with code coverage
+install              Install the project
+format               Format source code
+lint                 Run static analysis
+clean                Clean build artifacts
+help                 Show this help message
 ```
-wait for the build to finish, should take around a minute
 
-pick a program you want to test
-```
-mkdir run;
-cd run;
-../ptraceBasedTracer [program] < optional args >
-```
-The traced program input is closed.
-stdout and stderr are redirected to stdout.txt and stderr.txt respectively.
+### Dependencies
 
-wait untill the program terminates
+Look at the [.devcontainer/Dockerfile](.devcontainer/Dockerfile).
 
-stderr will be populated with potential errors.
-stdout is currently mostly unused, no progress will be reported
+## Coding standards
 
-accessedFiles.csv will be created. THe file contains a csv dump of all the detected filesystem dependencies.
- 
-report.txt contains some interesting statistics taken from the dependencies
-
- launch.sh is created. The script stores the launch environment of the program.
-Input escaping is not properly implemented. You might have to manually change the launch arguments on the last line of the script.
-
-buildDocker.sh contains a script which will
-1. create a folder
-2. copy relevant files into the folder so they can be transferred to an image
-3. build a docker image  
-4. delete the folder
-5. run the built docker image in the current shell
-6. inspect the container or run ./launch.sh 
-
-Building the image will probably take long. Access to the internet is necessary. Just run the script and go for lunch.
-171 apt packages took around 700 seconds
-131 R packages took around 1500 seconds
-Your mileage will vary but this should show just how long a build process can take.
-
-In case of errors, delete the offending library/file from the dockerfile and re-run. This may involve removing the movement of files or installation of individual packages. The environment will still probably work due to system defaults.
-If a step successfully completes, due to the nature of docker only the un-compiled steps will be repeated.
+- We try to follow [Google C++ code style](https://google.github.io/styleguide/cppguide.html)

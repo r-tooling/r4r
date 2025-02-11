@@ -1,0 +1,30 @@
+---
+title: "MTCARS Plot Example"
+author: "Your Name"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required packages
+library(ggplot2)
+
+# Set global chunk options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This document demonstrates how to create a simple ggplot from the **mtcars** dataset.
+
+```{r mtcars-plot, fig.width=7, fig.height=5}
+ggplot(mtcars, aes(x = disp, y = mpg)) +
+  geom_point(aes(color = factor(cyl)), size = 3) +
+  labs(
+    title = "Miles per Gallon vs. Displacement",
+    x = "Displacement (cu. in.)",
+    y = "Miles per Gallon",
+    color = "Cylinders"
+  ) +
+  theme_minimal()
+```
+

@@ -1,0 +1,34 @@
+---
+# https://clang.llvm.org/extra/clang-tidy/checks/list.html
+Checks:  '-*,
+          bugprone-*,
+          clang-analyzer-*,
+          cppcoreguidelines-*,
+          google-default-arguments,
+          google-explicit-constructor,
+          google-runtime-operator,
+          hicpp-exception-baseclass,
+          hicpp-multiway-paths-covered,
+          modernize-*,
+          performance-*,
+          readability-*,
+          -bugprone-easily-swappable-parameters,
+          -cppcoreguidelines-avoid-magic-numbers,
+          -cppcoreguidelines-special-member-functions,
+          -cppcoreguidelines-pro-type-union-access,
+          -modernize-use-ranges,
+          -modernize-use-trailing-return-type,
+          -readability-identifier-length,
+          -readability-magic-numbers,
+          -performance-enum-size
+          '
+CheckOptions:
+  # FIXME: enable this one at some point
+  # https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rc-five
+  # https://google.github.io/styleguide/cppguide.html#Copyable_Movable_Types
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
+
+  readability-implicit-bool-conversion.AllowIntegerConditions: true
+  readability-implicit-bool-conversion.AllowPointerConditions: true
+
+UseColor: true

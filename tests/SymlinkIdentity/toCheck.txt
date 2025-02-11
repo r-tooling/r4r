@@ -1,1 +1,0 @@
-The tracer should detect access to '/usr/bin/c++' '/bin/c++' as access to one file.
