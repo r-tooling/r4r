@@ -87,6 +87,12 @@ jobs:
       - name: Run build wrapper
         run: |
           build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} make coverage
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage-report
+          path: |
+            build/coverage*
       - name: Run SonarCloud scan
         uses: SonarSource/sonarqube-scan-action@v4
         env:

@@ -16,4 +16,4 @@ RUN apt-get update -y  && \
   ninja-build \
   pip \
   rr && \
-  pip install gcovr
+  pip install gcovr==5.0
