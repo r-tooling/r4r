@@ -10,9 +10,9 @@ RUN apt-get update -y  && \
   apt-get install -y \
   build-essential \
   cmake \
-  libcurl4-openssl-dev \
-  gcovr \
   gdb \
+  libcurl4-openssl-dev \
   ninja-build \
-  rr
-
+  pip \
+  rr && \
+  pip install gcovr
