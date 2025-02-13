@@ -1,6 +1,7 @@
 #ifndef FILE_TRACER_H
 #define FILE_TRACER_H
 
+#include "filesystem_trie.h"
 #include "logger.h"
 #include "syscall_monitor.h"
 #include <fcntl.h>
@@ -25,6 +26,9 @@ class FileTracer : public SyscallListener {
 
   public:
     using Files = std::unordered_map<fs::path, FileInfo>;
+
+    explicit FileTracer(FileSystemTrie<bool> ignore_file_list)
+        : ignore_file_list_{ignore_file_list} {}
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override;
@@ -109,6 +113,7 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
+    FileSystemTrie<bool> ignore_file_list_;
     std::uint64_t syscalls_count_{0};
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
@@ -208,6 +213,12 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
             result = *d;
         }
         result /= pathname;
+    }
+
+    if (bool const* it = ignore_file_list_.find_last_matching(result);
+        it && *it) {
+        LOG(DEBUG) << "Ignoring file: " << result;
+        return;
     }
 
     std::error_code ec;
