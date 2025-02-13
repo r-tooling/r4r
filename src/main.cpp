@@ -112,6 +112,9 @@ static Options parse_cmd_args(std::span<char const*> args) {
     parser.add_option("skip-make")
         .with_help("Do not run the generated makefile")
         .with_callback([&](auto&) { opts.run_make = false; });
+    parser.add_option("skip-manifest")
+        .with_help("Do not generate the manifest")
+        .with_callback([&](auto&) { opts.skip_manifest = true; });
     parser.add_option("help")
         .with_help("Print this message")
         .with_callback([&](auto&) {

@@ -66,6 +66,7 @@ struct Options {
     AbsolutePathSet results;
     bool docker_sudo_access{true};
     bool run_make{true};
+    bool skip_manifest{false};
     // TODO: make this mutable so more files could be added from command line
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
@@ -295,14 +296,16 @@ class ManifestTask : public Task<Manifest> {
   public:
     explicit ManifestTask(Resolvers const& resolvers,
                           fs::path const& output_dir,
-                          AbsolutePathSet& result_files)
+                          AbsolutePathSet& result_files, bool interactive)
         : resolvers_{resolvers}, output_dir_{output_dir},
-          result_files_(result_files) {}
+          result_files_(result_files), interactive_{interactive} {}
 
     Manifest run() override {
         Manifest manifest{output_dir_};
         resolvers_.add_to_manifest(manifest);
-        edit_manifest(manifest);
+        if (interactive_) {
+            edit_manifest(manifest);
+        }
         return manifest;
     }
 
@@ -441,8 +444,8 @@ class ManifestTask : public Task<Manifest> {
             editor = std::getenv("EDITOR");
         }
         if (editor == nullptr) {
-            LOG(ERROR) << "No editor found. Set VISUAL or EDITOR "
-                          "environment variable.";
+            LOG(WARN) << "Failed to open manifest: no editor found (set VISUAL "
+                         "or EDITOR environment variabl)";
             return false;
         }
 
@@ -461,6 +464,7 @@ class ManifestTask : public Task<Manifest> {
     Resolvers const& resolvers_;
     fs::path const& output_dir_;
     AbsolutePathSet result_files_;
+    bool interactive_;
 };
 
 class DockerFileBuilderTask : public Task<DockerFile> {
@@ -756,7 +760,8 @@ class Tracer {
                             options_.ignore_file_list});
         auto manifest =
             run("Manifest builder",
-                ManifestTask{resolvers, options_.output_dir, options_.results});
+                ManifestTask{resolvers, options_.output_dir, options_.results,
+                             !options_.skip_manifest});
 
         run("Docker file builder",
             DockerFileBuilderTask{options_, envir, manifest});
