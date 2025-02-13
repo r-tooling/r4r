@@ -68,7 +68,6 @@ class DefaultImageFiles {
 
         auto out =
             Command("docker")
-                .arg("docker")
                 .arg("run")
                 .arg("--rm")
                 .arg(image_name)
