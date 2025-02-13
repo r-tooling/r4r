@@ -652,8 +652,7 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
-                 // << " | tee docker-build.log"
-                 // << " | fold"
+                 << " | tee docker-build.log"
                  << "\n\n"
                  // clang-format on
 
@@ -661,8 +660,7 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "run: build\n"
                  << "\t@echo 'Running container $(CONTAINER_NAME)'\n"
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
-                 // << " | tee docker-run.log"
-                 // << " | fold"
+                 << " | tee docker-run.log"
                  << "\n\n"
                  // clang-format on
 
