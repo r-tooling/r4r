@@ -109,6 +109,9 @@ static Options parse_cmd_args(std::span<char const*> args) {
         .with_help("Path for the output")
         .with_argument("PATH")
         .with_callback([&](auto& arg) { opts.output_dir = arg; });
+    parser.add_option("skip-make")
+        .with_help("Do not run the generated makefile")
+        .with_callback([&](auto&) { opts.run_make = false; });
     parser.add_option("help")
         .with_help("Print this message")
         .with_callback([&](auto&) {

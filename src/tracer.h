@@ -65,6 +65,7 @@ struct Options {
     fs::path makefile;
     AbsolutePathSet results;
     bool docker_sudo_access{true};
+    bool run_make{true};
     // TODO: make this mutable so more files could be added from command line
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
@@ -762,7 +763,9 @@ class Tracer {
 
         run("Makefile builder", MakefileBuilderTask{options_});
 
-        run("Make runner", RunMakefileTask{options_.makefile});
+        if (options_.run_make) {
+            run("Make runner", RunMakefileTask{options_.makefile});
+        }
     }
 
     void configure() {
