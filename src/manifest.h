@@ -218,7 +218,15 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
            << "install.packages('remotes', lib = c(tmp_dir))\n"
            << "require('remotes', lib.loc = c(tmp_dir))\n"
            << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
-           << "\n"
+           << "\n\n"
+           << "# install wrapper that turns warnings into errors\n"
+           // clang-format off
+           << "CHK <- function(thunk) {\n"
+           << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
+           << "if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }})\n"
+           << "}\n\n"
+           // clang-format on
+
            << "# installing packages\n\n";
 
     std::unordered_set<std::string> seen;
@@ -232,8 +240,8 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
             continue;
         }
 
-        script << "install_version('" << pkg.name << "', '" << pkg.version
-               << "', upgrade = 'never', dependencies = FALSE)\n";
+        script << "CHK(install_version('" << pkg.name << "', '" << pkg.version
+               << "', upgrade = 'never', dependencies = FALSE))\n";
     }
 
     builder.copy({cran_install_script_}, "/");
