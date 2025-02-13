@@ -15,16 +15,16 @@ TEST(RPackagesTest, BasicParsing) {
     std::istringstream iss(data);
     auto packages = RpkgDatabase::from_stream(iss);
 
-    ASSERT_EQ(packages.size(), 4u);
+    ASSERT_EQ(packages.size(), 4);
 
     // check askpass
     {
-        auto pkg = packages.find("askpass");
+        auto const* pkg = packages.find("askpass");
         ASSERT_NE(pkg, nullptr);
         EXPECT_EQ(pkg->name, "askpass");
         EXPECT_EQ(pkg->lib_path, "/home/user/R/library/4.1");
         EXPECT_EQ(pkg->version, "1.1");
-        ASSERT_EQ(pkg->dependencies.size(), 1u);
+        ASSERT_EQ(pkg->dependencies.size(), 1);
         EXPECT_TRUE(pkg->dependencies.contains("sys"));
         EXPECT_FALSE(pkg->is_base);
         EXPECT_TRUE(pkg->needs_compilation);
@@ -32,23 +32,23 @@ TEST(RPackagesTest, BasicParsing) {
 
     // check backports
     {
-        auto pkg = packages.find("backports");
+        auto const* pkg = packages.find("backports");
         ASSERT_NE(pkg, nullptr);
         // "R (>= 3.0.0)" => ignore "R"
-        EXPECT_EQ(pkg->dependencies.size(), 0u);
+        EXPECT_EQ(pkg->dependencies.size(), 0);
         EXPECT_FALSE(pkg->is_base);
         EXPECT_FALSE(pkg->needs_compilation);
     }
 
     // check bslib
     {
-        auto pkg = packages.find("bslib");
+        auto const* pkg = packages.find("bslib");
         ASSERT_NE(pkg, nullptr);
         // "R (>= 2.10)" => ignored
         // "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>=
         // 0.1.3)"
         // => "htmltools", "jsonlite", "sass", "jquerylib"
-        ASSERT_EQ(pkg->dependencies.size(), 4u);
+        ASSERT_EQ(pkg->dependencies.size(), 4);
         EXPECT_TRUE(pkg->dependencies.contains("htmltools"));
         EXPECT_TRUE(pkg->dependencies.contains("jsonlite"));
         EXPECT_TRUE(pkg->dependencies.contains("sass"));
@@ -59,9 +59,9 @@ TEST(RPackagesTest, BasicParsing) {
 
     // check base
     {
-        auto pkg = packages.find("tools");
+        auto const* pkg = packages.find("tools");
         ASSERT_NE(pkg, nullptr);
-        EXPECT_EQ(pkg->dependencies.size(), 0u);
+        EXPECT_EQ(pkg->dependencies.size(), 0);
         EXPECT_TRUE(pkg->is_base);
     }
 }
@@ -85,10 +85,10 @@ TEST(RPackagesTest, TopologicalSorting) {
 
     {
         // If we request A, we get A plus B plus C
-        std::unordered_set<RPackage const*> pkgs = {db.find("A")};
+        std::set<RPackage const*> pkgs = {db.find("A")};
         auto deps = db.get_dependencies(pkgs);
         // One valid topological order is [C, B, A]
-        ASSERT_EQ(deps.size(), 3u);
+        ASSERT_EQ(deps.size(), 3);
         EXPECT_EQ(deps[0]->name, "C");
         EXPECT_EQ(deps[1]->name, "B");
         EXPECT_EQ(deps[2]->name, "A");
@@ -96,18 +96,18 @@ TEST(RPackagesTest, TopologicalSorting) {
 
     {
         // If we request D, we get just D
-        std::unordered_set<RPackage const*> pkgs = {db.find("D")};
+        std::set<RPackage const*> pkgs = {db.find("D")};
         auto deps = db.get_dependencies(pkgs);
-        ASSERT_EQ(deps.size(), 1u);
+        ASSERT_EQ(deps.size(), 1);
         EXPECT_EQ(deps[0]->name, "D");
     }
 
     {
         // If we request A and D at once, a valid topological order is:
         // [C, B, A, D] or [D, C, B, A] as long as dependencies are satisfied
-        std::unordered_set<RPackage const*> pkgs = {db.find("A"), db.find("D")};
+        std::set<RPackage const*> pkgs = {db.find("A"), db.find("D")};
         auto deps = db.get_dependencies(pkgs);
-        ASSERT_EQ(deps.size(), 4u);
+        ASSERT_EQ(deps.size(), 4);
 
         // We'll verify that C appears before B, which appears before A.
         // And D can appear anywhere as it has no dependencies.
@@ -139,13 +139,13 @@ TEST(RPackagesTest, SystemDependencies) {
     std::istringstream iss(data);
     auto packages = RpkgDatabase::from_stream(iss);
 
-    ASSERT_EQ(packages.size(), 3u);
+    ASSERT_EQ(packages.size(), 3);
 
     std::unordered_set<RPackage const*> pkgs;
     pkgs.insert(packages.find("RPostgres"));
     pkgs.insert(packages.find("Matrix"));
     pkgs.insert(packages.find("UnknownPackage"));
-    auto res = packages.get_system_dependencies(pkgs);
+    auto res = RpkgDatabase::get_system_dependencies(pkgs);
 
     // TODO: assert no warnings
     ASSERT_EQ(res.size(), 1);

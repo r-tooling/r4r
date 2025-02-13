@@ -11,10 +11,10 @@
 #include <cctype>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -22,7 +22,7 @@ struct RPackage {
     std::string name;
     fs::path lib_path;
     std::string version;
-    std::unordered_set<std::string> dependencies;
+    std::set<std::string> dependencies;
     bool is_base = false;
     bool needs_compilation = false;
 
@@ -147,21 +147,21 @@ class RpkgDatabase {
     // Return all dependencies (recursively) of the given set of packages
     // in a topologically sorted order. The packages themselves are included.
     std::vector<RPackage const*>
-    get_dependencies(std::unordered_set<RPackage const*> const& pkgs) const {
-        std::vector<RPackage const*> deps;
+    get_dependencies(std::set<RPackage const*> const& pkgs) const {
+        std::vector<RPackage const*> dependencies;
         std::unordered_set<RPackage const*> visited;
         std::unordered_set<RPackage const*> in_stack;
 
         for (auto const* p : pkgs) {
             if (!visited.contains(p)) {
-                dfs_visit(p, visited, in_stack, deps);
+                dfs_visit(p, visited, in_stack, dependencies);
             }
         }
 
         std::unordered_set<RPackage const*> seen;
         std::vector<RPackage const*> result;
-        result.reserve(deps.size());
-        for (auto const* d : deps) {
+        result.reserve(dependencies.size());
+        for (auto const* d : dependencies) {
             if (!seen.contains(d)) {
                 seen.insert(d);
                 result.push_back(d);
@@ -211,7 +211,8 @@ class RpkgDatabase {
                 continue;
             }
 
-            std::unordered_set<std::string> dependencies;
+            // we want them in order
+            std::set<std::string> dependencies;
             // Depends
             parse_dependency_field(tokens->at(3), dependencies);
             // Imports
@@ -232,9 +233,8 @@ class RpkgDatabase {
     // Given a single field from the line that might contain multiple
     // dependencies separated by commas, parse out the package names ignoring
     // version constraints (like "sys (>= 2.1)") and ignoring "R".
-    static void
-    parse_dependency_field(std::string const& field,
-                           std::unordered_set<std::string>& target) {
+    static void parse_dependency_field(std::string const& field,
+                                       std::set<std::string>& target) {
         // If "NA", return empty
         if (field == "NA") {
             return;
@@ -274,7 +274,7 @@ class RpkgDatabase {
     void dfs_visit(RPackage const* pkg,
                    std::unordered_set<RPackage const*>& visited,
                    std::unordered_set<RPackage const*>& in_stack,
-                   std::vector<RPackage const*>& sorted) const {
+                   std::vector<RPackage const*>& dependencies) const {
         visited.insert(pkg);
         in_stack.insert(pkg);
 
@@ -283,7 +283,7 @@ class RpkgDatabase {
             CHECK(d_pkg);
 
             if (!visited.contains(d_pkg)) {
-                dfs_visit(d_pkg, visited, in_stack, sorted);
+                dfs_visit(d_pkg, visited, in_stack, dependencies);
             } else if (in_stack.contains(d_pkg)) {
                 throw std::runtime_error(
                     "Cycle detected in package dependencies: " + d);
@@ -291,8 +291,7 @@ class RpkgDatabase {
         }
 
         in_stack.erase(pkg);
-        // Post-order insertion
-        sorted.push_back(pkg);
+        dependencies.push_back(pkg);
     }
 
     RPackages packages_;

@@ -200,7 +200,7 @@ class CRANPackageResolver : public Resolver {
     std::shared_ptr<RpkgDatabase const> rpkg_database_;
     std::shared_ptr<DpkgDatabase const> dpkg_database_;
     std::unordered_map<fs::path, RPackage const*> files_;
-    std::unordered_set<RPackage const*> packages_;
+    std::set<RPackage const*> packages_;
 };
 
 inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
