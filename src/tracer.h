@@ -29,6 +29,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <sys/select.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -152,6 +153,7 @@ struct Environment {
     fs::path cwd;
     std::unordered_map<std::string, std::string> vars;
     UserInfo user;
+    std::string timezone;
 };
 
 class CaptureEnvironmentTask : public Task<Environment> {
@@ -179,7 +181,46 @@ class CaptureEnvironmentTask : public Task<Environment> {
             LOG(WARN) << "Failed to get environment variables";
         }
 
+        if (auto tz = CaptureEnvironmentTask::get_system_timezone(); tz) {
+            envir.timezone = *tz;
+        } else {
+            LOG(WARN) << "Failed to get timezone information, fallback to "
+                      << kDefaultTimezone;
+            envir.timezone = kDefaultTimezone;
+        }
+
         return envir;
+    }
+
+  private:
+    static inline std::string_view const kDefaultTimezone{"UTC"};
+    static std::optional<std::string> get_system_timezone() {
+        // 1. try TZ environment
+        char const* tz_env = std::getenv("TZ");
+        if (tz_env) {
+            return {tz_env};
+        }
+
+        // 2. try reading from /etc/timezone
+        std::ifstream tz_file("/etc/timezone");
+        if (tz_file) {
+            std::string timezone;
+            std::getline(tz_file, timezone);
+            return timezone;
+        }
+
+        // 3. timedatectl
+        auto out = Command("timedatectl")
+                       .arg("show")
+                       .arg("--property=Timezone")
+                       .arg("--value")
+                       .output();
+
+        if (out.exit_code == 0) {
+            return out.stdout_data;
+        }
+
+        return {};
     }
 };
 
@@ -407,7 +448,7 @@ class DockerFileBuilderTask : public Task<DockerFile> {
 
         builder.env("DEBIAN_FRONTEND", "noninteractive");
 
-        set_locale(builder);
+        set_basics(builder);
         create_user(builder);
 
         manifest_.write_to_docker(builder);
@@ -422,20 +463,23 @@ class DockerFileBuilderTask : public Task<DockerFile> {
     }
 
   private:
-    void set_locale(DockerFileBuilder& builder) {
-        std::optional<std::string> lang = "C"s;
+    void set_basics(DockerFileBuilder& builder) {
+        std::string lang = "C"s;
         if (auto it = envir_.vars.find("LANG"); it != envir_.vars.end()) {
             lang = it->second;
         }
-
-        if (lang) {
-            builder.env("LANG", *lang);
-            builder.nl();
-
-            builder.run({"apt-get update -y",
-                         "apt-get install -y --no-install-recommends locales",
-                         "locale-gen $LANG", "update-locale LANG=$LANG"});
+        std::string tz = envir_.timezone;
+        if (auto it = envir_.vars.find("TZ"); it != envir_.vars.end()) {
+            tz = it->second;
         }
+
+        builder.env("LANG", lang);
+        builder.env("TZ", tz);
+        builder.run(
+            {"apt-get update -y",
+             "apt-get install -y --no-install-recommends locales tzdata",
+             "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
+             "update-locale LANG=$LANG"});
     }
 
     void create_user(DockerFileBuilder& builder) {
