@@ -9,6 +9,11 @@
         GTEST_SKIP() << message;                                               \
     }
 
+#define SKIP_ON_ROOT(message)                                                  \
+    if (geteuid() == 0) {                                                      \
+        GTEST_SKIP() << message;                                               \
+    }
+
 class CheckAccessibilityTest : public ::testing::Test {
   public:
     fs::path temp_dir;
@@ -47,8 +52,7 @@ TEST_F(CheckAccessibilityTest, directory_readable) {
 }
 
 TEST_F(CheckAccessibilityTest, file_insufficient_permission) {
-    // FIXME: not sure why, but the check_accessibility returns 0
-    SKIP_ON_CI("Not working on CI");
+    SKIP_ON_ROOT("root has access to everything!");
 
     fs::path unreadable_file = temp_dir / "unreadable.txt";
     {
@@ -65,8 +69,7 @@ TEST_F(CheckAccessibilityTest, file_insufficient_permission) {
 }
 
 TEST_F(CheckAccessibilityTest, directory_insufficient_permission) {
-    // FIXME: not sure why, but the check_accessibility returns 0
-    SKIP_ON_CI("Not working on CI");
+    SKIP_ON_ROOT("root has access to everything!");
 
     fs::path unreadable_dir = temp_dir / "unreadable_dir";
     fs::create_directories(unreadable_dir);
