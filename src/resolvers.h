@@ -4,6 +4,7 @@
 #include "default_image_files.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
+#include "filesystem_trie.h"
 #include "logger.h"
 #include "manifest.h"
 #include "rpkg_database.h"
@@ -274,9 +275,13 @@ inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
 
 class IgnoreFileResolver : public Resolver {
   public:
+    explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list)
+        : ignore_file_list_{ignore_file_list} {}
+
     void load_from_files(std::vector<FileInfo>& files) override;
 
   private:
+    FileSystemTrie<bool> const& ignore_file_list_;
     static FileSystemTrie<ImageFileInfo> load_default_files();
     static inline std::string const kImageName = "ubuntu:22.04";
 
@@ -286,24 +291,6 @@ class IgnoreFileResolver : public Resolver {
 
     static inline std::vector<std::string> const kBlacklistPatterns = {
         "/dev/*", "/sys/*", "/proc/*"};
-
-    static inline FileSystemTrie<bool> kIgnoredFiles = [] {
-        FileSystemTrie<bool> trie{false};
-        trie.insert("/dev", true);
-        trie.insert("/etc/ld.so.cache", true);
-        trie.insert("/etc/nsswitch.conf", true);
-        trie.insert("/etc/passwd", true);
-        trie.insert("/proc", true);
-        trie.insert("/sys", true);
-        // created by locale-gen
-        trie.insert("/usr/lib/locale/locale-archive", true);
-        // fonts should be installed from a package
-        trie.insert("/usr/local/share/fonts", true);
-        // this might be a bit too drastic, but cache is usually not
-        // transferable anyway
-        trie.insert("/var/cache", true);
-        return trie;
-    }();
 };
 
 inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
@@ -314,7 +301,7 @@ inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
 
     std::erase_if(files, [&](FileInfo const& info) {
         auto const& path = info.path;
-        if (*kIgnoredFiles.find_last_matching(path)) {
+        if (ignore_file_list_.find_last_matching(path) != nullptr) {
             LOG(TRACE) << "Resolving: " << path << " to: ignored";
             return true;
         }
