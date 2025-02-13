@@ -24,8 +24,8 @@ FORMAT_PATTERNS = *.cpp *.hpp *.c *.h
 FORMAT_EXCLUDE  = 
 
 COVERAGE_BUILD_DIR    = $(BUILD_DIR)-coverage
-COVERAGE_REPORT       = $(COVERAGE_BUILD_DIR)/coverage.lcov
-COVERAGE_REPORT_HTML  = $(COVERAGE_BUILD_DIR)/coverage-lcov
+COVERAGE_REPORT       = $(COVERAGE_BUILD_DIR)/coverage.info
+COVERAGE_REPORT_HTML  = $(COVERAGE_BUILD_DIR)/coverage
 
 #-------------------------------------------------------------------------------
 # Targets
@@ -47,7 +47,7 @@ coverage: ## Run tests with code coverage
 	$(MAKE) build BUILD_DIR=$(COVERAGE_BUILD_DIR) CMAKE_ARGS='$(CMAKE_ARGS) -DENABLE_COVERAGE=ON'
 	cd $(COVERAGE_BUILD_DIR) && \
 		$(CTEST) --output-on-failure -T Test -T Coverage
-	lcov --directory build \
+	lcov --directory $(COVERAGE_BUILD_DIR) \
 		--exclude '/usr/*' \
 		--exclude '*/_deps/*' \
 		--exclude '*/tests/*' \
@@ -72,6 +72,7 @@ lint: build ## Run static analysis
 
 clean: ## Clean build artifacts
 	@rm -rf $(BUILD_DIR)
+	@rm -rf $(COVERAGE_BUILD_DIR)
 
 help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
