@@ -91,7 +91,9 @@ using TracingResult = std::vector<FileInfo>;
 
 class TracingTask : public Task<TracingResult> {
   public:
-    explicit TracingTask(std::vector<std::string> const& cmd) : cmd_(cmd) {}
+    TracingTask(std::vector<std::string> const& cmd,
+                FileSystemTrie<bool> const& ignore_file_list)
+        : cmd_(cmd), ignore_file_list_{ignore_file_list} {}
 
     TracingResult run() override {
         LOG(INFO) << "Tracing program: " << string_join(cmd_, ' ');
@@ -99,7 +101,7 @@ class TracingTask : public Task<TracingResult> {
         auto old_log_sink =
             Logger::get().set_sink(std::make_unique<StoreSink>());
 
-        FileTracer tracer;
+        FileTracer tracer{ignore_file_list_};
         SyscallMonitor monitor{cmd_, tracer};
         monitor.redirect_stdout(std::cout);
         monitor.redirect_stderr(std::cerr);
@@ -167,6 +169,7 @@ class TracingTask : public Task<TracingResult> {
 
   private:
     std::vector<std::string> const& cmd_;
+    FileSystemTrie<bool> const& ignore_file_list_;
     SyscallMonitor* monitor_{};
 };
 
@@ -743,7 +746,8 @@ class Tracer {
     void run_pipeline() {
         auto envir = run("Capture environment", CaptureEnvironmentTask{});
 
-        auto files = run("File tracer", TracingTask{options_.cmd});
+        auto files = run("File tracer",
+                         TracingTask{options_.cmd, options_.ignore_file_list});
 
         auto resolvers =
             run("File resolver",
