@@ -6,7 +6,6 @@ FROM mcr.microsoft.com/devcontainers/base:$BASE_IMAGE
 ENV LANG=en_US.UTF-8
 
 # install build time dependencies
-# note: we install gcovr via pip as the ubuntu package is too old
 RUN apt-get update -y  && \ 
   apt-get install -y \
   build-essential \
@@ -15,6 +14,4 @@ RUN apt-get update -y  && \
   lcov \
   libcurl4-openssl-dev \
   ninja-build \
-  pip \
-  rr && \
-  pip install gcovr
+  rr
