@@ -156,9 +156,23 @@ DpkgDatabase::lookup_by_path(fs::path const& path) const {
     return r != nullptr ? *r : nullptr;
 }
 
+constexpr std::string_view kDpkgArch =
+#if defined(__x86_64__) || defined(_M_X64)
+    "amd64";
+#else
+    "";
+#endif
+
 inline DebPackage const*
 DpkgDatabase::lookup_by_name(std::string const& name) const {
+
     auto it = packages_.find(name);
+
+    if (it == packages_.end()) {
+        // try multiarch name
+        it = packages_.find(STR(name << ":" << kDpkgArch));
+    }
+
     return it == packages_.end() ? nullptr : it->second.get();
 }
 
