@@ -1,8 +1,8 @@
 #ifndef ARCHIVE_H
 #define ARCHIVE_H
 
-#include "util_fs.h"
 #include "process.h"
+#include "util_fs.h"
 #include <fstream>
 
 template <typename FileCollection>
@@ -16,10 +16,13 @@ void create_tar_archive(fs::path const& archive, FileCollection const& files) {
     }
 
     auto out = Command("tar")
-                   .arg("--absolute-names")
-                   .arg("--preserve-permissions")
-                   .arg("-cvf")
+                   .arg("-c")
+                   .arg("-f")
                    .arg(archive.string())
+                   .arg("--verbose")
+                   .arg("--absolute-names")
+                   .arg("--same-permissions")
+                   .arg("--same-owner")
                    .arg("--files-from")
                    .arg(*temp_file)
                    .output(true);

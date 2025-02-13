@@ -148,9 +148,11 @@ inline void Manifest::write_files(DockerFileBuilder& builder) const {
     std::sort(copy_files.begin(), copy_files.end());
 
     create_tar_archive(archive_, copy_files);
-
     builder.copy({archive_}, archive_);
-    builder.run({STR("tar -x --file " << archive_ << " --absolute-names"),
+    // FIXME: the paths are not good, it will copy into out/archive.tar
+    builder.run({STR("tar -x -f "
+                     << archive_
+                     << " --same-owner --same-permissions --absolute-names"),
                  STR("rm -f " << archive_)});
 }
 
