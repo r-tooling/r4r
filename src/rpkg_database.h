@@ -186,7 +186,7 @@ class RpkgDatabase {
 
     static FileSystemTrie<RPackage const*>
     build_files_db(RPackages const& packages) {
-        FileSystemTrie<RPackage const*> files{nullptr};
+        FileSystemTrie<RPackage const*> files;
         for (auto const& [_, pkg] : packages) {
             files.insert(pkg->lib_path / pkg->name, pkg.get());
         }

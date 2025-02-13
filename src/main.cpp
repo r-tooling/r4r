@@ -25,7 +25,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "Unhandled unknown exception." << '\n';
         return EXIT_FAILURE;
     }
-    return EXIT_SUCCESS;
 }
 
 static int do_main(std::span<char const*> args) {

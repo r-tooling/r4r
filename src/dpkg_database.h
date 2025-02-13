@@ -124,7 +124,7 @@ DpkgDatabase::process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
     std::string line;
     while (std::getline(infile, line)) {
         if (!line.empty()) {
-            trie.insert(line, pkg);
+            trie.insert(line, std::move(pkg));
         }
     }
 }

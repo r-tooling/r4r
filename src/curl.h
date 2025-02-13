@@ -43,6 +43,9 @@ class CURLMultipleTransfer {
         }
     }
 
+    CURLMultipleTransfer(CURLMultipleTransfer const&) = delete;
+    CURLMultipleTransfer& operator=(CURLMultipleTransfer const&) = delete;
+
     ~CURLMultipleTransfer() { curl_multi_cleanup(cm_); }
 
     void add(T key, std::string const& url) { pending_.emplace(key, url); }
@@ -71,35 +74,7 @@ class CURLMultipleTransfer {
                 Request* req{};
                 curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, &req);
 
-                if (msg->msg == CURLMSG_DONE) {
-                    long http_code = 0;
-                    curl_easy_getinfo(msg->easy_handle, CURLINFO_RESPONSE_CODE,
-                                      &http_code);
-
-                    results.emplace(
-                        req->key,
-                        HttpResult{static_cast<int>(http_code), req->response});
-
-                    if (Logger::is_level_enabled(TRACE)) {
-                        char* url{};
-                        curl_easy_getinfo(msg->easy_handle,
-                                          CURLINFO_EFFECTIVE_URL, &url);
-                        curl_off_t total{};
-                        curl_easy_getinfo(msg->easy_handle,
-                                          CURLINFO_TOTAL_TIME_T, &total);
-                        std::chrono::microseconds total_chrono{total};
-                        LOG(TRACE) << "Finished CURL task: " << url << " in "
-                                   << format_elapsed_time(total_chrono);
-                    }
-                } else {
-                    char const* error = curl_easy_strerror(msg->data.result);
-                    results.emplace(req->key, std::string{error});
-
-                    char* url{};
-                    curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL,
-                                      &url);
-                    LOG(WARN) << "Failed CURL task: " << url << " in " << error;
-                }
+                results.emplace(req->key, process_curl_message(msg, req));
 
                 curl_multi_remove_handle(cm_, msg->easy_handle);
                 requests_.erase(req->key);
@@ -123,14 +98,37 @@ class CURLMultipleTransfer {
     struct Request {
         T key;
         std::string response;
-        CURL* handle{};
-
-        ~Request() {
-            if (handle) {
-                curl_easy_cleanup(handle);
-            }
-        }
     };
+
+    CURLResult process_curl_message(CURLMsg* msg, Request* req) {
+        if (msg->msg != CURLMSG_DONE) {
+            char const* error = curl_easy_strerror(msg->data.result);
+
+            char* url{};
+            curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &url);
+            LOG(WARN) << "Failed CURL task: " << url << " in " << error;
+
+            return std::string{error};
+        }
+
+        long http_code = 0;
+        curl_easy_getinfo(msg->easy_handle, CURLINFO_RESPONSE_CODE, &http_code);
+
+        if (Logger::is_level_enabled(TRACE)) {
+            char* url{};
+            curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &url);
+
+            curl_off_t total{};
+            curl_easy_getinfo(msg->easy_handle, CURLINFO_TOTAL_TIME_T, &total);
+
+            std::chrono::microseconds total_chrono{total};
+
+            LOG(TRACE) << "Finished CURL task: " << url << " in "
+                       << format_elapsed_time(total_chrono);
+        }
+
+        return HttpResult{static_cast<int>(http_code), req->response};
+    }
 
     static size_t write_callback(char* ptr, size_t size, size_t nmemb,
                                  std::string* data) {
@@ -139,18 +137,19 @@ class CURLMultipleTransfer {
     }
 
     void add_transfer(T key, std::string const& url) {
-        auto req = std::make_unique<Request>(key, "", curl_easy_init());
-        if (!req->handle) {
+        auto req = std::make_unique<Request>(key, "");
+        CURL* handle = curl_easy_init();
+        if (!handle) {
             throw std::runtime_error("curl_easy_init failed");
         }
 
-        curl_easy_setopt(req->handle, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(req->handle, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(req->handle, CURLOPT_WRITEDATA, &req->response);
-        curl_easy_setopt(req->handle, CURLOPT_PRIVATE, req.get());
-        curl_easy_setopt(req->handle, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(handle, CURLOPT_WRITEDATA, &req->response);
+        curl_easy_setopt(handle, CURLOPT_PRIVATE, req.get());
+        curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
 
-        curl_multi_add_handle(cm_, req->handle);
+        curl_multi_add_handle(cm_, handle);
 
         requests_.emplace(key, std::move(req));
     }

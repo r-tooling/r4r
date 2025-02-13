@@ -20,9 +20,15 @@ struct ImageFileInfo {
     std::string sha1;
 
     bool operator==(ImageFileInfo const& other) const noexcept {
-        return path == other.path && user == other.user &&
-               group == other.group && permissions == other.permissions &&
-               size == other.size && sha1 == other.sha1;
+        return std::tie(path, user, group, permissions, size, sha1) ==
+               std::tie(other.path, other.user, other.group, other.permissions,
+                        other.size, other.sha1);
+    }
+
+    bool operator<(ImageFileInfo const& other) const noexcept {
+        return std::tie(path, user, group, permissions, size, sha1) <
+               std::tie(other.path, other.user, other.group, other.permissions,
+                        other.size, other.sha1);
     }
 };
 

@@ -6,6 +6,7 @@
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
+#include "filesystem_trie.h"
 #include "logger.h"
 #include "manifest.h"
 #include "process.h"
@@ -34,6 +35,24 @@
 #include <utility>
 #include <vector>
 
+static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
+    FileSystemTrie<bool> trie;
+    trie.insert("/dev", true);
+    trie.insert("/etc/ld.so.cache", true);
+    trie.insert("/etc/nsswitch.conf", true);
+    trie.insert("/etc/passwd", true);
+    trie.insert("/proc", true);
+    trie.insert("/sys", true);
+    // created by locale-gen
+    trie.insert("/usr/lib/locale/locale-archive", true);
+    // fonts should be installed from a package
+    trie.insert("/usr/local/share/fonts", true);
+    // this might be a bit too drastic, but cache is usually not
+    // transferable anyway
+    trie.insert("/var/cache", true);
+    return trie;
+}();
+
 struct Options {
     LogLevel log_level = LogLevel::Warning;
     fs::path R_bin{"R"};
@@ -46,6 +65,8 @@ struct Options {
     fs::path makefile;
     AbsolutePathSet results;
     bool docker_sudo_access{true};
+    // TODO: make this mutable so more files could be added from command line
+    FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
 
 class TaskBase {
@@ -234,9 +255,10 @@ class ResolveTask : public Task<Resolvers> {
 
     explicit ResolveTask(std::vector<FileInfo>& files,
                          AbsolutePathSet const& result_files, fs::path cwd,
-                         fs::path R_bin)
+                         fs::path R_bin,
+                         FileSystemTrie<bool> const& ignore_file_list)
         : files_{files}, result_files_{result_files}, cwd_{std::move(cwd)},
-          R_bin_{std::move(R_bin)} {}
+          R_bin_{std::move(R_bin)}, ignore_file_list_{ignore_file_list} {}
 
     Resolvers run() override {
 
@@ -246,7 +268,7 @@ class ResolveTask : public Task<Resolvers> {
             std::make_shared<RpkgDatabase>(RpkgDatabase::from_R(R_bin_));
 
         Resolvers resolvers;
-        resolvers.add<IgnoreFileResolver>("ignore");
+        resolvers.add<IgnoreFileResolver>("ignore", ignore_file_list_);
         resolvers.add<DebPackageResolver>("deb", dpkg_database);
         resolvers.add<CRANPackageResolver>("cran", rpkg_database,
                                            dpkg_database);
@@ -262,6 +284,7 @@ class ResolveTask : public Task<Resolvers> {
     AbsolutePathSet const& result_files_;
     fs::path cwd_;
     fs::path R_bin_;
+    FileSystemTrie<bool> const& ignore_file_list_;
 };
 
 class ManifestTask : public Task<Manifest> {
@@ -310,7 +333,7 @@ class ManifestTask : public Task<Manifest> {
             // clang-format off
             STR("The following "
                 << files.size() << " files has not been resolved.\n"
-                << "By default, they will be copied, unless explicitly ignored.\n"
+                << "# - ignore\n"
                 << "C - mark file to be copied into the image.\n"
                 << "R - mark as additional result file.")};
         // clang-format on
@@ -334,6 +357,9 @@ class ManifestTask : public Task<Manifest> {
                 break;
             case FileStatus::Result:
                 content << "R " << path << "\n";
+                break;
+            case FileStatus::IgnoreNoLongerExist:
+                // nothing we can do
                 break;
             default:
                 content << ManifestFormat::comment() << " " << path << " "
@@ -720,8 +746,9 @@ class Tracer {
         auto files = run("File tracer", TracingTask{options_.cmd});
 
         auto resolvers =
-            run("File resolver", ResolveTask{files, options_.results, envir.cwd,
-                                             options_.R_bin});
+            run("File resolver",
+                ResolveTask{files, options_.results, envir.cwd, options_.R_bin,
+                            options_.ignore_file_list});
         auto manifest =
             run("Manifest builder",
                 ManifestTask{resolvers, options_.output_dir, options_.results});
