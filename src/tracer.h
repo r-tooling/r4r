@@ -610,61 +610,50 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "TARGET_DIR = result"
                  << "\n\n"
 
-                 << "fg_blue  = \033[1;34m\n"
-                 << "fg_reset = \033[0m\n"
-
-                 << "log_build = [$(fg_blue)build$(fg_reset)]\n"
-                 << "log_run   = [$(fg_blue)run$(fg_reset)]\n"
-                 << "log_copy  = [$(fg_blue)copy$(fg_reset)]\n"
-                 << "log_clean = [$(fg_blue)clean$(fg_reset)]\n"
-
                  << ".PHONY: all build run copy clean\n\n"
 
                  << "all: clean copy\n\n"
 
                  // clang-format off
                  << "build:\n"
-                 << "\t@echo '$(log_build) build image $(IMAGE_TAG)'\n"
+                 << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
-                 << " | tee docker-build.log"
-                 << " | fold"
-                 << " | sed 's/^/$(log_build) /'"
+                 // << " | tee docker-build.log"
+                 // << " | fold"
                  << "\n\n"
                  // clang-format on
 
                  // clang-format off
                  << "run: build\n"
-                 << "\t@echo '$(log_run) running container $(CONTAINER_NAME)'\n"
+                 << "\t@echo 'Running container $(CONTAINER_NAME)'\n"
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
-                 << " | tee docker-run.log"
-                 << " | fold"
-                 << " | sed 's/^/$(log_run) /'"
+                 // << " | tee docker-run.log"
+                 // << " | fold"
                  << "\n\n"
                  // clang-format on
 
                  << "copy: run\n"
                  << "\t@echo\n" // add a new line in case the docker run did not
                                 // finish with one
-                 << "\t@echo '$(log_copy) copying files'\n"
+                 << "\t@echo 'Copying files'\n"
                  << "\t@mkdir -p $(TARGET_DIR)\n";
 
         for (auto const& file : options_.results) {
-            makefile << "\t@echo -n '$(log_copy)' - " << file << "...\n"
+            makefile << "\t@echo -n '  - " << file << "...'\n"
                      << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
                      << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
                         "failed'"
                      << "\n";
         }
 
-        makefile
-            << "\n"
-            << "clean:\n"
-            << "\t@echo '$(log_clean) cleaning previous container (if any)'\n"
-            << "\t-docker rm $(CONTAINER_NAME)\n"
-            << "\t@echo '$(log_clean) cleaning previous image (if any)'\n"
-            << "\t-docker rmi $(IMAGE_TAG)\n"
-            << "\t@echo '$(log_clean) cleaning previous result (if any)'\n"
-            << "\trm -rf $(TARGET_DIR)\n\n";
+        makefile << "\n"
+                 << "clean:\n"
+                 << "\t@echo 'Cleaning previous container (if any)'\n"
+                 << "\t-docker rm $(CONTAINER_NAME)\n"
+                 << "\t@echo 'Cleaning previous image (if any)'\n"
+                 << "\t-docker rmi $(IMAGE_TAG)\n"
+                 << "\t@echo 'Cleaning previous result (if any)'\n"
+                 << "\trm -rf $(TARGET_DIR)\n\n";
     }
 
   private:
@@ -681,28 +670,31 @@ class RunMakefileTask : public Task<int> {
 
     int run() override {
         LOG(INFO) << "Running Makefile: " << makefile_;
+        int exit_code = run_makefile_target("all", "make> ");
+        if (exit_code != 0) {
+            throw TaskException("Failed to run make");
+        }
+        return exit_code;
+    }
+
+  private:
+    int run_makefile_target(std::string const& target,
+                            std::string const& prefix) {
         auto proc = Command("make")
                         .arg("-f")
                         .arg(makefile_.filename())
+                        .arg(target)
                         .current_dir(makefile_.parent_path())
                         .set_stderr(Stdio::Merge)
                         .set_stdout(Stdio::Pipe)
                         .spawn();
 
         int fd = proc.stdout_fd();
-        with_prefixed_ostream(std::cout, "make> ",
-                              [fd] { forward_output(fd, std::cout, ""); });
-
-        auto exit_code = proc.wait();
-
-        if (exit_code != 0) {
-            throw TaskException("Failed to run make");
-        }
-
-        return exit_code;
+        with_prefixed_ostream(std::cout, prefix,
+                              [fd] { forward_output(fd, std::cout); });
+        return proc.wait();
     }
 
-  private:
     fs::path const& makefile_;
 };
 

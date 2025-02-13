@@ -159,10 +159,10 @@ inline SyscallMonitor::Result SyscallMonitor::process_tracer(Pipe& out,
     err.close_write();
 
     auto stdout_thread_ =
-        std::thread([&] { forward_output(out.read(), *stdout_, "STDOUT"); });
+        std::thread([&] { forward_output(out.read(), *stdout_); });
 
     auto stderr_thread_ =
-        std::thread([&] { forward_output(err.read(), *stderr_, "STDERR"); });
+        std::thread([&] { forward_output(err.read(), *stderr_); });
 
     wait_for_initial_stop();
 

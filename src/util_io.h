@@ -1,6 +1,7 @@
 #ifndef UTIL_IO_H
 #define UTIL_IO_H
 
+#include "common.h"
 #include <array>
 #include <cstring>
 #include <iostream>
@@ -62,9 +63,9 @@ inline void with_prefixed_ostream(std::ostream& dst, std::string const& prefix,
     dst.rdbuf(old);
 }
 
-inline void forward_output(int read_fd, std::ostream& os, char const* tag) {
-    constexpr size_t BUFFER_SIZE = 1024;
-    std::array<char, BUFFER_SIZE> buffer{};
+inline void forward_output(int read_fd, std::ostream& os) {
+    constexpr size_t kBufferSize = 4096;
+    std::array<char, kBufferSize> buffer{};
     while (true) {
         ssize_t bytes = ::read(read_fd, buffer.data(), buffer.size());
         if (bytes == 0) {
@@ -74,13 +75,12 @@ inline void forward_output(int read_fd, std::ostream& os, char const* tag) {
             if (errno == EINTR) {
                 continue; // retry
             }
-            std::cerr << "[Tracer] " << tag
-                      << " read error: " << strerror(errno) << '\n';
-            break;
+            throw make_system_error(
+                errno, STR("Unable to read from pipe: " << read_fd));
         }
         os.write(buffer.data(), bytes);
-        os.flush();
     }
+    os.flush();
 }
 
 #endif // UTIL_IO_H
