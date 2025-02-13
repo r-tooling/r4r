@@ -10,8 +10,10 @@
 #include <bits/types/struct_sched_param.h>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
 
 enum class FileStatus {
@@ -57,6 +59,7 @@ class Manifest {
 
     explicit Manifest(fs::path const& output_dir)
         : archive_{output_dir / "archive.tar"},
+          permission_script_{output_dir / "permissions.sh"},
           cran_install_script_{output_dir / "install_r_packages.R"} {}
 
     void write_to_docker(DockerFileBuilder& builder) const;
@@ -69,8 +72,11 @@ class Manifest {
     void write_deb_packages(DockerFileBuilder& builder) const;
     void write_cran_packages(DockerFileBuilder& builder) const;
     void write_files(DockerFileBuilder& builder) const;
+    static void generate_permissions_script(std::vector<fs::path> const& files,
+                                            std::ostream& out);
 
     fs::path archive_;
+    fs::path permission_script_;
     fs::path cran_install_script_;
     Files files_;
 
@@ -154,6 +160,50 @@ inline void Manifest::write_files(DockerFileBuilder& builder) const {
                      << archive_
                      << " --same-owner --same-permissions --absolute-names"),
                  STR("rm -f " << archive_)});
+
+    {
+        std::ofstream permissions{permission_script_};
+        generate_permissions_script(copy_files, permissions);
+    }
+    builder.copy({permission_script_}, permission_script_);
+    // FIXME: the paths are not good, it will copy into out/...sh
+    builder.run({STR("bash " << permission_script_),
+                 STR("rm -f " << permission_script_)});
+}
+
+inline void
+Manifest::generate_permissions_script(std::vector<fs::path> const& files,
+                                      std::ostream& out) {
+    std::set<fs::path> directories;
+
+    for (auto const& file : files) {
+        fs::path current = file.parent_path();
+        while (!current.empty() && current != "/") {
+            directories.insert(current);
+            current = current.parent_path();
+        }
+    }
+
+    std::vector<fs::path> sorted_dirs(directories.begin(), directories.end());
+
+    out << "#!/bin/bash\n\n";
+    out << "set -e\n\n";
+
+    for (auto const& dir : sorted_dirs) {
+        struct stat info{};
+        if (stat(dir.c_str(), &info) != 0) {
+            LOG(WARN) << "Warning: Unable to access " << dir << '\n';
+            continue;
+        }
+
+        uid_t owner = info.st_uid;
+        gid_t group = info.st_gid;
+        mode_t permissions = info.st_mode & 0777;
+
+        out << "chown " << owner << ":" << group << " " << dir << '\n';
+        out << "chmod " << std::oct << permissions << std::dec << " " << dir
+            << '\n';
+    }
 }
 
 inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
@@ -163,7 +213,7 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
 
     std::ofstream script(cran_install_script_);
     // TODO: parameterize the max cores
-    script << "cores <- min(parallel::detectCores(), 4)\n"
+    script << "options(Ncpus=min(parallel::detectCores(), 4))\n\n"
            << "tmp_dir <- tempdir()\n"
            << "install.packages('remotes', lib = c(tmp_dir))\n"
            << "require('remotes', lib.loc = c(tmp_dir))\n"
@@ -183,8 +233,7 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
         }
 
         script << "install_version('" << pkg.name << "', '" << pkg.version
-               << "', upgrade = 'never', dependencies = FALSE, Ncpus = cores"
-               << ")" << std::endl;
+               << "', upgrade = 'never', dependencies = FALSE)\n";
     }
 
     builder.copy({cran_install_script_}, "/");
