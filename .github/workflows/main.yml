@@ -83,7 +83,7 @@ jobs:
         with:
           name: code-coverage-report
           path: |
-            build/coverage*
+            build-coverage/coverage*
       - name: Upload to codecov
         uses: codecov/codecov-action@v5
         with:
