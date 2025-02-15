@@ -23,7 +23,7 @@ inline std::string escape_cmd_arg(std::string const& arg,
     char quoted_chr = single_quote ? '\'' : '"';
 
     if (arg.empty()) {
-        return std::string(2, quoted_chr);
+        return {2, quoted_chr};
     }
 
     bool needs_quoting = false;
@@ -226,6 +226,16 @@ std::optional<std::array<std::string, N>> inline string_split_n(
     }
 
     return result;
+}
+
+inline bool string_iequals(std::string const& s1, std::string const& s2) {
+    if (s1.size() != s2.size()) {
+        return false;
+    }
+    return std::equal(s1.begin(), s1.end(), s2.begin(),
+                      [](unsigned char c1, unsigned char c2) {
+                          return std::tolower(c1) == std::tolower(c2);
+                      });
 }
 
 template <typename T>

@@ -19,18 +19,38 @@
 #include <vector>
 
 struct RPackage {
+    struct GitHub {
+        std::string org;
+        std::string name;
+        std::string ref;
+
+        bool operator==(GitHub const& other) const {
+            return std::tie(org, name, ref) ==
+                   std::tie(other.org, other.name, other.ref);
+        };
+    };
+
+    struct CRAN {
+        bool operator==(const CRAN&) const = default;
+    };
+
+    using Repository = std::variant<GitHub, CRAN>;
+
     std::string name;
     fs::path lib_path;
     std::string version;
+    // TODO: RPackage const*
     std::set<std::string> dependencies;
     bool is_base = false;
     bool needs_compilation = false;
+    Repository repository;
 
     bool operator==(RPackage const& other) const {
-        return name == other.name && lib_path == other.lib_path &&
-               version == other.version && dependencies == other.dependencies &&
-               is_base == other.is_base &&
-               needs_compilation == other.needs_compilation;
+        return std::tie(name, lib_path, version, dependencies, is_base,
+                        needs_compilation, repository) ==
+               std::tie(other.name, other.lib_path, other.version,
+                        other.dependencies, other.is_base,
+                        other.needs_compilation, repository);
     }
 };
 
@@ -62,7 +82,16 @@ class RpkgDatabase {
                                      gsub(
                                        "\n",
                                        "",
-                                       installed.packages()[,c("Package", "LibPath", "Version", "Depends", "Imports", "LinkingTo", "Priority", "NeedsCompilation")]
+                                       installed.packages(
+                                         fields = c(
+                                           "RemoteType", "RemoteRepo", "RemoteUsername", "RemoteRef"
+                                         )
+                                       )[, c(
+                                             "Package", "LibPath", "Version", "Depends", 
+                                             "Imports", "LinkingTo", "Priority", "NeedsCompilation", 
+                                             "RemoteType", "RemoteRepo", "RemoteUsername", "RemoteRef"
+                                           )
+                                        ]
                                      ),
                                      sep="\U00A0",
                                      quote=FALSE,
@@ -109,6 +138,9 @@ class RpkgDatabase {
 
         auto res = curl.run();
 
+        LOG(DEBUG) << "Got system dependencies for " << res.size()
+                   << " packages";
+
         for (auto& [p, r] : res) {
             try {
                 auto* hr = std::get_if<HttpResult>(&r);
@@ -125,15 +157,13 @@ class RpkgDatabase {
 
                 auto json = JsonParser::parse(hr->message);
                 auto reqs = json_query<JsonArray>(json, "requirements");
-                if (reqs.empty()) {
-                    continue;
-                }
+                for (auto const& req : reqs) {
+                    auto deps =
+                        json_query<JsonArray>(req, "requirements.packages");
 
-                auto deps =
-                    json_query<JsonArray>(reqs[0], "requirements.packages");
-
-                for (auto const& dep : deps) {
-                    dependencies.insert(std::get<std::string>(dep));
+                    for (auto const& dep : deps) {
+                        dependencies.insert(std::get<std::string>(dep));
+                    }
                 }
             } catch (std::exception const& e) {
                 LOG(WARN) << "Failed to get system dependencies for " << p->name
@@ -204,12 +234,16 @@ class RpkgDatabase {
                 continue;
             }
 
-            auto tokens = string_split_n<8>(line, NBSP);
+            auto tokens = string_split_n<12>(line, NBSP);
             if (!tokens) {
                 LOG(WARN) << "Failed to parse installed.package() output line: "
                           << line;
                 continue;
             }
+
+            std::string name = tokens->at(0);
+            std::string lib_path = tokens->at(1);
+            std::string version = tokens->at(2);
 
             // we want them in order
             std::set<std::string> dependencies;
@@ -223,11 +257,50 @@ class RpkgDatabase {
             bool is_base = tokens->at(6) == "base";
             bool needs_compilation = tokens->at(7) == "yes";
 
-            auto pkg = std::make_unique<RPackage>(tokens->at(0), tokens->at(1),
-                                                  tokens->at(2), dependencies,
-                                                  is_base, needs_compilation);
+            RPackage::Repository repo = RPackage::CRAN{};
+            auto repo_type = tokens->at(8);
+            if (string_iequals(repo_type, "github")) {
+                std::string org = tokens->at(9);
+                std::string name = tokens->at(10);
+                std::string ref = tokens->at(11);
+
+                if (auto gh_repo = parse_github_repo(org, name, ref); gh_repo) {
+                    repo = *gh_repo;
+                } else {
+                    continue;
+                }
+            }
+
+            auto pkg = std::make_unique<RPackage>(name, lib_path, version,
+                                                  dependencies, is_base,
+                                                  needs_compilation, repo);
             packages.emplace(pkg->name, std::move(pkg));
         }
+    }
+
+    static std::optional<RPackage::GitHub>
+    parse_github_repo(std::string const& org, std::string const& name,
+                      std::string const& ref) {
+
+        std::string r = ref;
+
+        if (org.empty() || org == "NA") {
+            LOG(WARN) << "Invalid GitHub repository org for package " << name
+                      << ", skipping.";
+            return {};
+        }
+        if (name.empty() || name == "NA") {
+            LOG(WARN) << "Invalid GitHub repository name for package " << name
+                      << ", skipping.";
+            return {};
+        }
+        if (ref.empty() || ref == "NA") {
+            LOG(WARN) << "Invalid GitHub repository ref for package " << name
+                      << " using HEAD instead";
+            r = "HEAD";
+        }
+
+        return RPackage::GitHub{.org = org, .name = name, .ref = r};
     }
 
     // Given a single field from the line that might contain multiple

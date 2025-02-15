@@ -34,4 +34,13 @@ inline std::system_error make_system_error(int error_code,
 #define NBSP "\xC2\xA0"
 static inline std::string const kDelimUtf8 = NBSP;
 
+// courtesy of cppreference.com:
+// https://en.cppreference.com/w/cpp/utility/variant/visit2
+template <class... Ts>
+struct overloaded : Ts... {
+    using Ts::operator()...;
+};
+template <class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 #endif // COMMON_H

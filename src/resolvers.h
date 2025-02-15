@@ -185,11 +185,10 @@ inline void CopyFileResolver::add_to_manifest(Manifest& manifest) const {
     }
 }
 
-class CRANPackageResolver : public Resolver {
+class RPackageResolver : public Resolver {
   public:
-    explicit CRANPackageResolver(
-        std::shared_ptr<RpkgDatabase const> rpkg_database,
-        std::shared_ptr<DpkgDatabase const> dpkg_database)
+    explicit RPackageResolver(std::shared_ptr<RpkgDatabase const> rpkg_database,
+                              std::shared_ptr<DpkgDatabase const> dpkg_database)
         : rpkg_database_{std::move(rpkg_database)},
           dpkg_database_{std::move(dpkg_database)} {}
 
@@ -203,7 +202,7 @@ class CRANPackageResolver : public Resolver {
     std::set<RPackage const*> packages_;
 };
 
-inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
+inline void RPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     SymlinkResolver symlink_resolved;
 
     auto resolved = [&](FileInfo const& info) {
@@ -233,7 +232,7 @@ inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     }
 };
 
-inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
+inline void RPackageResolver::add_to_manifest(Manifest& manifest) const {
     std::unordered_set<RPackage const*> compiled_packages;
     for (auto const* pkg : rpkg_database_->get_dependencies(packages_)) {
         if (pkg->is_base) {
@@ -244,11 +243,17 @@ inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
             compiled_packages.insert(pkg);
         }
 
+        // TODO: make repo an abstract class instead of variant, then add name
+        // method
+        LOG(DEBUG) << "Adding R package: " << pkg->name << " " << pkg->version
+                   << (pkg->needs_compilation ? "(needs compilation)" : "");
+
         manifest.add_cran_package(*pkg);
     }
 
     if (!compiled_packages.empty()) {
-        LOG(INFO) << "There are CRAN packages that needs compilation, need to "
+        LOG(INFO) << "There are " << compiled_packages.size()
+                  << " R packages that needs compilation, need to "
                      "pull system dependencies";
 
         auto deb_packages =

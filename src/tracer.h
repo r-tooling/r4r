@@ -275,8 +275,7 @@ class ResolveTask : public Task<Resolvers> {
         Resolvers resolvers;
         resolvers.add<IgnoreFileResolver>("ignore", ignore_file_list_);
         resolvers.add<DebPackageResolver>("deb", dpkg_database);
-        resolvers.add<CRANPackageResolver>("cran", rpkg_database,
-                                           dpkg_database);
+        resolvers.add<RPackageResolver>("cran", rpkg_database, dpkg_database);
         resolvers.add<CopyFileResolver>("copy", cwd_, result_files_);
 
         resolvers.load_from_files(files_);

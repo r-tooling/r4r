@@ -137,6 +137,8 @@ class CURLMultipleTransfer {
     }
 
     void add_transfer(T key, std::string const& url) {
+        LOG(TRACE) << "Adding CURL task: " << url;
+
         auto req = std::make_unique<Request>(key, "");
         CURL* handle = curl_easy_init();
         if (!handle) {

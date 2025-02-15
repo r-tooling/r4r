@@ -240,8 +240,20 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
             continue;
         }
 
-        script << "CHK(install_version('" << pkg.name << "', '" << pkg.version
-               << "', upgrade = 'never', dependencies = FALSE))\n";
+        std::visit(
+            overloaded{
+                [&](RPackage::GitHub const& gh) {
+                    script << "CHK(install_github('" << gh.org << "/" << gh.name
+                           << "', ref = '" << gh.ref
+                           << "', upgrade = 'never', dependencies = FALSE))\n";
+                },
+                [&](RPackage::CRAN const&) {
+                    script << "CHK(install_version('" << pkg.name << "', '"
+                           << pkg.version
+                           << "', upgrade = 'never', dependencies = FALSE))\n";
+                },
+            },
+            pkg.repository);
     }
 
     builder.copy({cran_install_script_}, "/");
