@@ -23,7 +23,7 @@ inline std::string escape_cmd_arg(std::string const& arg,
     char quoted_chr = single_quote ? '\'' : '"';
 
     if (arg.empty()) {
-        return {2, quoted_chr};
+        return std::string(2, quoted_chr);
     }
 
     bool needs_quoting = false;
@@ -188,7 +188,7 @@ inline std::string format_elapsed_time(Duration elapsed) {
         auto secs = remaining_ms / MS_PER_SEC;
         auto deci_secs = (remaining_ms % MS_PER_SEC) / 100;
         return STR(std::setfill('0')
-                   << mins << ":" << std::setw(2) << secs << "." << deci_secs);
+            << mins << ":" << std::setw(2) << secs << "." << deci_secs);
     }
 
     auto hrs = total_ms / MS_PER_HOUR;
@@ -196,7 +196,7 @@ inline std::string format_elapsed_time(Duration elapsed) {
     auto secs = (total_ms % MS_PER_MIN) / MS_PER_SEC;
 
     return STR(std::setfill('0') << hrs << ":" << std::setw(2) << mins << ":"
-                                 << std::setw(2) << secs);
+        << std::setw(2) << secs);
 }
 
 template <size_t N>

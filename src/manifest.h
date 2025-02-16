@@ -7,7 +7,6 @@
 #include "rpkg_database.h"
 #include "util_io.h"
 #include <algorithm>
-#include <bits/types/struct_sched_param.h>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -54,13 +53,14 @@ inline std::ostream& operator<<(std::ostream& os, FileStatus status) {
 
 // TODO: split this class to a smaller ones.
 class Manifest {
-  public:
+public:
     using Files = std::unordered_map<fs::path, FileStatus>;
 
     explicit Manifest(fs::path const& output_dir)
         : archive_{output_dir / "archive.tar"},
           permission_script_{output_dir / "permissions.sh"},
-          cran_install_script_{output_dir / "install_r_packages.R"} {}
+          cran_install_script_{output_dir / "install_r_packages.R"} {
+    }
 
     void write_to_docker(DockerFileBuilder& builder) const;
     void add_deb_package(DebPackage const& pkg);
@@ -68,7 +68,7 @@ class Manifest {
     void add_file(fs::path const& path, FileStatus status);
     Files& files() { return files_; }
 
-  private:
+private:
     void write_deb_packages(DockerFileBuilder& builder) const;
     void write_cran_packages(DockerFileBuilder& builder) const;
     void write_files(DockerFileBuilder& builder) const;
@@ -85,25 +85,25 @@ class Manifest {
     std::vector<DebPackage> deb_packages_;
 };
 
-void Manifest::add_cran_package(RPackage const& pkg) {
+inline void Manifest::add_cran_package(RPackage const& pkg) {
     cran_packages_.push_back(pkg);
 }
 
-void Manifest::add_deb_package(DebPackage const& pkg) {
+inline void Manifest::add_deb_package(DebPackage const& pkg) {
     deb_packages_.push_back(pkg);
 }
 
-void Manifest::add_file(fs::path const& path, FileStatus status) {
+inline void Manifest::add_file(fs::path const& path, FileStatus status) {
     files_.emplace(path, status);
 }
 
-void Manifest::write_to_docker(DockerFileBuilder& builder) const {
+inline void Manifest::write_to_docker(DockerFileBuilder& builder) const {
     write_deb_packages(builder);
     write_cran_packages(builder);
     write_files(builder);
 }
 
-void Manifest::write_deb_packages(DockerFileBuilder& builder) const {
+inline void Manifest::write_deb_packages(DockerFileBuilder& builder) const {
 
     // TODO: the main problem with this implementation is that
     // it ignores the fact a package can come from multiple repos
@@ -157,8 +157,8 @@ inline void Manifest::write_files(DockerFileBuilder& builder) const {
     builder.copy({archive_}, archive_);
     // FIXME: the paths are not good, it will copy into out/archive.tar
     builder.run({STR("tar -x -f "
-                     << archive_
-                     << " --same-owner --same-permissions --absolute-names"),
+        << archive_
+        << " --same-owner --same-permissions --absolute-names"),
                  STR("rm -f " << archive_)});
 
     {
@@ -214,20 +214,20 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
     std::ofstream script(cran_install_script_);
     // TODO: parameterize the max cores
     script << "options(Ncpus=min(parallel::detectCores(), 4))\n\n"
-           << "tmp_dir <- tempdir()\n"
-           << "install.packages('remotes', lib = c(tmp_dir))\n"
-           << "require('remotes', lib.loc = c(tmp_dir))\n"
-           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
-           << "\n\n"
-           << "# install wrapper that turns warnings into errors\n"
+        << "tmp_dir <- tempdir()\n"
+        << "install.packages('remotes', lib = c(tmp_dir))\n"
+        << "require('remotes', lib.loc = c(tmp_dir))\n"
+        << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
+        << "\n\n"
+        << "# install wrapper that turns warnings into errors\n"
            // clang-format off
            << "CHK <- function(thunk) {\n"
            << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
            << "if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }})\n"
            << "}\n\n"
-           // clang-format on
+        // clang-format on
 
-           << "# installing packages\n\n";
+        << "# installing packages\n\n";
 
     std::unordered_set<std::string> seen;
     // we have to install the dependencies ourselves otherwise we cannot get
@@ -244,13 +244,13 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
             overloaded{
                 [&](RPackage::GitHub const& gh) {
                     script << "CHK(install_github('" << gh.org << "/" << gh.name
-                           << "', ref = '" << gh.ref
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
+                        << "', ref = '" << gh.ref
+                        << "', upgrade = 'never', dependencies = FALSE))\n";
                 },
                 [&](RPackage::CRAN const&) {
                     script << "CHK(install_version('" << pkg.name << "', '"
-                           << pkg.version
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
+                        << pkg.version
+                        << "', upgrade = 'never', dependencies = FALSE))\n";
                 },
             },
             pkg.repository);
@@ -263,7 +263,7 @@ inline void Manifest::write_cran_packages(DockerFileBuilder& builder) const {
 }
 
 class ManifestFormat {
-  public:
+public:
     static constexpr char comment() noexcept { return kCommentChar; }
 
     struct Section {
@@ -296,7 +296,7 @@ class ManifestFormat {
         return &*it;
     }
 
-    Section& add_section(Section section) {
+    Section& add_section(const Section& section) {
         if (!is_valid_section_name(section.name)) {
             throw std::invalid_argument("Invalid section name: " +
                                         section.name);
@@ -372,7 +372,7 @@ class ManifestFormat {
         }
     }
 
-  private:
+private:
     static constexpr char kCommentChar = '#';
 
     std::string preamble_;

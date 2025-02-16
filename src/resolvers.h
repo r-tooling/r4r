@@ -15,69 +15,79 @@
 #include <vector>
 
 class Resolver {
-  public:
+public:
     virtual ~Resolver() = default;
 
     virtual void load_from_files(std::vector<FileInfo>& files) = 0;
-    virtual void add_to_manifest(Manifest&) const {};
+
+    virtual void add_to_manifest(Manifest&) const {
+    };
 };
 
 class Resolvers : public Resolver {
-  public:
+public:
     template <std::derived_from<Resolver> T, typename... Args>
 
-    void add(std::string const& key, Args&&... args) {
-        resolvers_.emplace(key,
-                           std::make_unique<T>(std::forward<Args>(args)...));
-        index_.emplace_back(key);
-    }
+    void add(std::string const& key, Args&&... args);
 
-    void load_from_files(std::vector<FileInfo>& files) override {
-        LOG(INFO) << "Resolving " << files.size() << " files";
+    void load_from_files(std::vector<FileInfo>& files) override;
 
-        std::string summary;
-        size_t total_count = files.size();
+    void add_to_manifest(Manifest& manifest) const override;
 
-        for (auto const& name : index_) {
-            size_t count = files.size();
-            resolvers_.at(name)->load_from_files(files);
-            summary += name + "(" + std::to_string(count - files.size()) + ") ";
-        }
-
-        LOG(INFO) << "Resolver summary: " << total_count
-                  << " file(s): " << summary;
-
-        if (files.empty()) {
-            LOG(INFO) << "All files resolved";
-        } else {
-            LOG(INFO) << "Failed to resolve " << files.size() << " files";
-            for (auto const& f : files) {
-                LOG(INFO) << "Failed to resolve: " << f.path;
-            }
-        }
-    }
-
-    void add_to_manifest(Manifest& manifest) const override {
-        for (auto const& name : index_) {
-            resolvers_.at(name)->add_to_manifest(manifest);
-        }
-    }
-
-  private:
+private:
     std::unordered_map<std::string, std::unique_ptr<Resolver>> resolvers_;
     std::vector<std::string> index_;
 };
 
+template <std::derived_from<Resolver> T, typename... Args>
+void Resolvers::add(std::string const& key, Args&&... args) {
+    resolvers_.emplace(key,
+                       std::make_unique<T>(std::forward<Args>(args)...));
+    index_.emplace_back(key);
+}
+
+inline void Resolvers::load_from_files(std::vector<FileInfo>& files) {
+    LOG(INFO) << "Resolving " << files.size() << " files";
+
+    std::string summary;
+    size_t total_count = files.size();
+
+    for (auto const& name : index_) {
+        size_t count = files.size();
+        resolvers_.at(name)->load_from_files(files);
+        summary += name + "(" + std::to_string(count - files.size()) + ") ";
+    }
+
+    LOG(INFO) << "Resolver summary: " << total_count
+                  << " file(s): " << summary;
+
+    if (files.empty()) {
+        LOG(INFO) << "All files resolved";
+    } else {
+        LOG(INFO) << "Failed to resolve " << files.size() << " files";
+        for (auto const& f : files) {
+            LOG(INFO) << "Failed to resolve: " << f.path;
+        }
+    }
+}
+
+inline void Resolvers::add_to_manifest(Manifest& manifest) const {
+    for (auto const& name : index_) {
+        resolvers_.at(name)->add_to_manifest(manifest);
+    }
+}
+
 class DebPackageResolver : public Resolver {
-  public:
+public:
     explicit DebPackageResolver(
         std::shared_ptr<DpkgDatabase const> dpkg_database)
-        : dpkg_database_(std::move(dpkg_database)) {}
+        : dpkg_database_(std::move(dpkg_database)) {
+    }
 
     void load_from_files(std::vector<FileInfo>& files) override;
     void add_to_manifest(Manifest& manifest) const override;
 
-  private:
+private:
     std::shared_ptr<DpkgDatabase const> dpkg_database_;
     std::unordered_map<fs::path, DebPackage const*> files_;
     std::unordered_set<DebPackage const*> packages_;
@@ -123,15 +133,16 @@ inline void DebPackageResolver::add_to_manifest(Manifest& manifest) const {
 }
 
 class CopyFileResolver : public Resolver {
-  public:
+public:
     explicit CopyFileResolver(fs::path const& cwd,
                               AbsolutePathSet const& result_files)
-        : cwd_{cwd}, result_files_{result_files} {}
+        : cwd_{cwd}, result_files_{result_files} {
+    }
 
     void load_from_files(std::vector<FileInfo>& files) override;
     void add_to_manifest(Manifest& manifest) const override;
 
-  private:
+private:
     fs::path const& cwd_;
     AbsolutePathSet const& result_files_;
     std::map<fs::path, FileStatus> files_;
@@ -164,6 +175,8 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
             case AccessStatus::InsufficientPermission:
                 status = FileStatus::IgnoreNotAccessible;
                 break;
+            default:
+                UNREACHABLE();
             }
         }
 
@@ -186,16 +199,17 @@ inline void CopyFileResolver::add_to_manifest(Manifest& manifest) const {
 }
 
 class RPackageResolver : public Resolver {
-  public:
+public:
     explicit RPackageResolver(std::shared_ptr<RpkgDatabase const> rpkg_database,
                               std::shared_ptr<DpkgDatabase const> dpkg_database)
         : rpkg_database_{std::move(rpkg_database)},
-          dpkg_database_{std::move(dpkg_database)} {}
+          dpkg_database_{std::move(dpkg_database)} {
+    }
 
     void load_from_files(std::vector<FileInfo>& files) override;
     void add_to_manifest(Manifest& manifest) const override;
 
-  private:
+private:
     std::shared_ptr<RpkgDatabase const> rpkg_database_;
     std::shared_ptr<DpkgDatabase const> dpkg_database_;
     std::unordered_map<fs::path, RPackage const*> files_;
@@ -279,13 +293,14 @@ inline void RPackageResolver::add_to_manifest(Manifest& manifest) const {
 }
 
 class IgnoreFileResolver : public Resolver {
-  public:
+public:
     explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list)
-        : ignore_file_list_{ignore_file_list} {}
+        : ignore_file_list_{ignore_file_list} {
+    }
 
     void load_from_files(std::vector<FileInfo>& files) override;
 
-  private:
+private:
     FileSystemTrie<bool> const& ignore_file_list_;
     static FileSystemTrie<ImageFileInfo> load_default_files();
     static inline std::string const kImageName = "ubuntu:22.04";

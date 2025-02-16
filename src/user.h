@@ -21,89 +21,91 @@ struct UserInfo {
     std::string shell;
     std::vector<GroupInfo> groups;
 
-    static UserInfo get_current_user_info() {
-        uid_t uid = getuid();
-        gid_t gid = getgid();
+    static UserInfo get_current_user_info();
+};
 
-        long pw_buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-        if (pw_buf_size == -1) {
-            pw_buf_size = 1024; // fallback
-        }
-        long gr_buf_size = sysconf(_SC_GETGR_R_SIZE_MAX);
-        if (gr_buf_size == -1) {
-            gr_buf_size = 1024; // fallback
-        }
+inline UserInfo UserInfo::get_current_user_info() {
+    uid_t uid = getuid();
+    gid_t gid = getgid();
 
-        std::vector<char> pw_buffer(static_cast<size_t>(pw_buf_size));
-        struct passwd pwd{};
-        struct passwd* pwd_result = nullptr;
+    long pw_buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if (pw_buf_size == -1) {
+        pw_buf_size = 1024; // fallback
+    }
+    long gr_buf_size = sysconf(_SC_GETGR_R_SIZE_MAX);
+    if (gr_buf_size == -1) {
+        gr_buf_size = 1024; // fallback
+    }
 
-        int pw_status = getpwuid_r(uid, &pwd, pw_buffer.data(),
-                                   pw_buffer.size(), &pwd_result);
-        if (pw_status != 0 || pwd_result == nullptr) {
-            throw make_system_error(
-                errno, STR("Failed to get passwd struct for UID " << uid));
-        }
+    std::vector<char> pw_buffer(static_cast<size_t>(pw_buf_size));
+    struct passwd pwd{};
+    struct passwd* pwd_result = nullptr;
 
-        std::string username = pwd.pw_name;
-        std::string home_directory = pwd.pw_dir;
-        std::string shell = pwd.pw_shell;
+    int pw_status = getpwuid_r(uid, &pwd, pw_buffer.data(),
+                               pw_buffer.size(), &pwd_result);
+    if (pw_status != 0 || pwd_result == nullptr) {
+        throw make_system_error(
+            errno, STR("Failed to get passwd struct for UID " << uid));
+    }
 
-        std::vector<char> gr_buffer(static_cast<size_t>(gr_buf_size));
-        struct group grp{};
-        struct group* grp_result = nullptr;
+    std::string username = pwd.pw_name;
+    std::string home_directory = pwd.pw_dir;
+    std::string shell = pwd.pw_shell;
 
-        int gr_status = getgrgid_r(gid, &grp, gr_buffer.data(),
-                                   gr_buffer.size(), &grp_result);
-        if (gr_status != 0 || grp_result == nullptr) {
-            throw make_system_error(
-                errno, STR("Failed to get group struct for GID " << gid));
-        }
+    std::vector<char> gr_buffer(static_cast<size_t>(gr_buf_size));
+    struct group grp{};
+    struct group* grp_result = nullptr;
 
-        GroupInfo primary_group = {.gid = gid, .name = grp.gr_name};
+    int gr_status = getgrgid_r(gid, &grp, gr_buffer.data(),
+                               gr_buffer.size(), &grp_result);
+    if (gr_status != 0 || grp_result == nullptr) {
+        throw make_system_error(
+            errno, STR("Failed to get group struct for GID " << gid));
+    }
 
-        int n_groups = 0;
-        if (getgrouplist(username.c_str(), gid, nullptr, &n_groups) == -1 &&
-            n_groups == 0) {
+    GroupInfo primary_group = {.gid = gid, .name = grp.gr_name};
+
+    int n_groups = 0;
+    if (getgrouplist(username.c_str(), gid, nullptr, &n_groups) == -1 &&
+        n_groups == 0) {
+        throw make_system_error(
+            errno,
+            "Failed to determine group list size for user " + username);
+    }
+
+    std::vector<gid_t> group_ids(n_groups);
+    if (getgrouplist(username.c_str(), gid, group_ids.data(), &n_groups) ==
+        -1) {
+        throw make_system_error(
+            errno, "Failed to get group list for user " + username);
+    }
+
+    std::vector<GroupInfo> groups;
+    groups.reserve(static_cast<size_t>(n_groups));
+
+    for (gid_t group_id : group_ids) {
+        struct group temp_grp{};
+        struct group* temp_result = nullptr;
+
+        gr_status = getgrgid_r(group_id, &temp_grp, gr_buffer.data(),
+                               gr_buffer.size(), &temp_result);
+        if (gr_status == 0 && temp_result != nullptr) {
+            std::string grp_name =
+                (temp_grp.gr_name ? temp_grp.gr_name : "");
+            groups.push_back({.gid = group_id, .name = grp_name});
+        } else {
             throw make_system_error(
                 errno,
-                "Failed to determine group list size for user " + username);
+                STR("Failed to get group info for GID: " << group_id));
         }
-
-        std::vector<gid_t> group_ids(n_groups);
-        if (getgrouplist(username.c_str(), gid, group_ids.data(), &n_groups) ==
-            -1) {
-            throw make_system_error(
-                errno, "Failed to get group list for user " + username);
-        }
-
-        std::vector<GroupInfo> groups;
-        groups.reserve(static_cast<size_t>(n_groups));
-
-        for (gid_t group_id : group_ids) {
-            struct group temp_grp{};
-            struct group* temp_result = nullptr;
-
-            gr_status = getgrgid_r(group_id, &temp_grp, gr_buffer.data(),
-                                   gr_buffer.size(), &temp_result);
-            if (gr_status == 0 && temp_result != nullptr) {
-                std::string grp_name =
-                    (temp_grp.gr_name ? temp_grp.gr_name : "");
-                groups.push_back({.gid = group_id, .name = grp_name});
-            } else {
-                throw make_system_error(
-                    errno,
-                    STR("Failed to get group info for GID: " << group_id));
-            }
-        }
-
-        return UserInfo{.uid = uid,
-                        .group = primary_group,
-                        .username = username,
-                        .home_directory = home_directory,
-                        .shell = shell,
-                        .groups = groups};
     }
-};
+
+    return UserInfo{.uid = uid,
+                    .group = primary_group,
+                    .username = username,
+                    .home_directory = home_directory,
+                    .shell = shell,
+                    .groups = groups};
+}
 
 #endif // USER_H

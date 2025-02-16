@@ -21,64 +21,19 @@ struct DebPackage {
     bool operator==(DebPackage const& other) const = default;
 };
 
-namespace std {
-
 template <>
-struct hash<DebPackage> {
+struct std::hash<DebPackage> {
     size_t operator()(DebPackage const& pkg) const noexcept {
         hash<string> string_hasher;
         return string_hasher(pkg.name) ^ (string_hasher(pkg.version) << 1);
     }
 };
 
-} // namespace std
-
 using DebPackages =
-    std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
-
-class DpkgParser {
-  public:
-    explicit DpkgParser(std::istream& dpkg_output)
-        : dpkg_output_{dpkg_output} {}
-
-    DebPackages parse();
-
-  private:
-    std::istream& dpkg_output_;
-};
-
-inline DebPackages DpkgParser::parse() {
-    DebPackages packages;
-    std::string line;
-
-    // skip header lines
-    while (std::getline(dpkg_output_, line)) {
-        if (line.starts_with("+++-")) {
-            break;
-        }
-    }
-
-    while (std::getline(dpkg_output_, line)) {
-        std::istringstream line_stream(line);
-        std::string status;
-        std::string name;
-        std::string version;
-
-        if (line_stream >> status >> std::ws >> name >> std::ws >> version) {
-            if (status == "ii") { // only consider installed packages
-                packages.emplace(name,
-                                 std::make_unique<DebPackage>(name, version));
-            }
-        } else {
-            LOG(WARN) << "Failed to parse line from dpkg: " << line;
-        }
-    }
-
-    return packages;
-}
+std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
 
 class DpkgDatabase {
-  public:
+public:
     static DpkgDatabase system_database();
     static DpkgDatabase from_path(fs::path const& path);
 
@@ -90,9 +45,10 @@ class DpkgDatabase {
     DebPackage const* lookup_by_path(fs::path const& path) const;
     DebPackage const* lookup_by_name(std::string const& name) const;
 
-  private:
+private:
     DpkgDatabase(DebPackages packages, FileSystemTrie<DebPackage const*> files)
-        : packages_{std::move(packages)}, files_{std::move(files)} {}
+        : packages_{std::move(packages)}, files_{std::move(files)} {
+    }
 
     static DebPackages load_installed_packages();
     static void
@@ -103,13 +59,43 @@ class DpkgDatabase {
     FileSystemTrie<DebPackage const*> files_;
 };
 
+inline DebPackages parse_dpkg_list_output(std::istream& dpkg_output) {
+    DebPackages packages;
+    std::string line;
+
+    // skip header lines
+    while (std::getline(dpkg_output, line)) {
+        if (line.starts_with("+++-")) {
+            break;
+        }
+    }
+
+    while (std::getline(dpkg_output, line)) {
+        std::istringstream line_stream(line);
+        std::string status;
+        std::string name;
+        std::string version;
+
+        if (line_stream >> status >> std::ws >> name >> std::ws >> version) {
+            if (status == "ii") {
+                // only consider installed packages
+                packages.emplace(name,
+                                 std::make_unique<DebPackage>(name, version));
+            }
+        } else {
+            LOG(WARN) << "Failed to parse line from dpkg: " << line;
+        }
+    }
+
+    return packages;
+}
+
 inline DebPackages DpkgDatabase::load_installed_packages() {
-    auto out = Command("dpkg").arg("-l").output();
+    const auto out = Command("dpkg").arg("-l").output();
     out.check_success("Unable to execute 'dpkg -l'");
 
     std::istringstream stream{out.stdout_data};
-    DpkgParser parser{stream};
-    return parser.parse();
+    return parse_dpkg_list_output(stream);
 }
 
 inline void
@@ -124,7 +110,7 @@ DpkgDatabase::process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
     std::string line;
     while (std::getline(infile, line)) {
         if (!line.empty()) {
-            trie.insert(line, std::move(pkg));
+            trie.insert(line, pkg);
         }
     }
 }

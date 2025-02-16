@@ -18,23 +18,20 @@
 #include "util_fs.h"
 #include "util_io.h"
 
-#include <fcntl.h>
 #include <filesystem>
 
 #include <cstdlib>
 #include <fstream>
-#include <grp.h>
 #include <iostream>
-#include <pwd.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
-#include <sys/select.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+/// The global ignore file list.
 static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
     FileSystemTrie<bool> trie;
     trie.insert("/dev", true);
@@ -72,30 +69,34 @@ struct Options {
 };
 
 class TaskBase {
-  public:
+public:
     virtual ~TaskBase() = default;
-    virtual void stop() {}
+
+    virtual void stop() {
+    }
 };
 
 template <typename T>
 class Task : public TaskBase {
-  public:
+public:
     virtual T run() = 0;
 };
 
 class TaskException : public std::runtime_error {
-  public:
+public:
     explicit TaskException(std::string const& message)
-        : std::runtime_error{message} {}
+        : std::runtime_error{message} {
+    }
 };
 
 using TracingResult = std::vector<FileInfo>;
 
 class TracingTask : public Task<TracingResult> {
-  public:
+public:
     TracingTask(std::vector<std::string> const& cmd,
                 FileSystemTrie<bool> const& ignore_file_list)
-        : cmd_(cmd), ignore_file_list_{ignore_file_list} {}
+        : cmd_(cmd), ignore_file_list_{ignore_file_list} {
+    }
 
     TracingResult run() override {
         LOG(INFO) << "Tracing program: " << string_join(cmd_, ' ');
@@ -169,7 +170,7 @@ class TracingTask : public Task<TracingResult> {
         }
     }
 
-  private:
+private:
     std::vector<std::string> const& cmd_;
     FileSystemTrie<bool> const& ignore_file_list_;
     SyscallMonitor* monitor_{};
@@ -183,7 +184,7 @@ struct Environment {
 };
 
 class CaptureEnvironmentTask : public Task<Environment> {
-  public:
+public:
     Environment run() override {
         Environment envir;
 
@@ -218,18 +219,17 @@ class CaptureEnvironmentTask : public Task<Environment> {
         return envir;
     }
 
-  private:
-    static inline std::string_view const kDefaultTimezone{"UTC"};
+private:
+    static constexpr std::string_view kDefaultTimezone{"UTC"};
+
     static std::optional<std::string> get_system_timezone() {
         // 1. try TZ environment
-        char const* tz_env = std::getenv("TZ");
-        if (tz_env) {
+        if (char const* tz_env = std::getenv("TZ")) {
             return {tz_env};
         }
 
         // 2. try reading from /etc/timezone
-        std::ifstream tz_file("/etc/timezone");
-        if (tz_file) {
+        if (std::ifstream tz_file("/etc/timezone"); tz_file) {
             std::string timezone;
             std::getline(tz_file, timezone);
             return timezone;
@@ -237,10 +237,10 @@ class CaptureEnvironmentTask : public Task<Environment> {
 
         // 3. timedatectl
         auto out = Command("timedatectl")
-                       .arg("show")
-                       .arg("--property=Timezone")
-                       .arg("--value")
-                       .output();
+                   .arg("show")
+                   .arg("--property=Timezone")
+                   .arg("--value")
+                   .output();
 
         if (out.exit_code == 0) {
             return out.stdout_data;
@@ -250,25 +250,20 @@ class CaptureEnvironmentTask : public Task<Environment> {
     }
 };
 
-class ResolveTask : public Task<Resolvers> {
-  public:
-    ResolveTask(ResolveTask const&) = delete;
-    ResolveTask& operator=(ResolveTask const&) = delete;
-    ~ResolveTask() override = default;
-    ResolveTask(ResolveTask&&) = delete;
-    ResolveTask& operator=(ResolveTask&&) = delete;
-
-    explicit ResolveTask(std::vector<FileInfo>& files,
-                         AbsolutePathSet const& result_files, fs::path cwd,
-                         fs::path R_bin,
-                         FileSystemTrie<bool> const& ignore_file_list)
+class ResolveFileTask : public Task<Resolvers> {
+public:
+    explicit ResolveFileTask(std::vector<FileInfo>& files,
+                             AbsolutePathSet const& result_files, fs::path cwd,
+                             fs::path R_bin,
+                             FileSystemTrie<bool> const& ignore_file_list)
         : files_{files}, result_files_{result_files}, cwd_{std::move(cwd)},
-          R_bin_{std::move(R_bin)}, ignore_file_list_{ignore_file_list} {}
+          R_bin_{std::move(R_bin)}, ignore_file_list_{ignore_file_list} {
+    }
 
     Resolvers run() override {
-
         auto dpkg_database =
             std::make_shared<DpkgDatabase>(DpkgDatabase::system_database());
+
         auto rpkg_database =
             std::make_shared<RpkgDatabase>(RpkgDatabase::from_R(R_bin_));
 
@@ -283,7 +278,7 @@ class ResolveTask : public Task<Resolvers> {
         return resolvers;
     }
 
-  private:
+private:
     std::vector<FileInfo>& files_;
     AbsolutePathSet const& result_files_;
     fs::path cwd_;
@@ -292,12 +287,13 @@ class ResolveTask : public Task<Resolvers> {
 };
 
 class ManifestTask : public Task<Manifest> {
-  public:
+public:
     explicit ManifestTask(Resolvers const& resolvers,
                           fs::path const& output_dir,
                           AbsolutePathSet& result_files, bool interactive)
         : resolvers_{resolvers}, output_dir_{output_dir},
-          result_files_(result_files), interactive_{interactive} {}
+          result_files_(result_files), interactive_{interactive} {
+    }
 
     Manifest run() override {
         Manifest manifest{output_dir_};
@@ -308,7 +304,7 @@ class ManifestTask : public Task<Manifest> {
         return manifest;
     }
 
-  private:
+private:
     void edit_manifest(Manifest& manifest) {
         // TODO: check if running an interactive terminal
         auto& files = manifest.files();
@@ -369,7 +365,7 @@ class ManifestTask : public Task<Manifest> {
                 break;
             default:
                 content << ManifestFormat::comment() << " " << path << " "
-                        << ManifestFormat::comment() << " " << status << "\n";
+                    << ManifestFormat::comment() << " " << status << "\n";
             }
         }
 
@@ -467,10 +463,11 @@ class ManifestTask : public Task<Manifest> {
 };
 
 class DockerFileBuilderTask : public Task<DockerFile> {
-  public:
+public:
     DockerFileBuilderTask(Options const& options, Environment const& envir,
                           Manifest const& manifest)
-        : options_{options}, envir_{envir}, manifest_{manifest} {}
+        : options_{options}, envir_{envir}, manifest_{manifest} {
+    }
 
     DockerFile run() override {
 
@@ -495,7 +492,7 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         return docker_file;
     }
 
-  private:
+private:
     void set_basics(DockerFileBuilder& builder) {
         std::string lang = "C"s;
         if (auto it = envir_.vars.find("LANG"); it != envir_.vars.end()) {
@@ -509,10 +506,10 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         builder.env("LANG", lang);
         builder.env("TZ", tz);
         builder.run(
-            {"apt-get update -y",
-             "apt-get install -y --no-install-recommends locales tzdata",
-             "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
-             "update-locale LANG=$LANG"});
+        {"apt-get update -y",
+         "apt-get install -y --no-install-recommends locales tzdata",
+         "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
+         "update-locale LANG=$LANG"});
     }
 
     void create_user(DockerFileBuilder& builder) {
@@ -526,9 +523,9 @@ class DockerFileBuilderTask : public Task<DockerFile> {
         // create groups
         for (auto const& group : user.groups) {
             cmds.push_back(STR("(groupadd -g " << group.gid << " " << group.name
-                                               << " || groupmod -g "
-                                               << group.gid << " " << group.name
-                                               << ")"));
+                << " || groupmod -g "
+                << group.gid << " " << group.name
+                << ")"));
         }
 
         // prepare additional groups for `-G`
@@ -543,23 +540,23 @@ class DockerFileBuilderTask : public Task<DockerFile> {
 
         // add user
         cmds.push_back(STR("useradd -u "
-                           << user.uid << " -g " << user.group.gid
-                           << (group_list.empty() ? "" : " -G " + group_list)
-                           << " -d " << user.home_directory << " -s "
-                           << user.shell << " " << user.username));
+            << user.uid << " -g " << user.group.gid
+            << (group_list.empty() ? "" : " -G " + group_list)
+            << " -d " << user.home_directory << " -s "
+            << user.shell << " " << user.username));
 
         // ensure home directory exists
         cmds.push_back(STR("mkdir -p " << user.home_directory));
         cmds.push_back(STR("chown " << user.username << ":" << user.group.name
-                                    << " " << user.home_directory));
+            << " " << user.home_directory));
 
         // sudo?
         if (options_.docker_sudo_access) {
             cmds.emplace_back("apt-get install -y sudo");
             cmds.push_back(STR("echo '"
-                               << user.username
-                               << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
-                               << user.username));
+                << user.username
+                << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
+                << user.username));
             cmds.push_back(STR("chmod 0440 /etc/sudoers.d/" << user.username));
         }
 
@@ -606,9 +603,9 @@ class DockerFileBuilderTask : public Task<DockerFile> {
 
     void prepare_command(DockerFileBuilder& builder) {
         builder.run(
-            {STR("mkdir -p " << envir_.cwd),
-             STR("chown " << envir_.user.username << ":"
-                          << envir_.user.group.name << " " << envir_.cwd)});
+        {STR("mkdir -p " << envir_.cwd),
+         STR("chown " << envir_.user.username << ":"
+             << envir_.user.group.name << " " << envir_.cwd)});
         builder.workdir(envir_.cwd);
         builder.user(envir_.user.username);
         builder.cmd(options_.cmd);
@@ -620,8 +617,9 @@ class DockerFileBuilderTask : public Task<DockerFile> {
 };
 
 class MakefileBuilderTask : public Task<fs::path> {
-  public:
-    explicit MakefileBuilderTask(Options const& options) : options_{options} {}
+public:
+    explicit MakefileBuilderTask(Options const& options) : options_{options} {
+    }
 
     fs::path run() override {
         LOG(INFO) << "Generating makefile: " << options_.makefile;
@@ -637,15 +635,15 @@ class MakefileBuilderTask : public Task<fs::path> {
         // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
         makefile << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
-                 << "CONTAINER_NAME = " << options_.docker_container_name
-                 << "\n"
-                 // TODO: add to settings
-                 << "TARGET_DIR = result"
-                 << "\n\n"
+            << "CONTAINER_NAME = " << options_.docker_container_name
+            << "\n"
+            // TODO: add to settings
+            << "TARGET_DIR = result"
+            << "\n\n"
 
-                 << ".PHONY: all build run copy clean\n\n"
+            << ".PHONY: all build run copy clean\n\n"
 
-                 << "all: clean copy\n\n"
+            << "all: clean copy\n\n"
 
                  // clang-format off
                  << "build:\n"
@@ -653,7 +651,7 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
-                 // clang-format on
+            // clang-format on
 
                  // clang-format off
                  << "run: build\n"
@@ -661,40 +659,41 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
                  << " | tee docker-run.log"
                  << "\n\n"
-                 // clang-format on
+            // clang-format on
 
-                 << "copy: run\n"
-                 << "\t@echo\n" // add a new line in case the docker run did not
-                                // finish with one
-                 << "\t@echo 'Copying files'\n"
-                 << "\t@mkdir -p $(TARGET_DIR)\n";
+            << "copy: run\n"
+            << "\t@echo\n" // add a new line in case the docker run did not
+            // finish with one
+            << "\t@echo 'Copying files'\n"
+            << "\t@mkdir -p $(TARGET_DIR)\n";
 
         for (auto const& file : options_.results) {
             makefile << "\t@echo -n '  - " << file << "...'\n"
-                     << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
-                     << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
-                        "failed'"
-                     << "\n";
+                << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
+                << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
+                "failed'"
+                << "\n";
         }
 
         makefile << "\n"
-                 << "clean:\n"
-                 << "\t@echo 'Cleaning previous container (if any)'\n"
-                 << "\t-docker rm $(CONTAINER_NAME)\n"
-                 << "\t@echo 'Cleaning previous image (if any)'\n"
-                 << "\t-docker rmi $(IMAGE_TAG)\n"
-                 << "\t@echo 'Cleaning previous result (if any)'\n"
-                 << "\trm -rf $(TARGET_DIR)\n\n";
+            << "clean:\n"
+            << "\t@echo 'Cleaning previous container (if any)'\n"
+            << "\t-docker rm $(CONTAINER_NAME)\n"
+            << "\t@echo 'Cleaning previous image (if any)'\n"
+            << "\t-docker rmi $(IMAGE_TAG)\n"
+            << "\t@echo 'Cleaning previous result (if any)'\n"
+            << "\trm -rf $(TARGET_DIR)\n\n";
     }
 
-  private:
+private:
     // FIXME: cherry-pick options
     Options const& options_;
 };
 
 class RunMakefileTask : public Task<int> {
-  public:
-    explicit RunMakefileTask(fs::path const& makefile) : makefile_{makefile} {}
+public:
+    explicit RunMakefileTask(fs::path const& makefile) : makefile_{makefile} {
+    }
 
     RunMakefileTask(RunMakefileTask const&) = delete;
     RunMakefileTask& operator=(RunMakefileTask const&) = delete;
@@ -708,17 +707,17 @@ class RunMakefileTask : public Task<int> {
         return exit_code;
     }
 
-  private:
+private:
     int run_makefile_target(std::string const& target,
                             std::string const& prefix) {
         auto proc = Command("make")
-                        .arg("-f")
-                        .arg(makefile_.filename())
-                        .arg(target)
-                        .current_dir(makefile_.parent_path())
-                        .set_stderr(Stdio::Merge)
-                        .set_stdout(Stdio::Pipe)
-                        .spawn();
+                    .arg("-f")
+                    .arg(makefile_.filename())
+                    .arg(target)
+                    .current_dir(makefile_.parent_path())
+                    .set_stderr(Stdio::Merge)
+                    .set_stdout(Stdio::Pipe)
+                    .spawn();
 
         int fd = proc.stdout_fd();
         with_prefixed_ostream(std::cout, prefix,
@@ -730,8 +729,9 @@ class RunMakefileTask : public Task<int> {
 };
 
 class Tracer {
-  public:
-    explicit Tracer(Options options) : options_{std::move(options)} {}
+public:
+    explicit Tracer(Options options) : options_{std::move(options)} {
+    }
 
     void execute() {
         configure();
@@ -744,7 +744,7 @@ class Tracer {
         }
     }
 
-  private:
+private:
     void run_pipeline() {
         auto envir = run("Capture environment", CaptureEnvironmentTask{});
 
@@ -753,8 +753,9 @@ class Tracer {
 
         auto resolvers =
             run("File resolver",
-                ResolveTask{files, options_.results, envir.cwd, options_.R_bin,
-                            options_.ignore_file_list});
+                ResolveFileTask{files, options_.results, envir.cwd,
+                                options_.R_bin,
+                                options_.ignore_file_list});
         auto manifest =
             run("Manifest builder",
                 ManifestTask{resolvers, options_.output_dir, options_.results,
@@ -771,7 +772,7 @@ class Tracer {
     }
 
     void configure() {
-        Logger::get().max_level(options_.log_level);
+        Logger::get().set_max_level(options_.log_level);
 
         fs::create_directory(options_.output_dir);
 

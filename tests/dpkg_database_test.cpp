@@ -15,9 +15,9 @@ const std::string kDpkgHeader = R"(Desired=Unknown/Install/Remove/Purge/Hold
 
 inline DebPackages parse_installed_packages(std::string const& dpkg_output) {
     std::istringstream stream(dpkg_output);
-    DpkgParser parser{stream};
-    return parser.parse();
+    return parse_dpkg_list_output(stream);
 }
+
 // Test case: No installed packages (empty dpkg output)
 TEST(ParseInstalledPackagesTest, ReturnsEmptyMapForNoPackages) {
     auto packages = parse_installed_packages(kDpkgHeader);
