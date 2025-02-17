@@ -1,6 +1,7 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
+#include "common.h"
 #include <array>
 #include <cstdlib>
 #include <iomanip>
@@ -62,24 +63,25 @@ inline std::ostream& operator<<(std::ostream& os, LogLevel level) {
 } // namespace std
 
 class LogSink {
-public:
+  public:
     virtual ~LogSink() = default;
     virtual void sink(LogEvent const& event) = 0;
 };
 
 class ConsoleSink : public LogSink {
-public:
+  public:
     void sink(LogEvent const& event) override {
         std::ostream& os =
             (event.level >= LogLevel::Warning) ? std::cerr : std::cout;
-        os << "[" << std::setw(5) << std::right << event.level << "] "
-            << " " << event.message << "\n";
-        os.flush();
+
+        auto msg = STR("[" << std::setw(5) << std::right << event.level << "] "
+                           << " " << event.message << "\n");
+        os << msg;
     }
 };
 
 class StoreSink : public LogSink {
-public:
+  public:
     struct StoredEvent {
         LogLevel level;
         std::string message;
@@ -88,8 +90,7 @@ public:
 
         explicit StoredEvent(LogEvent const& ev)
             : level(ev.level), message(ev.message), filename(ev.filename),
-              line(ev.line) {
-        }
+              line(ev.line) {}
 
         [[nodiscard]] LogEvent to_log_event() const {
             return {.level = level,
@@ -109,13 +110,13 @@ public:
         return messages_;
     }
 
-private:
+  private:
     std::vector<StoredEvent> messages_;
     mutable std::mutex mutex_;
 };
 
 class Logger {
-public:
+  public:
     static Logger& get() {
         static Logger instance;
         return instance;
@@ -129,9 +130,9 @@ public:
     std::unique_ptr<LogSink> set_sink(std::unique_ptr<LogSink> sink);
     [[nodiscard]] LogSink& get_sink() const { return *sink_; }
 
-    void log(const LogEvent& event);
+    void log(LogEvent const& event);
 
-private:
+  private:
     Logger() {
         set_sink(std::make_unique<ConsoleSink>());
         set_max_level(LogLevel::Info);
@@ -162,13 +163,13 @@ inline bool Logger::is_enabled(LogLevel level) const {
     return levels_enabled_.at(static_cast<size_t>(level));
 }
 
-inline std::unique_ptr<LogSink> Logger::
-set_sink(std::unique_ptr<LogSink> sink) {
+inline std::unique_ptr<LogSink>
+Logger::set_sink(std::unique_ptr<LogSink> sink) {
     sink_.swap(sink);
     return sink;
 }
 
-inline void Logger::log(const LogEvent& event) {
+inline void Logger::log(LogEvent const& event) {
     std::lock_guard lock(mutex_);
     if (!is_enabled(event.level)) {
         return;
@@ -193,10 +194,9 @@ inline void Logger::set_level(LogLevel level, bool enabled) {
 }
 
 class LogMessage {
-public:
+  public:
     LogMessage(LogLevel level, char const* filename, int line)
-        : level_(level), filename_(filename), line_(line) {
-    }
+        : level_(level), filename_(filename), line_(line) {}
 
     ~LogMessage() {
         Logger::get().log({.level = level_,
@@ -207,7 +207,7 @@ public:
 
     std::ostream& stream() { return stream_; }
 
-private:
+  private:
     LogLevel level_;
     char const* filename_;
     int line_;

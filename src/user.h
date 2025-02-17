@@ -108,4 +108,31 @@ inline UserInfo UserInfo::get_current_user_info() {
                     .groups = groups};
 }
 
+static std::optional<std::string> get_system_timezone() {
+    // 1. try TZ environment
+    if (char const* tz_env = std::getenv("TZ")) {
+        return {tz_env};
+    }
+
+    // 2. try reading from /etc/timezone
+    if (std::ifstream tz_file("/etc/timezone"); tz_file) {
+        std::string timezone;
+        std::getline(tz_file, timezone);
+        return timezone;
+    }
+
+    // 3. timedatectl
+    auto out = Command("timedatectl")
+               .arg("show")
+               .arg("--property=Timezone")
+               .arg("--value")
+               .output();
+
+    if (out.exit_code == 0) {
+        return out.stdout_data;
+    }
+
+    return {};
+}
+
 #endif // USER_H
