@@ -26,7 +26,7 @@ if(ENABLE_COVERAGE)
   endif()
 
   # set compiler/linker flags for coverage
-  set(COVERAGE_FLAGS "-g --coverage")
+  set(COVERAGE_FLAGS "-g -O0 --coverage")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COVERAGE_FLAGS}")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COVERAGE_FLAGS}")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${COVERAGE_FLAGS}")
