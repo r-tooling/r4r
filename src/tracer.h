@@ -417,9 +417,9 @@ class DockerFileBuilderTask : public Task {
 
     void run(TracerState& state) override;
 
-private:
+  private:
     static void install_deb_packages(DockerFileBuilder& builder,
-                              Manifest const& manifest);
+                                     Manifest const& manifest);
 
     static void generate_permissions_script(std::vector<fs::path> const& files,
                                             std::ostream& out);
@@ -427,19 +427,20 @@ private:
     static void set_lang_and_timezone(DockerFileBuilder& builder,
                                       Manifest const& manifest);
 
-    static void set_environment(DockerFileBuilder& builder, Manifest const& manifest);
+    static void set_environment(DockerFileBuilder& builder,
+                                Manifest const& manifest);
 
-    static void prepare_command(DockerFileBuilder& builder, Manifest const& manifest);
+    static void prepare_command(DockerFileBuilder& builder,
+                                Manifest const& manifest);
 
-    void copy_files(DockerFileBuilder& builder,
-                    Manifest const& manifest) const;
+    void copy_files(DockerFileBuilder& builder, Manifest const& manifest) const;
 
     void install_r_packages(DockerFileBuilder& builder,
                             Manifest const& manifest,
                             RpkgDatabase const& rpkg_database) const;
 
-    void create_user(DockerFileBuilder& builder, Manifest const& manifest) const;
-
+    void create_user(DockerFileBuilder& builder,
+                     Manifest const& manifest) const;
 
     fs::path output_dir_;
     fs::path archive_;
@@ -474,7 +475,7 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
 }
 
 inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
-    Manifest const& manifest) const {
+                                              Manifest const& manifest) const {
 
     std::vector<fs::path> files;
     for (auto const& [path, status] : manifest.copy_files) {
@@ -498,11 +499,10 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
     // FIXME: the paths are not good, it will copy into out/archive.tar
     builder.copy({archive_}, archive_);
 
-    builder.run(
-    {STR("tar -x -f "
-        << archive_
-        << " --same-owner --same-permissions --absolute-names"),
-     STR("rm -f " << archive_)});
+    builder.run({STR("tar -x -f "
+                     << archive_
+                     << " --same-owner --same-permissions --absolute-names"),
+                 STR("rm -f " << archive_)});
 
     {
         std::ofstream permissions{permission_script_};
@@ -527,8 +527,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
         }
     }
 
-    std::vector<fs::path> sorted_dirs(directories.begin(),
-                                      directories.end());
+    std::vector<fs::path> sorted_dirs(directories.begin(), directories.end());
 
     out << "#!/bin/bash\n\n";
     out << "set -e\n\n";
@@ -559,32 +558,31 @@ inline void DockerFileBuilderTask::install_r_packages(
 
     std::vector<RPackage const*> packages{manifest.r_packages.begin(),
                                           manifest.r_packages.end()};
-    std::sort(packages.begin(), packages.end(),
-              [](auto const* lhs, auto const* rhs) {
-                  return lhs->name < rhs->name;
-              });
+    std::sort(
+        packages.begin(), packages.end(),
+        [](auto const* lhs, auto const* rhs) { return lhs->name < rhs->name; });
 
     auto all_packages = rpkg_database.get_dependencies(manifest.r_packages);
 
     std::ofstream script(cran_install_script_);
 
     // TODO: parameterize the max cores
-    script << "options(Ncpus=min(parallel::detectCores(), 4))\n\n"
-        << "tmp_dir <- tempdir()\n"
-        << "install.packages('remotes', lib = c(tmp_dir))\n"
-        << "require('remotes', lib.loc = c(tmp_dir))\n"
-        << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
-        << "\n\n"
-        << "# install wrapper that turns warnings into errors\n"
-        // clang-format off
+    script << "options(Ncpus=min(parallel::detectCores(), 32))\n\n"
+           << "tmp_dir <- tempdir()\n"
+           << "install.packages('remotes', lib = c(tmp_dir))\n"
+           << "require('remotes', lib.loc = c(tmp_dir))\n"
+           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
+           << "\n\n"
+           << "# install wrapper that turns warnings into errors\n"
+           // clang-format off
         << "CHK <- function(thunk) {\n"
         << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
         << "    if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }\n"
         << "  })\n"
         << "}\n\n"
-        // clang-format on
+           // clang-format on
 
-        << "# installing packages\n\n";
+           << "# installing packages\n\n";
 
     std::unordered_set<std::string> seen;
     for (auto const* pkg : all_packages) {
@@ -599,16 +597,14 @@ inline void DockerFileBuilderTask::install_r_packages(
         std::visit(
             overloaded{
                 [&](RPackage::GitHub const& gh) {
-                    script
-                        << "CHK(install_github('" << gh.org << "/"
-                        << gh.name << "', ref = '" << gh.ref
-                        << "', upgrade = 'never', dependencies = FALSE))\n";
+                    script << "CHK(install_github('" << gh.org << "/" << gh.name
+                           << "', ref = '" << gh.ref
+                           << "', upgrade = 'never', dependencies = FALSE))\n";
                 },
                 [&](RPackage::CRAN const&) {
-                    script
-                        << "CHK(install_version('" << pkg->name << "', '"
-                        << pkg->version
-                        << "', upgrade = 'never', dependencies = FALSE))\n";
+                    script << "CHK(install_version('" << pkg->name << "', '"
+                           << pkg->version
+                           << "', upgrade = 'never', dependencies = FALSE))\n";
                 },
             },
             pkg->repository);
@@ -616,13 +612,13 @@ inline void DockerFileBuilderTask::install_r_packages(
 
     builder.copy({cran_install_script_}, "/");
     // TODO: simplify
-    builder.run(
-    {STR("Rscript /" << cran_install_script_.filename().string()),
-     STR("rm -f /" << cran_install_script_.filename().string())});
+    builder.run({STR("Rscript /" << cran_install_script_.filename().string()),
+                 STR("rm -f /" << cran_install_script_.filename().string())});
 }
 
-inline void DockerFileBuilderTask::set_lang_and_timezone(
-    DockerFileBuilder& builder, Manifest const& manifest) {
+inline void
+DockerFileBuilderTask::set_lang_and_timezone(DockerFileBuilder& builder,
+                                             Manifest const& manifest) {
     std::string lang = "C"s;
     if (auto it = manifest.envir.find("LANG"); it != manifest.envir.end()) {
         lang = it->second;
@@ -634,15 +630,14 @@ inline void DockerFileBuilderTask::set_lang_and_timezone(
 
     builder.env("LANG", lang);
     builder.env("TZ", tz);
-    builder.run(
-    {"apt-get update -y",
-     "apt-get install -y --no-install-recommends locales tzdata",
-     "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
-     "update-locale LANG=$LANG"});
+    builder.run({"apt-get update -y",
+                 "apt-get install -y --no-install-recommends locales tzdata",
+                 "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
+                 "update-locale LANG=$LANG"});
 }
 
 inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
-    Manifest const& manifest) const {
+                                               Manifest const& manifest) const {
     std::vector<std::string> cmds;
     auto const& user = manifest.user;
 
@@ -653,9 +648,8 @@ inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
     // create groups
     for (auto const& group : user.groups) {
         cmds.push_back(STR("(groupadd -g " << group.gid << " " << group.name
-            << " || groupmod -g "
-            << group.gid << " " << group.name
-            << ")"));
+                                           << " || groupmod -g " << group.gid
+                                           << " " << group.name << ")"));
     }
 
     // prepare additional groups for `-G`
@@ -670,23 +664,23 @@ inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
 
     // add user
     cmds.push_back(STR("useradd -u "
-        << user.uid << " -g " << user.group.gid
-        << (group_list.empty() ? "" : " -G " + group_list)
-        << " -d " << user.home_directory << " -s "
-        << user.shell << " " << user.username));
+                       << user.uid << " -g " << user.group.gid
+                       << (group_list.empty() ? "" : " -G " + group_list)
+                       << " -d " << user.home_directory << " -s " << user.shell
+                       << " " << user.username));
 
     // ensure home directory exists
     cmds.push_back(STR("mkdir -p " << user.home_directory));
     cmds.push_back(STR("chown " << user.username << ":" << user.group.name
-        << " " << user.home_directory));
+                                << " " << user.home_directory));
 
     // sudo?
     if (docker_sudo_access_) {
         cmds.emplace_back("apt-get install -y sudo");
         cmds.push_back(STR("echo '"
-            << user.username
-            << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
-            << user.username));
+                           << user.username
+                           << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
+                           << user.username));
         cmds.push_back(STR("chmod 0440 /etc/sudoers.d/" << user.username));
     }
 
@@ -694,7 +688,7 @@ inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
 }
 
 inline void DockerFileBuilderTask::set_environment(DockerFileBuilder& builder,
-    Manifest const& manifest) {
+                                                   Manifest const& manifest) {
     auto& envir = manifest.envir;
     if (envir.empty()) {
         return;
@@ -733,18 +727,19 @@ inline void DockerFileBuilderTask::set_environment(DockerFileBuilder& builder,
 }
 
 inline void DockerFileBuilderTask::prepare_command(DockerFileBuilder& builder,
-    Manifest const& manifest) {
+                                                   Manifest const& manifest) {
     builder.run(
-    {STR("mkdir -p " << manifest.cwd),
-     STR("chown " << manifest.user.username << ":"
-         << manifest.user.group.name << " " << manifest.cwd)});
+        {STR("mkdir -p " << manifest.cwd),
+         STR("chown " << manifest.user.username << ":"
+                      << manifest.user.group.name << " " << manifest.cwd)});
     builder.workdir(manifest.cwd);
     builder.user(manifest.user.username);
     builder.cmd(manifest.cmd);
 }
 
-inline void DockerFileBuilderTask::install_deb_packages(
-    DockerFileBuilder& builder, Manifest const& manifest) {
+inline void
+DockerFileBuilderTask::install_deb_packages(DockerFileBuilder& builder,
+                                            Manifest const& manifest) {
     // TODO: the main problem with this implementation is that
     // it ignores the fact a package can come from multiple repos
     // and that these repos need to be installed.
@@ -800,6 +795,13 @@ class MakefileBuilderTask : public Task {
         // TODO: make sure it executes in the same dir as the makefile
         // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
+        std::vector<fs::path> copy_files;
+        for (auto const& [file, status] : manifest.copy_files) {
+            if (status == FileStatus::Result) {
+                copy_files.push_back(file);
+            }
+        }
+
         makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
                  << "CONTAINER_NAME = " << docker_container_name_
                  << "\n"
@@ -828,17 +830,22 @@ class MakefileBuilderTask : public Task {
                  // clang-format on
 
                  << "copy: run\n"
-                 << "\t@echo\n" // add a new line in case the docker run did not
-                 // finish with one
-                 << "\t@echo 'Copying files'\n"
-                 << "\t@mkdir -p $(TARGET_DIR)\n";
+                 // add a new line in case the docker run did
+                 // not finish with one
+                 << "\t@echo\n";
 
-        for (auto const& [file, status] : manifest.copy_files) {
-            if (status == FileStatus::Result) {
+        if (copy_files.empty()) {
+            makefile << "\t@echo 'No result files'\n";
+        } else {
+            makefile << "\t@echo 'Copying files'\n"
+                     << "\t@mkdir -p $(TARGET_DIR)\n";
+
+            for (auto const& file : copy_files) {
                 makefile
                     << "\t@echo -n '  - " << file << "...'\n"
                     << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
-                    << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
+                    << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo "
+                       "' "
                        "failed'"
                     << "\n";
             }

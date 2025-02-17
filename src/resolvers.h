@@ -9,6 +9,7 @@
 #include "manifest.h"
 #include "rpkg_database.h"
 #include "util_fs.h"
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -95,7 +96,11 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         }
 
         if (!f.existed_before) {
-            status = FileStatus::IgnoreDidNotExistBefore;
+            if (fs::is_regular_file(f.path)) {
+                status = FileStatus::Result;
+            } else {
+                status = FileStatus::IgnoreDidNotExistBefore;
+            }
         } else if (fs::equivalent(path, manifest.cwd)) {
             status = FileStatus::IgnoreCWD;
         } else {

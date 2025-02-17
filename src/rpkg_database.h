@@ -190,7 +190,7 @@ inline RpkgDatabase RpkgDatabase::from_R(fs::path const& R_bin) {
                                        )[, c(
                                              "Package", "LibPath", "Version", "Depends",
                                              "Imports", "LinkingTo", "Priority", "NeedsCompilation",
-                                             "RemoteType", "RemoteRepo", "RemoteUsername", "RemoteRef"
+                                             "RemoteType", "RemoteUsername", "RemoteRepo", "RemoteRef"
                                            )
                                         ]
                                      ),

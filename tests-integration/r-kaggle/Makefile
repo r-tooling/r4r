@@ -1,13 +1,25 @@
-all: clean trace
+NAME := r-ggplot
+IMAGE_TAG := r4r/test-$(NAME)
+CONTAINER_NAME := r4r-test-$(NAME)
 
+all: clean trace check
+
+.PHONY: trace
 trace:
 	../../build/r4r \
-		-v \
-		--output out \
-		--result code/titanic-2nd-degree-families-and-majority-voting.html \
-		--docker-container-name r4r-test-kaggle \
-		--docker-image-tag r4r/test-kaggle \
+		-vvv \
+		--output actual \
+		--skip-manifest \
+		--docker-image-tag $(IMAGE_TAG) \
+		--docker-container-name $(CONTAINER_NAME) \
 		R -e 'rmarkdown::render("code/titanic-2nd-degree-families-and-majority-voting.Rmd")'
 
+.PHONY: check
+check:
+	../snapshot.sh expected actual/result
+
+.PHONY: clean
 clean:
-	rm -fr a.html out
+	-docker rm $(CONTAINER_NAME)
+	-docker rmi -f $(IMAGE_TAG)
+	rm -fr actual code/Titanic_select.csv code/titanic-2nd-degree-families-and-majority-voting.html
