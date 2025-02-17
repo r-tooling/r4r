@@ -1,6 +1,7 @@
 #ifndef TRACER_H
 #define TRACER_H
 
+#include "archive.h"
 #include "common.h"
 #include "config.h"
 #include "dockerfile.h"
@@ -9,6 +10,8 @@
 #include "filesystem_trie.h"
 #include "logger.h"
 #include "manifest.h"
+#include "manifest_format.h"
+#include "manifest_section.h"
 #include "process.h"
 #include "resolvers.h"
 #include "rpkg_database.h"
@@ -18,23 +21,21 @@
 #include "util_fs.h"
 #include "util_io.h"
 
-#include <fcntl.h>
 #include <filesystem>
 
 #include <cstdlib>
 #include <fstream>
-#include <grp.h>
 #include <iostream>
-#include <pwd.h>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
-#include <sys/select.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+/// The global ignore file list.
 static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
     FileSystemTrie<bool> trie;
     trie.insert("/dev", true);
@@ -61,7 +62,6 @@ struct Options {
     std::string docker_image_tag{STR(kBinaryName << "/test")};
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
-    fs::path dockerfile;
     fs::path makefile;
     AbsolutePathSet results;
     bool docker_sudo_access{true};
@@ -71,16 +71,29 @@ struct Options {
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
 
-class TaskBase {
-  public:
-    virtual ~TaskBase() = default;
-    virtual void stop() {}
+struct TracerState {
+    DpkgDatabase dpkg_database;
+    RpkgDatabase rpkg_database;
+
+    std::vector<FileInfo> traced_files;
+
+    Manifest manifest;
 };
 
-template <typename T>
-class Task : public TaskBase {
+class Task {
   public:
-    virtual T run() = 0;
+    explicit Task(std::string name) : name_(std::move(name)) {}
+
+    virtual ~Task() = default;
+
+    virtual void run(TracerState& state) = 0;
+
+    virtual void stop() {}
+
+    [[nodiscard]] std::string const& name() const { return name_; }
+
+  private:
+    std::string name_;
 };
 
 class TaskException : public std::runtime_error {
@@ -89,556 +102,708 @@ class TaskException : public std::runtime_error {
         : std::runtime_error{message} {}
 };
 
-using TracingResult = std::vector<FileInfo>;
+static constexpr std::string_view kDefaultTimezone{"UTC"};
 
-class TracingTask : public Task<TracingResult> {
+class FileTracingTask : public Task {
   public:
-    TracingTask(std::vector<std::string> const& cmd,
-                FileSystemTrie<bool> const& ignore_file_list)
-        : cmd_(cmd), ignore_file_list_{ignore_file_list} {}
+    explicit FileTracingTask(FileSystemTrie<bool> const& ignore_file_list)
+        : Task("Trace files"), ignore_file_list_{ignore_file_list} {}
 
-    TracingResult run() override {
-        LOG(INFO) << "Tracing program: " << string_join(cmd_, ' ');
-
-        auto old_log_sink =
-            Logger::get().set_sink(std::make_unique<StoreSink>());
-
-        FileTracer tracer{ignore_file_list_};
-        SyscallMonitor monitor{cmd_, tracer};
-        monitor.redirect_stdout(std::cout);
-        monitor.redirect_stderr(std::cerr);
-
-        // this is just to support the stop()
-        monitor_ = &monitor;
-        auto [result, elapsed] = stopwatch([&] { return monitor_->start(); });
-        monitor_ = nullptr;
-
-        LOG(INFO) << "Finished tracing in " << format_elapsed_time(elapsed);
-
-        // print the postponed messages
-        auto sink = Logger::get().set_sink(std::move(old_log_sink));
-        auto const& events =
-            dynamic_cast<StoreSink*>(sink.get())->get_messages();
-
-        LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls and "
-                  << tracer.files().size() << " files";
-
-        if (!events.empty()) {
-            LOG(INFO) << "While tracing, there were " << events.size()
-                      << " log event(s) captured during tracing";
-            for (auto const& e : events) {
-                Logger::get().log(e.to_log_event());
-            }
-        }
-
-        switch (result.kind) {
-        case SyscallMonitor::Result::Failure:
-            throw TaskException("Failed to spawn the process");
-
-        case SyscallMonitor::Result::Signal:
-            throw TaskException(
-                STR("Program was terminated by signal: " << *result.detail));
-
-        case SyscallMonitor::Result::Exit:
-            int exit_code = *result.detail;
-            if (exit_code != 0) {
-                throw TaskException(STR("Program exited with: " << exit_code));
-            }
-
-            auto file_map = tracer.files();
-            std::vector<FileInfo> files;
-            files.reserve(file_map.size());
-            for (auto const& [key, value] : file_map) {
-                files.push_back(value);
-            }
-
-            std::sort(files.begin(), files.end(),
-                      [](auto const& lhs, auto const& rhs) {
-                          return lhs.path < rhs.path;
-                      });
-
-            return files;
-        }
-
-        UNREACHABLE();
-    }
-
-    void stop() override {
-        if (monitor_) {
-            monitor_->stop();
-        }
-    }
+    void run(TracerState& state) override;
+    void stop() override;
 
   private:
-    std::vector<std::string> const& cmd_;
-    FileSystemTrie<bool> const& ignore_file_list_;
+    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
     SyscallMonitor* monitor_{};
 };
 
-struct Environment {
-    fs::path cwd;
-    std::unordered_map<std::string, std::string> vars;
-    UserInfo user;
-    std::string timezone;
-};
+inline void FileTracingTask::run(TracerState& state) {
+    LOG(INFO) << "Tracing program: " << string_join(state.manifest.cmd, ' ');
 
-class CaptureEnvironmentTask : public Task<Environment> {
-  public:
-    Environment run() override {
-        Environment envir;
+    // silent the log while running the program not to interfere with the
+    // output of the traced program
+    auto old_log_sink = Logger::get().set_sink(std::make_unique<StoreSink>());
 
-        envir.cwd = std::filesystem::current_path();
-        LOG(DEBUG) << "Current working directory: " << envir.cwd;
-        envir.user = UserInfo::get_current_user_info();
-        LOG(DEBUG) << "Current user: " << envir.user.username;
+    FileTracer tracer{ignore_file_list_};
+    SyscallMonitor monitor{state.manifest.cmd, tracer};
+    monitor.redirect_stdout(std::cout);
+    monitor.redirect_stderr(std::cerr);
 
-        if (environ != nullptr) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            for (char** env = environ; *env != nullptr; ++env) {
-                std::string s(*env);
-                size_t pos = s.find('=');
-                if (pos != std::string::npos) {
-                    envir.vars.emplace(s.substr(0, pos), s.substr(pos + 1));
-                } else {
-                    LOG(WARN) << "Invalid environment variable: '" << s << "'";
-                }
-            }
-        } else {
-            LOG(WARN) << "Failed to get environment variables";
-        }
+    // this is just to support the stop()
+    monitor_ = &monitor;
+    auto [result, elapsed] = stopwatch([&] { return monitor_->start(); });
+    monitor_ = nullptr;
 
-        if (auto tz = CaptureEnvironmentTask::get_system_timezone(); tz) {
-            envir.timezone = *tz;
-        } else {
-            LOG(WARN) << "Failed to get timezone information, fallback to "
-                      << kDefaultTimezone;
-            envir.timezone = kDefaultTimezone;
-        }
+    LOG(INFO) << "Finished tracing in " << format_elapsed_time(elapsed);
+    LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls and "
+              << tracer.files().size() << " files";
 
-        return envir;
-    }
+    // print the postponed messages
+    auto sink = Logger::get().set_sink(std::move(old_log_sink));
+    auto const& events = dynamic_cast<StoreSink*>(sink.get())->get_messages();
 
-  private:
-    static inline std::string_view const kDefaultTimezone{"UTC"};
-    static std::optional<std::string> get_system_timezone() {
-        // 1. try TZ environment
-        char const* tz_env = std::getenv("TZ");
-        if (tz_env) {
-            return {tz_env};
-        }
-
-        // 2. try reading from /etc/timezone
-        std::ifstream tz_file("/etc/timezone");
-        if (tz_file) {
-            std::string timezone;
-            std::getline(tz_file, timezone);
-            return timezone;
-        }
-
-        // 3. timedatectl
-        auto out = Command("timedatectl")
-                       .arg("show")
-                       .arg("--property=Timezone")
-                       .arg("--value")
-                       .output();
-
-        if (out.exit_code == 0) {
-            return out.stdout_data;
-        }
-
-        return {};
-    }
-};
-
-class ResolveTask : public Task<Resolvers> {
-  public:
-    ResolveTask(ResolveTask const&) = delete;
-    ResolveTask& operator=(ResolveTask const&) = delete;
-    ~ResolveTask() override = default;
-    ResolveTask(ResolveTask&&) = delete;
-    ResolveTask& operator=(ResolveTask&&) = delete;
-
-    explicit ResolveTask(std::vector<FileInfo>& files,
-                         AbsolutePathSet const& result_files, fs::path cwd,
-                         fs::path R_bin,
-                         FileSystemTrie<bool> const& ignore_file_list)
-        : files_{files}, result_files_{result_files}, cwd_{std::move(cwd)},
-          R_bin_{std::move(R_bin)}, ignore_file_list_{ignore_file_list} {}
-
-    Resolvers run() override {
-
-        auto dpkg_database =
-            std::make_shared<DpkgDatabase>(DpkgDatabase::system_database());
-        auto rpkg_database =
-            std::make_shared<RpkgDatabase>(RpkgDatabase::from_R(R_bin_));
-
-        Resolvers resolvers;
-        resolvers.add<IgnoreFileResolver>("ignore", ignore_file_list_);
-        resolvers.add<DebPackageResolver>("deb", dpkg_database);
-        resolvers.add<CRANPackageResolver>("cran", rpkg_database,
-                                           dpkg_database);
-        resolvers.add<CopyFileResolver>("copy", cwd_, result_files_);
-
-        resolvers.load_from_files(files_);
-
-        return resolvers;
-    }
-
-  private:
-    std::vector<FileInfo>& files_;
-    AbsolutePathSet const& result_files_;
-    fs::path cwd_;
-    fs::path R_bin_;
-    FileSystemTrie<bool> const& ignore_file_list_;
-};
-
-class ManifestTask : public Task<Manifest> {
-  public:
-    explicit ManifestTask(Resolvers const& resolvers,
-                          fs::path const& output_dir,
-                          AbsolutePathSet& result_files, bool interactive)
-        : resolvers_{resolvers}, output_dir_{output_dir},
-          result_files_(result_files), interactive_{interactive} {}
-
-    Manifest run() override {
-        Manifest manifest{output_dir_};
-        resolvers_.add_to_manifest(manifest);
-        if (interactive_) {
-            edit_manifest(manifest);
-        }
-        return manifest;
-    }
-
-  private:
-    void edit_manifest(Manifest& manifest) {
-        // TODO: check if running an interactive terminal
-        auto& files = manifest.files();
-        if (files.empty()) {
-            return;
-        }
-
-        auto manifest_file = TempFile{"r4r-manifest", ".conf"};
-        {
-            LOG(DEBUG) << "Saving manifest to: " << *manifest_file;
-            std::ofstream stream{*manifest_file};
-            save_manifest(manifest, stream);
-        }
-
-        auto ts = fs::last_write_time(*manifest_file);
-
-        if (open_manifest(*manifest_file) &&
-            fs::last_write_time(*manifest_file) != ts) {
-            LOG(DEBUG) << "Rereading manifest from: " << *manifest_file;
-            std::ifstream stream{*manifest_file};
-            load_manifest(manifest, stream);
+    if (!events.empty()) {
+        LOG(INFO) << "While tracing, there were " << events.size()
+                  << " log event(s) captured during tracing";
+        for (auto const& e : events) {
+            Logger::get().log(e.to_log_event());
         }
     }
 
-    static ManifestFormat::Section
-    create_copy_section(Manifest::Files const& files) {
-        std::string preamble{
-            // clang-format off
-            STR("The following "
-                << files.size() << " files has not been resolved.\n"
-                << "# - ignore\n"
-                << "C - mark file to be copied into the image.\n"
-                << "R - mark as additional result file.")};
-        // clang-format on
+    switch (result.kind) {
+    case SyscallMonitor::Result::Failure:
+        throw TaskException("Failed to spawn the process");
 
-        std::vector<std::pair<fs::path, FileStatus>> sorted_files;
-        sorted_files.reserve(files.size());
-        for (auto const& f : files) {
-            sorted_files.emplace_back(f);
+    case SyscallMonitor::Result::Signal:
+        throw TaskException(
+            STR("Program was terminated by signal: " << *result.detail));
+
+    case SyscallMonitor::Result::Exit:
+        int exit_code = *result.detail;
+        if (exit_code != 0) {
+            throw TaskException(STR("Program exited with: " << exit_code));
         }
 
-        std::sort(sorted_files.begin(), sorted_files.end(),
+        auto file_map = tracer.files();
+        auto& files = state.traced_files;
+        files.reserve(file_map.size());
+        for (auto const& [key, value] : file_map) {
+            files.push_back(value);
+        }
+
+        std::sort(files.begin(), files.end(),
                   [](auto const& lhs, auto const& rhs) {
-                      return lhs.first < rhs.first;
+                      return lhs.path < rhs.path;
                   });
+    }
+}
 
-        std::ostringstream content;
-        for (auto const& [path, status] : sorted_files) {
-            switch (status) {
-            case FileStatus::Copy:
-                content << "C " << path << "\n";
-                break;
-            case FileStatus::Result:
-                content << "R " << path << "\n";
-                break;
-            case FileStatus::IgnoreNoLongerExist:
-                // nothing we can do
-                break;
-            default:
-                content << ManifestFormat::comment() << " " << path << " "
-                        << ManifestFormat::comment() << " " << status << "\n";
-            }
-        }
+inline void FileTracingTask::stop() {
+    if (monitor_) {
+        monitor_->stop();
+    }
+}
 
-        return {.name = "copy", .content = content.str(), .preamble = preamble};
+// We do not need this composition, each of the resolver can now be a task
+class ResolveFileTask : public Task {
+  public:
+    ResolveFileTask(fs::path R_bin,
+                    FileSystemTrie<bool> const& ignore_file_list)
+        : Task("Resolve files"), R_bin_{std::move(R_bin)},
+          ignore_file_list_{ignore_file_list} {}
+
+    void run(TracerState& state) override;
+
+  private:
+    fs::path R_bin_;
+    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
+};
+
+inline void ResolveFileTask::run(TracerState& state) {
+    std::vector<std::pair<std::string, std::unique_ptr<Resolver>>> resolvers;
+
+    resolvers.emplace_back(
+        "ignore", std::make_unique<IgnoreFileResolver>(ignore_file_list_));
+
+    resolvers.emplace_back(
+        "deb", std::make_unique<DebPackageResolver>(state.dpkg_database));
+
+    resolvers.emplace_back("R", std::make_unique<RPackageResolver>(
+                                    state.rpkg_database, state.dpkg_database));
+
+    resolvers.emplace_back("copy", std::make_unique<CopyFileResolver>());
+
+    LOG(INFO) << "Resolving " << state.traced_files.size() << " files";
+
+    std::string summary;
+    size_t total_count = state.traced_files.size();
+
+    for (auto& [name, resolver] : resolvers) {
+        size_t count = state.traced_files.size();
+        resolver->resolve(state.traced_files, state.manifest);
+        summary += name + "(" +
+                   std::to_string(count - state.traced_files.size()) + ") ";
     }
 
-    static void load_copy_section(ManifestFormat::Section const& section,
-                                  Manifest::Files& copy_files,
-                                  AbsolutePathSet& result_files) {
-        std::istringstream stream{section.content};
-        std::string line;
+    LOG(INFO) << "Resolver summary: " << total_count << " file(s): " << summary;
 
-        copy_files.clear();
-
-        while (std::getline(stream, line)) {
-            bool copy;
-
-            if (line.starts_with("C")) {
-                copy = true;
-            } else if (line.starts_with("R")) {
-                copy = false;
-            } else {
-                LOG(WARN) << "Invalid manifest line: " << line;
-                continue;
-            }
-
-            line = line.substr(1);
-            line = string_trim(line);
-            if (line.starts_with('"')) {
-                if (line.ends_with('"')) {
-                    line = line.substr(1, line.size() - 2);
-                } else {
-                    LOG(WARN) << "Invalid path: " << line;
-                    continue;
-                }
-            }
-
-            if (copy) {
-                copy_files.emplace(line, FileStatus::Copy);
-            } else {
-                result_files.insert(line);
-            }
+    if (state.traced_files.empty()) {
+        LOG(INFO) << "All files resolved";
+    } else {
+        LOG(INFO) << "Failed to resolve " << state.traced_files.size()
+                  << " files";
+        for (auto const& f : state.traced_files) {
+            LOG(INFO) << "Failed to resolve: " << f.path;
         }
     }
+}
 
-    void load_manifest(Manifest& manifest, std::istream& stream) {
-        // TODO: add >> operator?
-        auto format = ManifestFormat::from_stream(stream);
-        auto* section = format.get_section("copy");
-        if (section == nullptr) {
-            return;
-        }
-        load_copy_section(*section, manifest.files(), result_files_);
+class EditManifestTask : public Task {
+  public:
+    EditManifestTask() : Task("Edit manifest") {
+        sections_.push_back(std::make_unique<CopyFilesManifestSection>());
     }
 
-    static void save_manifest(Manifest& manifest, std::ostream& stream) {
-        ManifestFormat format;
-        format.preamble(
-            "This is the manifest file generated by R4R.\n"
-            "You can update its content by either adding or "
-            "removing/commenting lines in the corresponding sections.");
+    void run(TracerState& state) override;
 
-        format.add_section(create_copy_section(manifest.files()));
+  private:
+    static bool open_manifest(fs::path const& path);
 
+    void load_manifest(std::istream& stream, Manifest& manifest);
+    bool save_manifest(std::ostream& stream, Manifest const& manifest);
+
+    std::vector<std::unique_ptr<ManifestSection>> sections_;
+};
+
+inline void EditManifestTask::load_manifest(std::istream& stream,
+                                            Manifest& manifest) {
+    ManifestFormat format;
+    stream >> format;
+
+    for (auto& section : sections_) {
+        ManifestFormat::Section* input = format.get_section(section->name());
+        if (input) {
+            std::istringstream iss{input->content};
+            section->load(iss, manifest);
+        }
+    }
+}
+
+inline bool EditManifestTask::save_manifest(std::ostream& stream,
+                                            Manifest const& manifest) {
+    ManifestFormat format;
+    format.set_preamble(
+        "This is the manifest file generated by R4R.\n"
+        "You can update its content by either adding or "
+        "removing/commenting lines in the corresponding sections.");
+
+    bool any_content{false};
+    for (auto& section : sections_) {
+        std::ostringstream oss;
+        bool content = section->save(oss, manifest);
+        any_content |= content;
+
+        if (!content) {
+            continue;
+        }
+
+        format.add_section({.name = section->name(), .content = oss.str()});
+    }
+
+    if (any_content) {
         stream << format;
     }
 
-    static bool open_manifest(fs::path const& path) {
-        char const* editor = std::getenv("VISUAL");
-        if (editor == nullptr) {
-            editor = std::getenv("EDITOR");
-        }
-        if (editor == nullptr) {
-            LOG(WARN) << "Failed to open manifest: no editor found (set VISUAL "
-                         "or EDITOR environment variabl)";
-            return false;
-        }
+    return any_content;
+}
 
-        LOG(DEBUG) << "Opening the manifest file: " << path << " using "
-                   << editor;
-        auto exit_code = Command{editor}.arg(path).spawn().wait();
-        if (exit_code == -1) {
-            LOG(ERROR) << "Failed to open the manifest file. Exit code: "
-                       << exit_code;
-            return false;
-        }
-
-        return true;
+inline void EditManifestTask::run(TracerState& state) {
+    auto manifest_file = TempFile{"r4r-manifest", ".conf"};
+    bool any_content{false};
+    {
+        LOG(DEBUG) << "Saving manifest to: " << *manifest_file;
+        std::ofstream stream{*manifest_file};
+        any_content = save_manifest(stream, state.manifest);
     }
 
-    Resolvers const& resolvers_;
-    fs::path const& output_dir_;
-    AbsolutePathSet result_files_;
-    bool interactive_;
+    if (!any_content) {
+        LOG(DEBUG) << "Na manifest part need any edittting";
+        return;
+    }
+
+    auto ts = fs::last_write_time(*manifest_file);
+
+    if (open_manifest(*manifest_file) &&
+        fs::last_write_time(*manifest_file) != ts) {
+        LOG(DEBUG) << "Rereading manifest from: " << *manifest_file;
+        std::ifstream stream{*manifest_file};
+        load_manifest(stream, state.manifest);
+    }
+}
+
+inline bool EditManifestTask::open_manifest(fs::path const& path) {
+    char const* editor = std::getenv("VISUAL");
+    if (editor == nullptr) {
+        editor = std::getenv("EDITOR");
+    }
+
+    if (editor == nullptr) {
+        LOG(WARN) << "Failed to open manifest: no editor found (set VISUAL "
+                     "or EDITOR environment variable)";
+        return false;
+    }
+
+    LOG(DEBUG) << "Opening the manifest file: " << path << " using " << editor;
+
+    auto exit_code = Command{editor}.arg(path).spawn().wait();
+    if (exit_code == -1) {
+        LOG(ERROR) << "Failed to open the manifest file. Exit code: "
+                   << exit_code;
+        return false;
+    }
+
+    return true;
+}
+
+class ResolveRPackageSystemDependencies : public Task {
+  public:
+    ResolveRPackageSystemDependencies()
+        : Task("Resolve R package system dependencies") {}
+
+    void run(TracerState& state) override;
 };
 
-class DockerFileBuilderTask : public Task<DockerFile> {
+inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
+    auto& manifest = state.manifest;
+
+    std::unordered_set<RPackage const*> compiled_packages;
+    for (auto const* pkg :
+         state.rpkg_database.get_dependencies(manifest.r_packages)) {
+        if (pkg->is_base) {
+            continue;
+        }
+
+        if (pkg->needs_compilation) {
+            compiled_packages.insert(pkg);
+            LOG(DEBUG) << "R package: " << pkg->name << " " << pkg->version
+                       << " needs compilation";
+        }
+
+        manifest.r_packages.insert(pkg);
+    }
+
+    if (compiled_packages.empty()) {
+        return;
+    }
+
+    LOG(INFO) << "There are " << compiled_packages.size()
+              << " R packages that needs compilation, need to "
+                 "pull system dependencies";
+
+    auto deb_packages =
+        RpkgDatabase::get_system_dependencies(compiled_packages);
+
+    // bring in R headers and R development dependencies (includes
+    // build-essential, gfortran, ...)
+    deb_packages.insert("r-base-dev");
+
+    for (auto const& name : deb_packages) {
+        auto const* pkg = state.dpkg_database.lookup_by_name(name);
+        if (pkg == nullptr) {
+            LOG(WARN) << "Failed to find " << name
+                      << " package needed "
+                         "by R packages to be built from source";
+        } else {
+            auto it = manifest.deb_packages.insert(pkg);
+            if (it.second) {
+                LOG(DEBUG) << "Adding native dependency: " << pkg->name << " "
+                           << pkg->version;
+            }
+        }
+    }
+}
+
+class DockerFileBuilderTask : public Task {
   public:
-    DockerFileBuilderTask(Options const& options, Environment const& envir,
-                          Manifest const& manifest)
-        : options_{options}, envir_{envir}, manifest_{manifest} {}
+    explicit DockerFileBuilderTask(fs::path output_dir, std::string base_image,
+                                   bool docker_sudo_access)
+        : Task("Create Dockerfile"), output_dir_{std::move(output_dir)},
+          archive_{output_dir_ / "archive.tar"},
+          permission_script_{output_dir_ / "permissions.sh"},
+          cran_install_script_{output_dir_ / "install_r_packages.R"},
+          dockerfile_{output_dir_ / "Dockerfile"},
+          base_image_{std::move(base_image)},
+          docker_sudo_access_{docker_sudo_access} {}
 
-    DockerFile run() override {
+    void run(TracerState& state) override;
 
-        LOG(INFO) << "Generating Dockerfile: " << options_.dockerfile;
+  private:
+    static void install_deb_packages(DockerFileBuilder& builder,
+                                     Manifest const& manifest);
 
-        DockerFileBuilder builder{options_.docker_base_image,
-                                  options_.output_dir};
+    static void generate_permissions_script(std::vector<fs::path> const& files,
+                                            std::ostream& out);
 
-        builder.env("DEBIAN_FRONTEND", "noninteractive");
+    static void set_lang_and_timezone(DockerFileBuilder& builder,
+                                      Manifest const& manifest);
 
-        set_basics(builder);
-        create_user(builder);
+    static void set_environment(DockerFileBuilder& builder,
+                                Manifest const& manifest);
 
-        manifest_.write_to_docker(builder);
+    static void prepare_command(DockerFileBuilder& builder,
+                                Manifest const& manifest);
 
-        set_environment(builder);
-        prepare_command(builder);
+    void copy_files(DockerFileBuilder& builder, Manifest const& manifest) const;
 
-        DockerFile docker_file = builder.build();
-        docker_file.save(options_.dockerfile);
+    void install_r_packages(DockerFileBuilder& builder,
+                            Manifest const& manifest,
+                            RpkgDatabase const& rpkg_database) const;
 
-        return docker_file;
+    void create_user(DockerFileBuilder& builder,
+                     Manifest const& manifest) const;
+
+    fs::path output_dir_;
+    fs::path archive_;
+    fs::path permission_script_;
+    fs::path cran_install_script_;
+    fs::path dockerfile_;
+    fs::path base_image_;
+    bool docker_sudo_access_{false};
+};
+
+inline void DockerFileBuilderTask::run(TracerState& state) {
+    LOG(INFO) << "Generating Dockerfile: " << dockerfile_;
+
+    DockerFileBuilder builder{base_image_, output_dir_};
+
+    builder.env("DEBIAN_FRONTEND", "noninteractive");
+
+    Manifest const& manifest{state.manifest};
+
+    set_lang_and_timezone(builder, manifest);
+    create_user(builder, manifest);
+
+    install_deb_packages(builder, manifest);
+    install_r_packages(builder, manifest, state.rpkg_database);
+    copy_files(builder, manifest);
+
+    set_environment(builder, manifest);
+    prepare_command(builder, manifest);
+
+    DockerFile docker_file = builder.build();
+    docker_file.save(dockerfile_);
+}
+
+inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
+                                              Manifest const& manifest) const {
+
+    std::vector<fs::path> files;
+    for (auto const& [path, status] : manifest.copy_files) {
+        if (status != FileStatus::Copy) {
+            continue;
+        }
+
+        files.push_back(path);
+        if (fs::is_symlink(path)) {
+            files.push_back(fs::read_symlink(path));
+        }
+    }
+
+    if (files.empty()) {
+        return;
+    }
+
+    std::sort(files.begin(), files.end());
+
+    create_tar_archive(archive_, files);
+    // FIXME: the paths are not good, it will copy into out/archive.tar
+    builder.copy({archive_}, archive_);
+
+    builder.run({STR("tar -x -f "
+                     << archive_
+                     << " --same-owner --same-permissions --absolute-names"),
+                 STR("rm -f " << archive_)});
+
+    {
+        std::ofstream permissions{permission_script_};
+        generate_permissions_script(files, permissions);
+    }
+
+    // FIXME: the paths are not good, it will copy into out/...sh
+    builder.copy({permission_script_}, permission_script_);
+    builder.run({STR("bash " << permission_script_),
+                 STR("rm -f " << permission_script_)});
+}
+
+inline void DockerFileBuilderTask::generate_permissions_script(
+    std::vector<fs::path> const& files, std::ostream& out) {
+    std::set<fs::path> directories;
+
+    for (auto const& file : files) {
+        fs::path current = file.parent_path();
+        while (!current.empty() && current != "/") {
+            directories.insert(current);
+            current = current.parent_path();
+        }
+    }
+
+    std::vector<fs::path> sorted_dirs(directories.begin(), directories.end());
+
+    out << "#!/bin/bash\n\n";
+    out << "set -e\n\n";
+
+    for (auto const& dir : sorted_dirs) {
+        struct stat info{};
+        if (stat(dir.c_str(), &info) != 0) {
+            LOG(WARN) << "Warning: Unable to access " << dir << '\n';
+            continue;
+        }
+
+        uid_t owner = info.st_uid;
+        gid_t group = info.st_gid;
+        mode_t permissions = info.st_mode & 0777;
+
+        out << "chown " << owner << ":" << group << " " << dir << '\n';
+        out << "chmod " << std::oct << permissions << std::dec << " " << dir
+            << '\n';
+    }
+}
+
+inline void DockerFileBuilderTask::install_r_packages(
+    DockerFileBuilder& builder, Manifest const& manifest,
+    RpkgDatabase const& rpkg_database) const {
+    if (manifest.r_packages.empty()) {
+        return;
+    }
+
+    std::vector<RPackage const*> packages{manifest.r_packages.begin(),
+                                          manifest.r_packages.end()};
+    std::sort(
+        packages.begin(), packages.end(),
+        [](auto const* lhs, auto const* rhs) { return lhs->name < rhs->name; });
+
+    auto all_packages = rpkg_database.get_dependencies(manifest.r_packages);
+
+    std::ofstream script(cran_install_script_);
+
+    // TODO: parameterize the max cores
+    script << "options(Ncpus=min(parallel::detectCores(), 32))\n\n"
+           << "tmp_dir <- tempdir()\n"
+           << "install.packages('remotes', lib = c(tmp_dir))\n"
+           << "require('remotes', lib.loc = c(tmp_dir))\n"
+           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
+           << "\n\n"
+           << "# install wrapper that turns warnings into errors\n"
+           // clang-format off
+        << "CHK <- function(thunk) {\n"
+        << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
+        << "    if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }\n"
+        << "  })\n"
+        << "}\n\n"
+           // clang-format on
+
+           << "# installing packages\n\n";
+
+    std::unordered_set<std::string> seen;
+    for (auto const* pkg : all_packages) {
+        if (pkg->is_base) {
+            continue;
+        }
+
+        if (!seen.insert(pkg->name).second) {
+            continue;
+        }
+
+        std::visit(
+            overloaded{
+                [&](RPackage::GitHub const& gh) {
+                    script << "CHK(install_github('" << gh.org << "/" << gh.name
+                           << "', ref = '" << gh.ref
+                           << "', upgrade = 'never', dependencies = FALSE))\n";
+                },
+                [&](RPackage::CRAN const&) {
+                    script << "CHK(install_version('" << pkg->name << "', '"
+                           << pkg->version
+                           << "', upgrade = 'never', dependencies = FALSE))\n";
+                },
+            },
+            pkg->repository);
+    }
+
+    builder.copy({cran_install_script_}, "/");
+    // TODO: simplify
+    builder.run({STR("Rscript /" << cran_install_script_.filename().string()),
+                 STR("rm -f /" << cran_install_script_.filename().string())});
+}
+
+inline void
+DockerFileBuilderTask::set_lang_and_timezone(DockerFileBuilder& builder,
+                                             Manifest const& manifest) {
+    std::string lang = "C"s;
+    if (auto it = manifest.envir.find("LANG"); it != manifest.envir.end()) {
+        lang = it->second;
+    }
+    std::string tz = manifest.timezone;
+    if (auto it = manifest.envir.find("TZ"); it != manifest.envir.end()) {
+        tz = it->second;
+    }
+
+    builder.env("LANG", lang);
+    builder.env("TZ", tz);
+    builder.run({"apt-get update -y",
+                 "apt-get install -y --no-install-recommends locales tzdata",
+                 "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
+                 "update-locale LANG=$LANG"});
+}
+
+inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
+                                               Manifest const& manifest) const {
+    std::vector<std::string> cmds;
+    auto const& user = manifest.user;
+
+    // create the primary group
+    cmds.push_back(
+        STR("groupadd -g " << user.group.gid << " " << user.group.name));
+
+    // create groups
+    for (auto const& group : user.groups) {
+        cmds.push_back(STR("(groupadd -g " << group.gid << " " << group.name
+                                           << " || groupmod -g " << group.gid
+                                           << " " << group.name << ")"));
+    }
+
+    // prepare additional groups for `-G`
+    std::vector<std::string> groups;
+    groups.reserve(user.groups.size());
+    for (auto const& group : user.groups) {
+        groups.push_back(group.name);
+    }
+    std::sort(groups.begin(), groups.end());
+
+    std::string group_list = string_join(groups, ',');
+
+    // add user
+    cmds.push_back(STR("useradd -u "
+                       << user.uid << " -g " << user.group.gid
+                       << (group_list.empty() ? "" : " -G " + group_list)
+                       << " -d " << user.home_directory << " -s " << user.shell
+                       << " " << user.username));
+
+    // ensure home directory exists
+    cmds.push_back(STR("mkdir -p " << user.home_directory));
+    cmds.push_back(STR("chown " << user.username << ":" << user.group.name
+                                << " " << user.home_directory));
+
+    // sudo?
+    if (docker_sudo_access_) {
+        cmds.emplace_back("apt-get install -y sudo");
+        cmds.push_back(STR("echo '"
+                           << user.username
+                           << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
+                           << user.username));
+        cmds.push_back(STR("chmod 0440 /etc/sudoers.d/" << user.username));
+    }
+
+    builder.run(cmds);
+}
+
+inline void DockerFileBuilderTask::set_environment(DockerFileBuilder& builder,
+                                                   Manifest const& manifest) {
+    auto& envir = manifest.envir;
+    if (envir.empty()) {
+        return;
+    }
+
+    // TODO: filtering should not be here
+    static std::unordered_set<std::string> const ignored_env = {
+        "DBUS_SESSION_BUS_ADDRES",
+        "GPG_TTY",
+        "HOME",
+        "LOGNAME",
+        "OLDPWD",
+        "PWD",
+        "SSH_AUTH_SOCK",
+        "SSH_CLIENT",
+        "SSH_CONNECTION",
+        "SSH_TTY",
+        "USER",
+        "XDG_RUNTIME_DIR",
+        "XDG_SESSION_CLASS",
+        "XDG_SESSION_ID",
+        "XDG_SESSION_TYPE"};
+
+    std::vector<std::string> sorted_env;
+    sorted_env.reserve(envir.size());
+
+    for (auto const& [k, v] : envir) {
+        if (!ignored_env.contains(k)) {
+            sorted_env.push_back(STR(k << "=\"" << v << "\""));
+        }
+    }
+
+    std::sort(sorted_env.begin(), sorted_env.end());
+
+    builder.env(sorted_env);
+}
+
+inline void DockerFileBuilderTask::prepare_command(DockerFileBuilder& builder,
+                                                   Manifest const& manifest) {
+    builder.run(
+        {STR("mkdir -p " << manifest.cwd),
+         STR("chown " << manifest.user.username << ":"
+                      << manifest.user.group.name << " " << manifest.cwd)});
+    builder.workdir(manifest.cwd);
+    builder.user(manifest.user.username);
+    builder.cmd(manifest.cmd);
+}
+
+inline void
+DockerFileBuilderTask::install_deb_packages(DockerFileBuilder& builder,
+                                            Manifest const& manifest) {
+    // TODO: the main problem with this implementation is that
+    // it ignores the fact a package can come from multiple repos
+    // and that these repos need to be installed.
+
+    if (manifest.deb_packages.empty()) {
+        return;
+    }
+
+    std::vector<std::string> pkgs;
+    std::unordered_set<std::string> seen;
+    pkgs.reserve(manifest.deb_packages.size());
+
+    for (auto const& pkg : manifest.deb_packages) {
+        std::string p = pkg->name + "=" + pkg->version;
+        if (seen.insert(p).second) {
+            pkgs.push_back(p);
+        }
+    }
+
+    std::sort(pkgs.begin(), pkgs.end());
+
+    std::string line = string_join(pkgs, " \\\n      ");
+
+    builder.run({
+        "apt-get update -y",
+        "apt-get install -y --no-install-recommends " + line,
+    });
+}
+
+class MakefileBuilderTask : public Task {
+  public:
+    explicit MakefileBuilderTask(fs::path makefile,
+                                 std::string docker_image_tag,
+                                 std::string docker_container_name)
+        : Task("Create Makefile"), makefile_{std::move(makefile)},
+          docker_image_tag_{std::move(docker_image_tag)},
+          docker_container_name_{std::move(docker_container_name)} {}
+
+    void run(TracerState& state) override {
+        std::ofstream stream{makefile_};
+
+        generate_makefile(stream, state.manifest);
+
+        LOG(INFO) << "Generated Makefile: " << makefile_;
     }
 
   private:
-    void set_basics(DockerFileBuilder& builder) {
-        std::string lang = "C"s;
-        if (auto it = envir_.vars.find("LANG"); it != envir_.vars.end()) {
-            lang = it->second;
-        }
-        std::string tz = envir_.timezone;
-        if (auto it = envir_.vars.find("TZ"); it != envir_.vars.end()) {
-            tz = it->second;
-        }
+    fs::path makefile_;
+    std::string docker_image_tag_;
+    std::string docker_container_name_;
 
-        builder.env("LANG", lang);
-        builder.env("TZ", tz);
-        builder.run(
-            {"apt-get update -y",
-             "apt-get install -y --no-install-recommends locales tzdata",
-             "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
-             "update-locale LANG=$LANG"});
-    }
-
-    void create_user(DockerFileBuilder& builder) {
-        std::vector<std::string> cmds;
-        auto const& user = envir_.user;
-
-        // create the primary group
-        cmds.push_back(
-            STR("groupadd -g " << user.group.gid << " " << user.group.name));
-
-        // create groups
-        for (auto const& group : user.groups) {
-            cmds.push_back(STR("(groupadd -g " << group.gid << " " << group.name
-                                               << " || groupmod -g "
-                                               << group.gid << " " << group.name
-                                               << ")"));
-        }
-
-        // prepare additional groups for `-G`
-        std::vector<std::string> groups;
-        groups.reserve(user.groups.size());
-        for (auto const& group : user.groups) {
-            groups.push_back(group.name);
-        }
-        std::sort(groups.begin(), groups.end());
-
-        std::string group_list = string_join(groups, ',');
-
-        // add user
-        cmds.push_back(STR("useradd -u "
-                           << user.uid << " -g " << user.group.gid
-                           << (group_list.empty() ? "" : " -G " + group_list)
-                           << " -d " << user.home_directory << " -s "
-                           << user.shell << " " << user.username));
-
-        // ensure home directory exists
-        cmds.push_back(STR("mkdir -p " << user.home_directory));
-        cmds.push_back(STR("chown " << user.username << ":" << user.group.name
-                                    << " " << user.home_directory));
-
-        // sudo?
-        if (options_.docker_sudo_access) {
-            cmds.emplace_back("apt-get install -y sudo");
-            cmds.push_back(STR("echo '"
-                               << user.username
-                               << " ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/"
-                               << user.username));
-            cmds.push_back(STR("chmod 0440 /etc/sudoers.d/" << user.username));
-        }
-
-        builder.run(cmds);
-    }
-
-    void set_environment(DockerFileBuilder& builder) {
-        auto const& env = envir_.vars;
-        if (env.empty()) {
-            return;
-        }
-
-        // FIXME: add to the environment task (possibly to manifest)
-        static std::unordered_set<std::string> const ignored_env = {
-            "DBUS_SESSION_BUS_ADDRES",
-            "GPG_TTY",
-            "HOME",
-            "LOGNAME",
-            "OLDPWD",
-            "PWD",
-            "SSH_AUTH_SOCK",
-            "SSH_CLIENT",
-            "SSH_CONNECTION",
-            "SSH_TTY",
-            "USER",
-            "XDG_RUNTIME_DIR",
-            "XDG_SESSION_CLASS",
-            "XDG_SESSION_ID",
-            "XDG_SESSION_TYPE"};
-
-        std::vector<std::string> sorted_env;
-        sorted_env.reserve(env.size());
-
-        for (auto const& [k, v] : env) {
-            if (!ignored_env.contains(k)) {
-                sorted_env.push_back(STR(k << "=\"" << v << "\""));
-            }
-        }
-
-        std::sort(sorted_env.begin(), sorted_env.end());
-
-        builder.env(sorted_env);
-    }
-
-    void prepare_command(DockerFileBuilder& builder) {
-        builder.run(
-            {STR("mkdir -p " << envir_.cwd),
-             STR("chown " << envir_.user.username << ":"
-                          << envir_.user.group.name << " " << envir_.cwd)});
-        builder.workdir(envir_.cwd);
-        builder.user(envir_.user.username);
-        builder.cmd(options_.cmd);
-    }
-
-    Options const& options_;
-    Environment const& envir_;
-    Manifest const& manifest_;
-};
-
-class MakefileBuilderTask : public Task<fs::path> {
-  public:
-    explicit MakefileBuilderTask(Options const& options) : options_{options} {}
-
-    fs::path run() override {
-        LOG(INFO) << "Generating makefile: " << options_.makefile;
-
-        std::ofstream makefile{options_.makefile};
-        generate_makefile(makefile);
-
-        return options_.makefile;
-    }
-
-    void generate_makefile(std::ostream& makefile) {
+    void generate_makefile(std::ostream& makefile, Manifest const& manifest) {
         // TODO: make sure it executes in the same dir as the makefile
         // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
-        makefile << "IMAGE_TAG = " << options_.docker_image_tag << "\n"
-                 << "CONTAINER_NAME = " << options_.docker_container_name
+        std::vector<fs::path> copy_files;
+        for (auto const& [file, status] : manifest.copy_files) {
+            if (status == FileStatus::Result) {
+                copy_files.push_back(file);
+            }
+        }
+
+        makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
+                 << "CONTAINER_NAME = " << docker_container_name_
                  << "\n"
                  // TODO: add to settings
                  << "TARGET_DIR = result"
@@ -665,17 +830,25 @@ class MakefileBuilderTask : public Task<fs::path> {
                  // clang-format on
 
                  << "copy: run\n"
-                 << "\t@echo\n" // add a new line in case the docker run did not
-                                // finish with one
-                 << "\t@echo 'Copying files'\n"
-                 << "\t@mkdir -p $(TARGET_DIR)\n";
+                 // add a new line in case the docker run did
+                 // not finish with one
+                 << "\t@echo\n";
 
-        for (auto const& file : options_.results) {
-            makefile << "\t@echo -n '  - " << file << "...'\n"
-                     << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
-                     << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo ' "
-                        "failed'"
-                     << "\n";
+        if (copy_files.empty()) {
+            makefile << "\t@echo 'No result files'\n";
+        } else {
+            makefile << "\t@echo 'Copying files'\n"
+                     << "\t@mkdir -p $(TARGET_DIR)\n";
+
+            for (auto const& file : copy_files) {
+                makefile
+                    << "\t@echo -n '  - " << file << "...'\n"
+                    << "\t@docker cp -L $(CONTAINER_NAME):" << file.string()
+                    << " $(TARGET_DIR) 2>/dev/null && echo ' done' || echo "
+                       "' "
+                       "failed'"
+                    << "\n";
+            }
         }
 
         makefile << "\n"
@@ -687,31 +860,27 @@ class MakefileBuilderTask : public Task<fs::path> {
                  << "\t@echo 'Cleaning previous result (if any)'\n"
                  << "\trm -rf $(TARGET_DIR)\n\n";
     }
-
-  private:
-    // FIXME: cherry-pick options
-    Options const& options_;
 };
 
-class RunMakefileTask : public Task<int> {
+class RunMakefileTask : public Task {
   public:
-    explicit RunMakefileTask(fs::path const& makefile) : makefile_{makefile} {}
+    explicit RunMakefileTask(fs::path makefile)
+        : Task("Run make"), makefile_{std::move(makefile)} {}
 
     RunMakefileTask(RunMakefileTask const&) = delete;
     RunMakefileTask& operator=(RunMakefileTask const&) = delete;
 
-    int run() override {
+    void run([[maybe_unused]] TracerState& state) override {
         LOG(INFO) << "Running Makefile: " << makefile_;
         int exit_code = run_makefile_target("all", "make> ");
         if (exit_code != 0) {
             throw TaskException("Failed to run make");
         }
-        return exit_code;
     }
 
   private:
-    int run_makefile_target(std::string const& target,
-                            std::string const& prefix) {
+    [[nodiscard]] int run_makefile_target(std::string const& target,
+                                          std::string const& prefix) const {
         auto proc = Command("make")
                         .arg("-f")
                         .arg(makefile_.filename())
@@ -727,7 +896,51 @@ class RunMakefileTask : public Task<int> {
         return proc.wait();
     }
 
-    fs::path const& makefile_;
+    fs::path makefile_;
+};
+
+class CaptureEnvironmentTask : public Task {
+  public:
+    CaptureEnvironmentTask() : Task("Capture environment") {}
+
+    void run(TracerState& state) override {
+        capture_user(state);
+        capture_timezone(state);
+    }
+
+  private:
+    static void capture_user(TracerState& state) {
+        state.manifest.cwd = std::filesystem::current_path();
+        LOG(DEBUG) << "Current working directory: " << state.manifest.cwd;
+        state.manifest.user = UserInfo::get_current_user_info();
+        LOG(DEBUG) << "Current user: " << state.manifest.user.username;
+
+        if (environ != nullptr) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            for (char** env = environ; *env != nullptr; ++env) {
+                std::string s(*env);
+                size_t pos = s.find('=');
+                if (pos != std::string::npos) {
+                    state.manifest.envir.emplace(s.substr(0, pos),
+                                                 s.substr(pos + 1));
+                } else {
+                    LOG(WARN) << "Invalid environment variable: '" << s << "'";
+                }
+            }
+        } else {
+            LOG(WARN) << "Failed to get environment variables";
+        }
+    }
+
+    static void capture_timezone(TracerState& state) {
+        if (auto tz = get_system_timezone(); tz) {
+            state.manifest.timezone = *tz;
+        } else {
+            LOG(WARN) << "Failed to get timezone information, fallback to "
+                      << kDefaultTimezone;
+            state.manifest.timezone = kDefaultTimezone;
+        }
+    }
 };
 
 class Tracer {
@@ -739,7 +952,7 @@ class Tracer {
         run_pipeline();
     }
 
-    void stop() {
+    void stop() const {
         if (current_task_ != nullptr) {
             current_task_->stop();
         }
@@ -747,62 +960,78 @@ class Tracer {
 
   private:
     void run_pipeline() {
-        auto envir = run("Capture environment", CaptureEnvironmentTask{});
+        std::vector<std::unique_ptr<Task>> tasks;
 
-        auto files = run("File tracer",
-                         TracingTask{options_.cmd, options_.ignore_file_list});
+        tasks.push_back(std::make_unique<CaptureEnvironmentTask>());
 
-        auto resolvers =
-            run("File resolver",
-                ResolveTask{files, options_.results, envir.cwd, options_.R_bin,
-                            options_.ignore_file_list});
-        auto manifest =
-            run("Manifest builder",
-                ManifestTask{resolvers, options_.output_dir, options_.results,
-                             !options_.skip_manifest});
+        tasks.push_back(
+            std::make_unique<FileTracingTask>(options_.ignore_file_list));
 
-        run("Docker file builder",
-            DockerFileBuilderTask{options_, envir, manifest});
+        tasks.push_back(std::make_unique<ResolveFileTask>(
+            options_.R_bin, options_.ignore_file_list));
 
-        run("Makefile builder", MakefileBuilderTask{options_});
+        tasks.push_back(std::make_unique<ResolveRPackageSystemDependencies>());
+
+        if (!options_.skip_manifest) {
+            tasks.push_back(std::make_unique<EditManifestTask>());
+        }
+
+        tasks.push_back(std::make_unique<DockerFileBuilderTask>(
+            options_.output_dir, options_.docker_base_image,
+            options_.docker_sudo_access));
+
+        tasks.push_back(std::make_unique<MakefileBuilderTask>(
+            options_.makefile, options_.docker_image_tag,
+            options_.docker_container_name));
 
         if (options_.run_make) {
-            run("Make runner", RunMakefileTask{options_.makefile});
+            tasks.push_back(
+                std::make_unique<RunMakefileTask>(options_.makefile));
+        }
+
+        TracerState state{
+            .dpkg_database = DpkgDatabase::system_database(),
+            .rpkg_database = RpkgDatabase::from_R(options_.R_bin),
+            .traced_files = {},
+            .manifest = {},
+        };
+
+        // initialize from options
+        state.manifest.cmd = options_.cmd;
+        for (auto& f : options_.results) {
+            state.manifest.copy_files.emplace(f, FileStatus::Result);
+        }
+
+        for (auto& task : tasks) {
+            run(*task, state);
         }
     }
 
     void configure() {
-        Logger::get().max_level(options_.log_level);
+        Logger::get().set_max_level(options_.log_level);
 
         fs::create_directory(options_.output_dir);
 
-        if (options_.dockerfile.empty()) {
-            options_.dockerfile = options_.output_dir / "Dockerfile";
-        }
         if (options_.makefile.empty()) {
             options_.makefile = options_.output_dir / "Makefile";
         }
     }
 
-    template <typename T>
-    T run(std::string const& name, Task<T>&& task) {
-        return run(name, task);
-    }
-
-    template <typename T>
-    T run(std::string const& name, Task<T>& task) {
+    void run(Task& task, TracerState& state) {
         current_task_ = &task;
 
-        LOG(INFO) << name << " starting";
+        LOG(INFO) << task.name() << " starting";
 
-        auto [result, elapsed] = stopwatch([&] { return task.run(); });
+        auto elapsed = stopwatch([&] { task.run(state); });
+
         current_task_ = nullptr;
-        LOG(INFO) << name << " finished in " << format_elapsed_time(elapsed);
-        return result;
+
+        LOG(INFO) << task.name() << " finished in "
+                  << format_elapsed_time(elapsed);
     }
 
     Options options_;
-    TaskBase* current_task_{};
+    Task* current_task_{};
 };
 
 #endif // TRACER_H

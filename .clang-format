@@ -1,9 +1,11 @@
-BasedOnStyle: LLVM
-IndentWidth: 4
-DerivePointerAlignment: false
-PointerAlignment: Left
-AlwaysBreakTemplateDeclarations: true
 AlignTrailingComments: true
 AllowShortBlocksOnASingleLine: false
-QualifierAlignment: Right
+AlwaysBreakTemplateDeclarations: true
+BasedOnStyle: LLVM
+DerivePointerAlignment: false
+IndentWidth: 4
 InsertBraces: true
+PointerAlignment: Left
+QualifierAlignment: Right
+BraceWrapping:
+  SplitEmptyFunction: false

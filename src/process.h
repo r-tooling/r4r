@@ -5,7 +5,6 @@
 #include "logger.h"
 #include "util.h"
 #include <filesystem>
-#include <linux/limits.h>
 #include <optional>
 #include <sys/wait.h>
 #include <system_error>
@@ -15,67 +14,76 @@
 #include <vector>
 
 class Pipe {
-  public:
+public:
+    Pipe();
+
     Pipe(Pipe const&) = delete;
+    Pipe(Pipe&& other) noexcept;
+
     Pipe& operator=(Pipe const&) = delete;
-
-    Pipe() {
-        std::array<int, 2> fds{};
-        if (::pipe(fds.data()) < 0) {
-            throw make_system_error(errno, "Failed to create pipe");
-        }
-        read_fd = fds[0];
-        write_fd = fds[1];
-    }
-    Pipe(Pipe&& other) noexcept
-        : read_fd(other.read_fd), write_fd(other.write_fd) {
-        other.read_fd = -1;
-        other.write_fd = -1;
-    }
-
-    Pipe& operator=(Pipe&& other) noexcept {
-        if (this != &other) {
-            close();
-            read_fd = other.read_fd;
-            write_fd = other.write_fd;
-            other.read_fd = -1;
-            other.write_fd = -1;
-        }
-        return *this;
-    }
+    Pipe& operator=(Pipe&& other) noexcept;
 
     ~Pipe() { close(); }
 
     [[nodiscard]] int read() const { return read_fd; }
-
     [[nodiscard]] int write() const { return write_fd; }
 
-    void close_read() {
-        if (read_fd != -1) {
-            ::close(read_fd);
-            read_fd = -1;
-        }
-    }
+    void close_read();
+    void close_write();
+    void close();
 
-    void close_write() {
-        if (write_fd != -1) {
-            ::close(write_fd);
-            write_fd = -1;
-        }
-    }
-
-    void close() {
-        close_read();
-        close_write();
-    }
-
-  private:
+private:
     int read_fd{-1};
     int write_fd{-1};
 };
 
+inline Pipe::Pipe() {
+    std::array<int, 2> fds{};
+    if (::pipe(fds.data()) < 0) {
+        throw make_system_error(errno, "Failed to create pipe");
+    }
+    read_fd = fds[0];
+    write_fd = fds[1];
+}
+
+inline Pipe::Pipe(Pipe&& other) noexcept: read_fd(other.read_fd),
+                                          write_fd(other.write_fd) {
+    other.read_fd = -1;
+    other.write_fd = -1;
+}
+
+inline Pipe& Pipe::operator=(Pipe&& other) noexcept {
+    if (this != &other) {
+        close();
+        read_fd = other.read_fd;
+        write_fd = other.write_fd;
+        other.read_fd = -1;
+        other.write_fd = -1;
+    }
+    return *this;
+}
+
+inline void Pipe::close_read() {
+    if (read_fd != -1) {
+        ::close(read_fd);
+        read_fd = -1;
+    }
+}
+
+inline void Pipe::close_write() {
+    if (write_fd != -1) {
+        ::close(write_fd);
+        write_fd = -1;
+    }
+}
+
+inline void Pipe::close() {
+    close_read();
+    close_write();
+}
+
 class Output {
-  public:
+public:
     std::string stdout_data;
     std::string stderr_data;
     int exit_code{0};
@@ -86,145 +94,151 @@ class Output {
 inline void Output::check_success(std::string const& message) const {
     if (exit_code != 0) {
         throw std::runtime_error(STR(message << " (exit code: " << exit_code
-                                             << ")\nstderr:\n"
-                                             << stderr_data));
+            << ")\n""stderr:\n"
+            << stderr_data));
     }
 }
 
 class Child {
-  public:
+public:
     Child(pid_t pid, Pipe stdout_pipe, Pipe stderr_pipe)
         : pid_(pid), stdout_(std::move(stdout_pipe)),
-          stderr_(std::move(stderr_pipe)) {}
-
-    [[nodiscard]] int wait() const {
-        int status = 0;
-        pid_t result = ::waitpid(pid_, &status, 0);
-
-        if (result < 0) {
-            throw make_system_error(errno, STR("waitpid failed for " << pid_));
-        }
-
-        return status_to_exit_code(status);
+          stderr_(std::move(stderr_pipe)) {
     }
 
-    [[nodiscard]] std::optional<int> try_wait() const {
-        int status = 0;
-        pid_t result = waitpid(pid_, &status, WNOHANG);
-        if (result == 0) {
-            return {};
-        }
-        if (result == pid_) {
-            return status_to_exit_code(status);
-        }
-        throw make_system_error(errno, STR("waitpid failed for " << pid_));
-    }
+    [[nodiscard]] int wait() const;
+    [[nodiscard]] std::optional<int> try_wait() const;
 
-    void kill(int signal = SIGKILL) const {
-        if (pid_ > 0) {
-            if (::kill(pid_, signal) < 0 && errno != ESRCH) {
-                throw make_system_error(errno, "Failed to kill process");
-            }
-        }
-    }
+    void kill(int signal = SIGKILL) const;
 
-    std::string read_stdout() {
-        if (stdout_.read() == 0) {
-            return "";
-        }
-        std::string data = read_all_from_fd(stdout_.read());
-        stdout_.close_read();
-        return data;
-    }
-
-    std::string read_stderr() {
-        if (stderr_.read() == 0) {
-            return "";
-        }
-        std::string data = read_all_from_fd(stderr_.read());
-        stderr_.close_read();
-        return data;
-    }
+    std::string read_stdout();
+    std::string read_stderr();
 
     [[nodiscard]] int stdout_fd() const { return stdout_.read(); }
-
     [[nodiscard]] int stderr_fd() const { return stderr_.read(); }
 
     [[nodiscard]] pid_t pid() const { return pid_; }
 
-  private:
+private:
+    static int status_to_exit_code(int status);
+
+    static std::string read_all_from_fd(int fd);
+
     pid_t pid_{-1};
     Pipe stdout_;
     Pipe stderr_;
-
-    static int status_to_exit_code(int status) {
-        if (WIFEXITED(status)) {
-            return WEXITSTATUS(status);
-        }
-        if (WIFSIGNALED(status)) {
-            return 126 + WTERMSIG(status);
-        }
-        return status;
-    }
-
-    static std::string read_all_from_fd(int fd) {
-        std::array<char, 4096> buffer{};
-        std::string result;
-
-        while (true) {
-            ssize_t bytes_read = ::read(fd, buffer.data(), buffer.size());
-            if (bytes_read < 0) {
-                // retry if interrupted by signal; otherwise throw.
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                throw make_system_error(
-                    errno, STR("Failed to read from pipe: " << fd));
-            }
-            if (bytes_read == 0) {
-                // EOF
-                break;
-            }
-            result.append(buffer.data(), static_cast<size_t>(bytes_read));
-        }
-        return result;
-    }
 };
 
 enum class Stdio {
     Inherit, // inherit from parent
-    Pipe,    // redirect to a pipe (to capture or read/write)
+    Pipe, // redirect to a pipe (to capture or read/write)
     Merge // merge this stream with the other (stderr->stdout or stdout->stderr)
 };
 
 class Command {
-  public:
+public:
     explicit Command(std::string const& program);
 
     Command& arg(std::string const& arg);
-
     Command& args(std::vector<std::string> const& args);
-
     Command& env(std::string const& key, std::string const& value);
-
     Command& current_dir(std::string const& dir);
-
     Command& set_stdout(Stdio stdio);
-
     Command& set_stderr(Stdio stdio);
 
     Child spawn();
-
     Output output(bool redirect_stderr_to_stdout = false);
 
-  private:
+private:
     std::vector<std::string> args_;
     std::map<std::string, std::string> envs_;
     std::optional<std::string> working_dir_;
     std::optional<Stdio> stdout_setting_;
     std::optional<Stdio> stderr_setting_;
 };
+
+inline int Child::wait() const {
+    int status = 0;
+    pid_t result = ::waitpid(pid_, &status, 0);
+
+    if (result < 0) {
+        throw make_system_error(errno, STR("waitpid failed for " << pid_));
+    }
+
+    return status_to_exit_code(status);
+}
+
+inline std::optional<int> Child::try_wait() const {
+    int status = 0;
+    pid_t result = waitpid(pid_, &status, WNOHANG);
+    if (result == 0) {
+        return {};
+    }
+    if (result == pid_) {
+        return status_to_exit_code(status);
+    }
+    throw make_system_error(errno, STR("waitpid failed for " << pid_));
+}
+
+inline void Child::kill(int signal) const {
+    if (pid_ > 0) {
+        if (::kill(pid_, signal) < 0 && errno != ESRCH) {
+            throw make_system_error(errno, "Failed to kill process");
+        }
+    }
+}
+
+inline std::string Child::read_stdout() {
+    if (stdout_.read() == 0) {
+        return "";
+    }
+    std::string data = read_all_from_fd(stdout_.read());
+    stdout_.close_read();
+    return data;
+}
+
+inline std::string Child::read_stderr() {
+    if (stderr_.read() == 0) {
+        return "";
+    }
+    std::string data = read_all_from_fd(stderr_.read());
+    stderr_.close_read();
+    return data;
+}
+
+inline int Child::status_to_exit_code(int status) {
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 126 + WTERMSIG(status);
+    }
+    return status;
+}
+
+inline std::string Child::read_all_from_fd(int fd) {
+    std::array<char, 4096> buffer{};
+    std::string result;
+
+    while (true) {
+        ssize_t bytes_read = ::read(fd, buffer.data(), buffer.size());
+        if (bytes_read < 0) {
+            // retry if interrupted by signal; otherwise throw.
+            if (errno == EINTR) {
+                continue;
+            }
+
+            throw make_system_error(
+                errno, STR("Failed to read from pipe: " << fd));
+        }
+        if (bytes_read == 0) {
+            // EOF
+            break;
+        }
+        result.append(buffer.data(), static_cast<size_t>(bytes_read));
+    }
+    return result;
+}
 
 inline Command::Command(std::string const& program) {
     args_.push_back(program);
@@ -345,6 +359,7 @@ inline Output Command::output(bool redirect_stderr_to_stdout) {
 
 struct WaitForSignalResult {
     enum Status { Success, Timeout, Exit, Signal } status = Success;
+
     std::optional<int> detail;
 };
 

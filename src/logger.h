@@ -1,6 +1,7 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
+#include "common.h"
 #include <array>
 #include <cstdlib>
 #include <iomanip>
@@ -72,9 +73,10 @@ class ConsoleSink : public LogSink {
     void sink(LogEvent const& event) override {
         std::ostream& os =
             (event.level >= LogLevel::Warning) ? std::cerr : std::cout;
-        os << "[" << std::setw(5) << std::right << event.level << "] "
-           << " " << event.message << "\n";
-        os.flush();
+
+        auto msg = STR("[" << std::setw(5) << std::right << event.level << "] "
+                           << " " << event.message << "\n");
+        os << msg;
     }
 };
 
@@ -120,69 +122,76 @@ class Logger {
         return instance;
     }
 
-    static bool is_level_enabled(LogLevel level) {
-        return get().is_enabled(level);
-    }
-
     void enable(LogLevel level) { set_level(level, true); }
     void disable(LogLevel level) { set_level(level, false); }
-    void max_level(LogLevel max_level) {
-        for (size_t i = 0; i < kLevelsCount; ++i) {
-            set_level(static_cast<LogLevel>(i),
-                      i >= static_cast<size_t>(max_level));
-        }
-    }
+    void set_max_level(LogLevel max_level);
+    [[nodiscard]] bool is_enabled(LogLevel level) const;
 
-    [[nodiscard]] bool is_enabled(LogLevel level) const {
-        if (level == LogLevel::Fatal) {
-            return true;
-        }
+    std::unique_ptr<LogSink> set_sink(std::unique_ptr<LogSink> sink);
+    [[nodiscard]] LogSink& get_sink() const { return *sink_; }
 
-        return levels_enabled_.at(static_cast<size_t>(level));
-    }
-
-    std::unique_ptr<LogSink> set_sink(std::unique_ptr<LogSink> sink) {
-        sink_.swap(sink);
-        return sink;
-    }
-
-    LogSink& get_sink() { return *sink_; }
-
-    void log(LogEvent event) {
-        std::lock_guard lock(mutex_);
-        if (!is_enabled(event.level)) {
-            return;
-        }
-
-        if (sink_) {
-            sink_->sink(event);
-        }
-
-        if (event.level == LogLevel::Fatal) {
-            std::abort();
-        }
-    }
+    void log(LogEvent const& event);
 
   private:
-    Logger() { set_sink(std::make_unique<ConsoleSink>()); }
-
-    void set_level(LogLevel level, bool enabled) {
-        if (level == LogLevel::Fatal) {
-            return;
-        }
-
-        std::lock_guard lock(mutex_);
-        levels_enabled_.at(static_cast<size_t>(level)) = enabled;
+    Logger() {
+        set_sink(std::make_unique<ConsoleSink>());
+        set_max_level(LogLevel::Info);
     }
+
+    void set_level(LogLevel level, bool enabled);
 
     static size_t constexpr kLevelsCount =
         static_cast<size_t>(LogLevel::Fatal) + 1;
 
     std::unique_ptr<LogSink> sink_;
-    std::array<bool, kLevelsCount> levels_enabled_{false, false, true,
-                                                   true,  true,  true};
+    std::array<bool, kLevelsCount> levels_enabled_{};
     std::mutex mutex_;
 };
+
+inline void Logger::set_max_level(LogLevel max_level) {
+    for (size_t i = 0; i < kLevelsCount; ++i) {
+        set_level(static_cast<LogLevel>(i),
+                  i >= static_cast<size_t>(max_level));
+    }
+}
+
+inline bool Logger::is_enabled(LogLevel level) const {
+    if (level == LogLevel::Fatal) {
+        return true;
+    }
+
+    return levels_enabled_.at(static_cast<size_t>(level));
+}
+
+inline std::unique_ptr<LogSink>
+Logger::set_sink(std::unique_ptr<LogSink> sink) {
+    sink_.swap(sink);
+    return sink;
+}
+
+inline void Logger::log(LogEvent const& event) {
+    std::lock_guard lock(mutex_);
+    if (!is_enabled(event.level)) {
+        return;
+    }
+
+    if (sink_) {
+        sink_->sink(event);
+    }
+
+    if (event.level == LogLevel::Fatal) {
+        std::abort();
+    }
+}
+
+inline void Logger::set_level(LogLevel level, bool enabled) {
+    if (level == LogLevel::Fatal) {
+        return;
+    }
+
+    std::lock_guard lock(mutex_);
+    levels_enabled_.at(static_cast<size_t>(level)) = enabled;
+}
 
 class LogMessage {
   public:

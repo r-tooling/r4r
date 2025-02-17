@@ -9,48 +9,6 @@
 #include <span>
 #include <string>
 
-static Options parse_cmd_args(std::span<char const*> args);
-static void register_error_handler(Tracer& tracer);
-static int do_main(std::span<char const*> args);
-
-int main(int argc, char* argv[]) {
-    try {
-        std::span<char const*> args(const_cast<char const**>(argv), argc);
-
-        return do_main(args);
-    } catch (std::exception const& ex) {
-        std::cerr << "Unhandled exception: " << ex.what() << '\n';
-        return EXIT_FAILURE;
-    } catch (...) {
-        std::cerr << "Unhandled unknown exception." << '\n';
-        return EXIT_FAILURE;
-    }
-}
-
-static int do_main(std::span<char const*> args) {
-    Options options = parse_cmd_args(args);
-    Tracer tracer{options};
-
-    // Interrupt signals generated in the terminal are delivered to the
-    // active process group, which here includes both parent and child. A
-    // signal manually generated and sent to an individual process (perhaps
-    // with kill) will be delivered only to that process, regardless of
-    // whether it is the parent or child. That is why we need to register a
-    // signal handler that will terminate the tracee when the tracer
-    // gets killed.
-
-    register_error_handler(tracer);
-
-    try {
-        tracer.execute();
-    } catch (TaskException& e) {
-        std::cerr << e.what() << "\n";
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
-}
-
 static void register_error_handler(Tracer& tracer) {
     static std::function<void(int)> global_signal_handler =
         [&, got_sigint = false](int sig) mutable {
@@ -137,5 +95,43 @@ static Options parse_cmd_args(std::span<char const*> args) {
                   << '\n';
 
         exit(1);
+    }
+}
+
+static int do_main(std::span<char const*> args) {
+    Options options = parse_cmd_args(args);
+    Tracer tracer{options};
+
+    // Interrupt signals generated in the terminal are delivered to the
+    // active process group, which here includes both parent and child. A
+    // signal manually generated and sent to an individual process (perhaps
+    // with kill) will be delivered only to that process, regardless of
+    // whether it is the parent or child. That is why we need to register a
+    // signal handler that will terminate the tracee when the tracer
+    // gets killed.
+
+    register_error_handler(tracer);
+
+    try {
+        tracer.execute();
+    } catch (TaskException& e) {
+        std::cerr << e.what() << "\n";
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char* argv[]) {
+    try {
+        std::span<char const*> args(const_cast<char const**>(argv), argc);
+
+        return do_main(args);
+    } catch (std::exception const& ex) {
+        std::cerr << "Unhandled exception: " << ex.what() << '\n';
+        return EXIT_FAILURE;
+    } catch (...) {
+        std::cerr << "Unhandled unknown exception." << '\n';
+        return EXIT_FAILURE;
     }
 }

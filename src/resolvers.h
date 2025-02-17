@@ -9,97 +9,46 @@
 #include "manifest.h"
 #include "rpkg_database.h"
 #include "util_fs.h"
-#include <memory>
+#include <filesystem>
+#include <functional>
 #include <string>
-#include <utility>
 #include <vector>
 
 class Resolver {
   public:
+    using Files = std::vector<FileInfo>;
+
     virtual ~Resolver() = default;
 
-    virtual void load_from_files(std::vector<FileInfo>& files) = 0;
-    virtual void add_to_manifest(Manifest&) const {};
-};
-
-class Resolvers : public Resolver {
-  public:
-    template <std::derived_from<Resolver> T, typename... Args>
-
-    void add(std::string const& key, Args&&... args) {
-        resolvers_.emplace(key,
-                           std::make_unique<T>(std::forward<Args>(args)...));
-        index_.emplace_back(key);
-    }
-
-    void load_from_files(std::vector<FileInfo>& files) override {
-        LOG(INFO) << "Resolving " << files.size() << " files";
-
-        std::string summary;
-        size_t total_count = files.size();
-
-        for (auto const& name : index_) {
-            size_t count = files.size();
-            resolvers_.at(name)->load_from_files(files);
-            summary += name + "(" + std::to_string(count - files.size()) + ") ";
-        }
-
-        LOG(INFO) << "Resolver summary: " << total_count
-                  << " file(s): " << summary;
-
-        if (files.empty()) {
-            LOG(INFO) << "All files resolved";
-        } else {
-            LOG(INFO) << "Failed to resolve " << files.size() << " files";
-            for (auto const& f : files) {
-                LOG(INFO) << "Failed to resolve: " << f.path;
-            }
-        }
-    }
-
-    void add_to_manifest(Manifest& manifest) const override {
-        for (auto const& name : index_) {
-            resolvers_.at(name)->add_to_manifest(manifest);
-        }
-    }
-
-  private:
-    std::unordered_map<std::string, std::unique_ptr<Resolver>> resolvers_;
-    std::vector<std::string> index_;
+    virtual void resolve(Files& files, Manifest& manifest) = 0;
 };
 
 class DebPackageResolver : public Resolver {
   public:
-    explicit DebPackageResolver(
-        std::shared_ptr<DpkgDatabase const> dpkg_database)
-        : dpkg_database_(std::move(dpkg_database)) {}
+    explicit DebPackageResolver(DpkgDatabase const& dpkg_database)
+        : dpkg_database_(dpkg_database) {}
 
-    void load_from_files(std::vector<FileInfo>& files) override;
-    void add_to_manifest(Manifest& manifest) const override;
+    void resolve(Files& files, Manifest& manifest) override;
 
   private:
-    std::shared_ptr<DpkgDatabase const> dpkg_database_;
-    std::unordered_map<fs::path, DebPackage const*> files_;
-    std::unordered_set<DebPackage const*> packages_;
+    std::reference_wrapper<DpkgDatabase const> dpkg_database_;
 };
 
-inline void DebPackageResolver::load_from_files(std::vector<FileInfo>& files) {
+inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
     SymlinkResolver symlink_resolver;
-
-    packages_.clear();
-    files_.clear();
+    std::unordered_set<DebPackage const*> resolved_packages;
+    size_t resolved_files{};
 
     auto resolved = [&](FileInfo const& info) {
-        auto path = info.path;
+        auto& path = info.path;
         for (auto const& p : symlink_resolver.resolve_symlinks(path)) {
-            if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
+            if (auto const* pkg = dpkg_database_.get().lookup_by_path(p); pkg) {
                 LOG(TRACE) << "Resolved: " << path << " to: " << pkg->name;
 
-                auto it = packages_.insert(pkg);
-                files_.insert_or_assign(p, *it.first);
+                // TODO: check that the file size is the same
 
-                // TODO: check that the size is the same
-
+                resolved_packages.insert(pkg);
+                resolved_files++;
                 return true;
             }
         }
@@ -107,39 +56,34 @@ inline void DebPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     };
 
     std::erase_if(files, resolved);
-    LOG(INFO) << "Resolved " << files_.size() << " files to "
-              << packages_.size() << " deb packages";
+
+    LOG(INFO) << "Resolved " << resolved_files << " files to "
+              << resolved_packages.size() << " deb packages";
+
     if (Logger::get().is_enabled(DEBUG)) {
-        for (auto const* p : packages_) {
+        for (auto const* p : resolved_packages) {
             LOG(DEBUG) << "Deb package: " << p->name << " " << p->version;
         }
     }
-}
 
-inline void DebPackageResolver::add_to_manifest(Manifest& manifest) const {
-    for (auto const& pkg : packages_) {
-        manifest.add_deb_package(*pkg);
-    }
+    manifest.deb_packages.merge(resolved_packages);
 }
 
 class CopyFileResolver : public Resolver {
   public:
-    explicit CopyFileResolver(fs::path const& cwd,
-                              AbsolutePathSet const& result_files)
-        : cwd_{cwd}, result_files_{result_files} {}
-
-    void load_from_files(std::vector<FileInfo>& files) override;
-    void add_to_manifest(Manifest& manifest) const override;
-
-  private:
-    fs::path const& cwd_;
-    AbsolutePathSet const& result_files_;
-    std::map<fs::path, FileStatus> files_;
+    void resolve(Files& files, Manifest& manifest) override;
 };
 
-inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
+inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
     size_t copy_cnt = 0;
     size_t result_cnt = 0;
+
+    std::unordered_set<fs::path> result_files_;
+    for (auto& [f, s] : manifest.copy_files) {
+        if (s == FileStatus::Result) {
+            result_files_.insert(f);
+        }
+    }
 
     std::erase_if(files, [&](auto const& f) {
         auto& path = f.path;
@@ -148,9 +92,16 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
         if (result_files_.contains(path)) {
             status = FileStatus::Result;
             result_cnt++;
-        } else if (!f.existed_before) {
-            status = FileStatus::IgnoreDidNotExistBefore;
-        } else if (fs::equivalent(path, cwd_)) {
+            return true;
+        }
+
+        if (!f.existed_before) {
+            if (fs::is_regular_file(f.path)) {
+                status = FileStatus::Result;
+            } else {
+                status = FileStatus::IgnoreDidNotExistBefore;
+            }
+        } else if (fs::equivalent(path, manifest.cwd)) {
             status = FileStatus::IgnoreCWD;
         } else {
             switch (check_accessibility(path)) {
@@ -164,6 +115,8 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
             case AccessStatus::InsufficientPermission:
                 status = FileStatus::IgnoreNotAccessible;
                 break;
+            default:
+                UNREACHABLE();
             }
         }
 
@@ -171,7 +124,7 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
 
         // TODO: check size / sha1
 
-        files_.emplace(path, status);
+        manifest.copy_files.emplace(path, status);
         return true;
     });
 
@@ -179,43 +132,36 @@ inline void CopyFileResolver::load_from_files(std::vector<FileInfo>& files) {
     LOG(INFO) << "Will copy " << copy_cnt << " files into the image";
 }
 
-inline void CopyFileResolver::add_to_manifest(Manifest& manifest) const {
-    for (auto const& [file, status] : files_) {
-        manifest.add_file(file, status);
-    }
-}
-
-class CRANPackageResolver : public Resolver {
+class RPackageResolver : public Resolver {
   public:
-    explicit CRANPackageResolver(
-        std::shared_ptr<RpkgDatabase const> rpkg_database,
-        std::shared_ptr<DpkgDatabase const> dpkg_database)
-        : rpkg_database_{std::move(rpkg_database)},
-          dpkg_database_{std::move(dpkg_database)} {}
+    explicit RPackageResolver(RpkgDatabase const& rpkg_database,
+                              DpkgDatabase const& dpkg_database)
+        : rpkg_database_{rpkg_database}, dpkg_database_{dpkg_database} {}
 
-    void load_from_files(std::vector<FileInfo>& files) override;
-    void add_to_manifest(Manifest& manifest) const override;
+    void resolve(Files& files, Manifest& manifest) override;
 
   private:
-    std::shared_ptr<RpkgDatabase const> rpkg_database_;
-    std::shared_ptr<DpkgDatabase const> dpkg_database_;
-    std::unordered_map<fs::path, RPackage const*> files_;
-    std::set<RPackage const*> packages_;
+    std::reference_wrapper<RpkgDatabase const> rpkg_database_;
+    std::reference_wrapper<DpkgDatabase const> dpkg_database_;
+    void
+    check_system_dependencies(std::unordered_set<RPackage const*> const& pkgs,
+                              Manifest& manifest);
 };
 
-inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
+inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
     SymlinkResolver symlink_resolved;
+    std::unordered_set<RPackage const*> resolved_packages;
+    size_t resolved_files{};
 
     auto resolved = [&](FileInfo const& info) {
-        auto path = info.path;
+        auto& path = info.path;
         for (auto const& p : symlink_resolved.resolve_symlinks(path)) {
-            if (auto const* pkg = rpkg_database_->lookup_by_path(p); pkg) {
+            if (auto const* pkg = rpkg_database_.get().lookup_by_path(p); pkg) {
 
                 LOG(TRACE) << "Resolved: " << path << " to: " << pkg->name;
 
-                auto it = packages_.insert(pkg);
-                files_.insert_or_assign(p, *it.first);
-
+                resolved_packages.insert(pkg);
+                resolved_files++;
                 return true;
             }
         }
@@ -223,54 +169,19 @@ inline void CRANPackageResolver::load_from_files(std::vector<FileInfo>& files) {
     };
 
     std::erase_if(files, resolved);
-    LOG(INFO) << "Resolved " << files_.size() << " files to "
-              << packages_.size() << " R packages";
+
+    LOG(INFO) << "Resolved " << resolved_files << " files to "
+              << resolved_packages.size() << " R packages";
+
     if (Logger::get().is_enabled(DEBUG)) {
-        for (auto const* p : packages_) {
-            LOG(DEBUG) << "CRAN package: " << p->name << " " << p->version
-                       << (p->needs_compilation ? " (needs compilation)" : "");
+        for (auto const* p : resolved_packages) {
+            // TODO: add repo info
+            LOG(DEBUG) << "R package: " << p->name << " " << p->version
+                       << " from " << p->repository;
         }
     }
-};
 
-inline void CRANPackageResolver::add_to_manifest(Manifest& manifest) const {
-    std::unordered_set<RPackage const*> compiled_packages;
-    for (auto const* pkg : rpkg_database_->get_dependencies(packages_)) {
-        if (pkg->is_base) {
-            continue;
-        }
-
-        if (pkg->needs_compilation) {
-            compiled_packages.insert(pkg);
-        }
-
-        manifest.add_cran_package(*pkg);
-    }
-
-    if (!compiled_packages.empty()) {
-        LOG(INFO) << "There are CRAN packages that needs compilation, need to "
-                     "pull system dependencies";
-
-        auto deb_packages =
-            RpkgDatabase::get_system_dependencies(compiled_packages);
-
-        // bring in R headers and R development dependencies (includes
-        // build-essential)
-        deb_packages.insert("r-base-dev");
-
-        for (auto const& name : deb_packages) {
-            auto const* pkg = dpkg_database_->lookup_by_name(name);
-            if (pkg == nullptr) {
-                LOG(WARN) << "Failed to find " << name
-                          << " package needed "
-                             "by R packages to be built from source";
-            } else {
-                LOG(DEBUG) << "Adding native dependency: " << pkg->name << " "
-                           << pkg->version;
-                manifest.add_deb_package(*pkg);
-            }
-        }
-    }
+    manifest.r_packages.merge(resolved_packages);
 }
 
 class IgnoreFileResolver : public Resolver {
@@ -278,10 +189,10 @@ class IgnoreFileResolver : public Resolver {
     explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list)
         : ignore_file_list_{ignore_file_list} {}
 
-    void load_from_files(std::vector<FileInfo>& files) override;
+    void resolve(Files& files, Manifest& manifest) override;
 
   private:
-    FileSystemTrie<bool> const& ignore_file_list_;
+    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
     static FileSystemTrie<ImageFileInfo> load_default_files();
     static inline std::string const kImageName = "ubuntu:22.04";
 
@@ -293,7 +204,8 @@ class IgnoreFileResolver : public Resolver {
         "/dev/*", "/sys/*", "/proc/*"};
 };
 
-inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
+inline void IgnoreFileResolver::resolve(Files& files,
+                                        [[maybe_unused]] Manifest& manifest) {
     static FileSystemTrie<ImageFileInfo> const kDefaultImageFiles =
         load_default_files();
 
@@ -301,7 +213,7 @@ inline void IgnoreFileResolver::load_from_files(std::vector<FileInfo>& files) {
 
     std::erase_if(files, [&](FileInfo const& info) {
         auto const& path = info.path;
-        if (ignore_file_list_.find_last_matching(path) != nullptr) {
+        if (ignore_file_list_.get().find_last_matching(path) != nullptr) {
             LOG(TRACE) << "Resolving: " << path << " to: ignored";
             return true;
         }

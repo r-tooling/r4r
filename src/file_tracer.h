@@ -14,21 +14,14 @@ struct FileInfo {
     bool existed_before;
 };
 
+// Use classes for each syscall with static methods and a ref to FileTracer
 class FileTracer : public SyscallListener {
-    using Warnings = std::vector<std::string>;
-    using SyscallState = std::variant<std::monostate, FileInfo>;
-    using PidState = std::pair<int, SyscallState>;
-
-    struct SyscallHandler {
-        void (FileTracer::*entry)(pid_t, SyscallArgs, SyscallState&);
-        void (FileTracer::*exit)(pid_t, SyscallRet, bool, SyscallState const&);
-    };
-
-  public:
+public:
     using Files = std::unordered_map<fs::path, FileInfo>;
 
-    explicit FileTracer(FileSystemTrie<bool> ignore_file_list)
-        : ignore_file_list_{ignore_file_list} {}
+    explicit FileTracer(FileSystemTrie<bool> const& ignore_file_list)
+        : ignore_file_list_{ignore_file_list} {
+    }
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override;
@@ -39,7 +32,16 @@ class FileTracer : public SyscallListener {
 
     std::uint64_t syscalls_count() const { return syscalls_count_; }
 
-  private:
+private:
+    using Warnings = std::vector<std::string>;
+    using SyscallState = std::variant<std::monostate, FileInfo>;
+    using PidState = std::pair<int, SyscallState>;
+
+    struct SyscallHandler {
+        void (FileTracer::*entry)(pid_t, SyscallArgs, SyscallState&);
+        void (FileTracer::*exit)(pid_t, SyscallRet, bool, SyscallState const&);
+    };
+
     void register_file(FileInfo info);
 
     void generic_open_entry(pid_t pid, int dirfd, fs::path const& pathname,
@@ -49,52 +51,21 @@ class FileTracer : public SyscallListener {
                            bool is_error, SyscallState const& state);
 
     void syscall_openat_entry(pid_t pid, SyscallArgs args,
-                              SyscallState& state) {
-        auto pathname =
-            SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
-        generic_open_entry(pid, static_cast<int>(args[0]), pathname, state);
-    }
+                              SyscallState& state);
 
     void syscall_openat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
-                             SyscallState const& state) {
-        generic_open_exit(pid, ret_val, is_error, state);
-    }
+                             SyscallState const& state);
 
-    void syscall_open_entry(pid_t pid, SyscallArgs args, SyscallState& state) {
-        auto pathname =
-            SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
-        generic_open_entry(pid, AT_FDCWD, pathname, state);
-    }
+    void syscall_open_entry(pid_t pid, SyscallArgs args, SyscallState& state);
 
     void syscall_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
-                           SyscallState const& state) {
-        generic_open_exit(pid, ret_val, is_error, state);
-    }
+                           SyscallState const& state);
 
     void syscall_execve_entry(pid_t pid, SyscallArgs args,
-                              SyscallState& state) {
-        auto path =
-            SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
-        state = FileInfo{.path = path, .size = {}, .existed_before = false};
-    }
+                              SyscallState& state);
 
     void syscall_execve_exit(pid_t /*unused*/, SyscallRet /*unused*/,
-                             bool is_error, SyscallState const& state) {
-        if (!is_error) {
-            if (std::holds_alternative<FileInfo>(state)) {
-                auto info = std::get<FileInfo>(state);
-                // it succeeded so it has to exist
-                info.existed_before = true;
-
-                LOG(DEBUG) << "Syscall execve " << info.path;
-
-                register_file(info);
-            } else {
-                throw std::runtime_error(
-                    "execve successful, yet not path stored");
-            }
-        }
-    }
+                             bool is_error, SyscallState const& state);
 
     // TODO: won't classes be easier? Passing a pointer to this?
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
@@ -113,7 +84,7 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
-    FileSystemTrie<bool> ignore_file_list_;
+    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
     std::uint64_t syscalls_count_{0};
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
@@ -131,10 +102,10 @@ inline void FileTracer::on_syscall_entry(pid_t pid, std::uint64_t syscall,
         return;
     }
 
-    auto handler = it->second;
+    auto [entry, _] = it->second;
     SyscallState state = std::monostate{};
 
-    (this->*(handler.entry))(pid, args, state);
+    (this->*(entry))(pid, args, state);
 
     auto [s_it, inserted] = state_.try_emplace(pid, syscall, state);
 
@@ -148,16 +119,15 @@ inline void FileTracer::on_syscall_exit(pid_t pid, SyscallRet ret_val,
                                         bool is_error) {
     LOG(TRACE) << "Syscall exit: pid: " << pid;
 
-    auto node = state_.extract(pid);
-    if (node) {
+    if (auto node = state_.extract(pid)) {
         auto [syscall, state] = node.mapped();
         auto it = kHandlers_.find(syscall);
         if (it == kHandlers_.end()) {
             throw std::runtime_error(
                 STR("No exit handler for syscall: " << syscall));
         }
-        auto handler = it->second;
-        (this->*(handler.exit))(pid, ret_val, is_error, state);
+        auto [_, exit] = it->second;
+        (this->*(exit))(pid, ret_val, is_error, state);
     }
 }
 
@@ -215,7 +185,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
         result /= pathname;
     }
 
-    if (bool const* it = ignore_file_list_.find_last_matching(result);
+    if (bool const* it = ignore_file_list_.get().find_last_matching(result);
         it && *it) {
         LOG(DEBUG) << "Ignoring file: " << result;
         return;
@@ -272,6 +242,57 @@ void FileTracer::generic_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
             } else {
                 register_file(info);
             }
+        }
+    }
+}
+
+inline void FileTracer::syscall_openat_entry(pid_t pid, SyscallArgs args,
+                                             SyscallState& state) {
+    auto pathname =
+        SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+    generic_open_entry(pid, static_cast<int>(args[0]), pathname, state);
+}
+
+inline void FileTracer::syscall_openat_exit(pid_t pid, SyscallRet ret_val,
+                                            bool is_error,
+                                            SyscallState const& state) {
+    generic_open_exit(pid, ret_val, is_error, state);
+}
+
+inline void FileTracer::syscall_open_entry(pid_t pid, SyscallArgs args,
+                                           SyscallState& state) {
+    auto pathname =
+        SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+    generic_open_entry(pid, AT_FDCWD, pathname, state);
+}
+
+inline void FileTracer::syscall_open_exit(pid_t pid, SyscallRet ret_val,
+                                          bool is_error,
+                                          SyscallState const& state) {
+    generic_open_exit(pid, ret_val, is_error, state);
+}
+
+inline void FileTracer::syscall_execve_entry(pid_t pid, SyscallArgs args,
+                                             SyscallState& state) {
+    auto path =
+        SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
+    state = FileInfo{.path = path, .size = {}, .existed_before = false};
+}
+
+inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
+                                            SyscallState const& state) {
+    if (!is_error) {
+        if (std::holds_alternative<FileInfo>(state)) {
+            auto info = std::get<FileInfo>(state);
+            // it succeeded so it has to exist
+            info.existed_before = true;
+
+            LOG(DEBUG) << "Syscall execve " << info.path;
+
+            register_file(info);
+        } else {
+            throw std::runtime_error(
+                "execve successful, yet not path stored");
         }
     }
 }

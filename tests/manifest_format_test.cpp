@@ -1,4 +1,4 @@
-#include "manifest.h"
+#include "manifest_format.h"
 #include "gtest/gtest.h"
 #include <sstream>
 #include <stdexcept>
@@ -7,30 +7,30 @@ TEST(ManifestFormatTest, ValidAndInvalidSectionNames) {
     EXPECT_NO_THROW({
         ManifestFormat mf;
         mf.add_section({"Section1", "content"});
-    });
+        });
     EXPECT_NO_THROW({
         ManifestFormat mf;
         mf.add_section({"_section", "content"});
-    });
+        });
 
     EXPECT_THROW(
         {
-            ManifestFormat mf;
-            mf.add_section({"1Section", "content"});
+        ManifestFormat mf;
+        mf.add_section({"1Section", "content"});
         },
         std::invalid_argument);
 
     EXPECT_THROW(
         {
-            ManifestFormat mf;
-            mf.add_section({"", "content"});
+        ManifestFormat mf;
+        mf.add_section({"", "content"});
         },
         std::invalid_argument);
 }
 
 TEST(ManifestFormatTest, DuplicateSectionNames) {
     ManifestFormat mf;
-    mf.add_section({"Section", "first content"});
+    mf.add_section({.name = "Section", .content = "first content"});
     EXPECT_THROW(mf.add_section({"Section", "duplicate content"}),
                  std::runtime_error);
 }
@@ -47,7 +47,8 @@ Line 1 of Section2 # Inline comment should be removed
 Line 2 of Section2
     )");
 
-    ManifestFormat mf = ManifestFormat::from_stream(input);
+    ManifestFormat mf;
+    input >> mf;
 
     auto it = mf.begin();
     ASSERT_NE(it, mf.end());
@@ -63,11 +64,11 @@ Line 2 of Section2
 
 TEST(ManifestFormatTest, WriteOutput) {
     ManifestFormat mf;
-    mf.preamble("Manifest preamble");
+    mf.set_preamble("Manifest preamble");
 
-    ManifestFormat::Section sec1{"Section1", "Line1\nLine2",
-                                 "Section1 preamble"};
-    ManifestFormat::Section sec2{"Section2", "Content of Section2", ""};
+    ManifestFormat::Section sec1{.name = "Section1", .content = "Line1\nLine2"};
+    ManifestFormat::Section sec2{.name = "Section2",
+                                 .content = "Content of Section2"};
     mf.add_section(sec1);
     mf.add_section(sec2);
 
@@ -76,18 +77,20 @@ TEST(ManifestFormatTest, WriteOutput) {
     std::string output = oss.str();
 
     std::string expected = "# Manifest preamble\n\n"
-                           "# Section1 preamble\n"
-                           "Section1:\n"
-                           "  Line1\n"
-                           "  Line2\n"
-                           "\n"
-                           "Section2:\n"
-                           "  Content of Section2\n"
-                           "\n";
+        "Section1:\n"
+        "  Line1\n"
+        "  Line2\n"
+        "\n"
+        "Section2:\n"
+        "  Content of Section2\n"
+        "\n";
     EXPECT_EQ(output, expected);
 }
 
 TEST(ManifestFormatTest, FromStreamContentBeforeHeader) {
     std::istringstream input("Content before header");
-    EXPECT_THROW({ ManifestFormat::from_stream(input); }, std::runtime_error);
+    EXPECT_THROW({
+                 ManifestFormat format;
+                 input >> format;
+                 }, std::runtime_error);
 }

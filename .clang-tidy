@@ -1,6 +1,6 @@
 ---
 # https://clang.llvm.org/extra/clang-tidy/checks/list.html
-Checks:  '-*,
+Checks: '-*,
           bugprone-*,
           clang-analyzer-*,
           cppcoreguidelines-*,
@@ -30,5 +30,6 @@ CheckOptions:
 
   readability-implicit-bool-conversion.AllowIntegerConditions: true
   readability-implicit-bool-conversion.AllowPointerConditions: true
+  readability-qualified-auto.AddConstToQualified: false
 
 UseColor: true

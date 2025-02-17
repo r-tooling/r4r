@@ -48,7 +48,7 @@ TEST_F(LoggerTest, CheckMacro) {
 }
 
 TEST_F(LoggerTest, EnableUpToLevel) {
-    Logger::get().max_level(LogLevel::Info);
+    Logger::get().set_max_level(LogLevel::Info);
 
     EXPECT_FALSE(Logger::get().is_enabled(LogLevel::Trace));
     EXPECT_FALSE(Logger::get().is_enabled(LogLevel::Debug));

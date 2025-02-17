@@ -1,9 +1,25 @@
-all: clean trace
+NAME := hw
+IMAGE_TAG := r4r/test-$(NAME)
+CONTAINER_NAME := r4r-test-$(NAME)
 
+all: clean trace check
+
+.PHONY: trace
 trace:
-	../../build/r4r -vvv --output out --result hello-world.txt --docker-image-tag r4r/test-hw ./script.sh
+	../../build/r4r \
+		-vvv \
+		--output actual \
+		--skip-manifest \
+		--docker-image-tag $(IMAGE_TAG) \
+		--docker-container-name $(CONTAINER_NAME) \
+		./script.sh
 
+.PHONY: check
+check:
+	../snapshot.sh expected actual/result
+
+.PHONY: clean
 clean:
-	- docker rmi -f r4r/test-hw
-	- docker rm test
-	rm -fr out hello-world.txt
+	-docker rm $(CONTAINER_NAME)
+	-docker rmi -f $(IMAGE_TAG)
+	rm -fr actual hello-world.txt

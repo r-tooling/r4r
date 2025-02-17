@@ -23,6 +23,7 @@ inline std::string escape_cmd_arg(std::string const& arg,
     char quoted_chr = single_quote ? '\'' : '"';
 
     if (arg.empty()) {
+        // NOLINTNEXTLINE(modernize-return-braced-init-list)
         return std::string(2, quoted_chr);
     }
 
@@ -228,6 +229,16 @@ std::optional<std::array<std::string, N>> inline string_split_n(
     return result;
 }
 
+inline bool string_iequals(std::string const& s1, std::string const& s2) {
+    if (s1.size() != s2.size()) {
+        return false;
+    }
+    return std::equal(s1.begin(), s1.end(), s2.begin(),
+                      [](unsigned char c1, unsigned char c2) {
+                          return std::tolower(c1) == std::tolower(c2);
+                      });
+}
+
 template <typename T>
 inline std::optional<T> to_number(std::string_view const& s) {
     T num;
@@ -238,15 +249,34 @@ inline std::optional<T> to_number(std::string_view const& s) {
     return {};
 }
 
+// template <typename Func>
+// inline auto stopwatch(Func&& func) {
+//     using clock = std::chrono::steady_clock;
+//
+//     auto start = clock::now();
+//     auto result = std::forward<Func>(func)();
+//     auto end = clock::now();
+//
+//     return std::make_pair(std::move(result), end - start);
+// }
+
 template <typename Func>
 inline auto stopwatch(Func&& func) {
     using clock = std::chrono::steady_clock;
+    using result_type = std::invoke_result_t<Func>;
 
     auto start = clock::now();
-    auto result = std::forward<Func>(func)();
-    auto end = clock::now();
-
-    return std::make_pair(std::move(result), end - start);
+    if constexpr (std::is_void_v<result_type>) {
+        // If the callable returns void:
+        std::forward<Func>(func)();
+        auto end = clock::now();
+        return end - start;
+    } else {
+        // If the callable returns a non-void type:
+        auto result = std::forward<Func>(func)();
+        auto end = clock::now();
+        return std::make_pair(std::move(result), end - start);
+    }
 }
 
 #endif // UTIL_H
