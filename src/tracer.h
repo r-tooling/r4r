@@ -787,10 +787,6 @@ class MakefileBuilderTask : public Task {
     }
 
   private:
-    fs::path makefile_;
-    std::string docker_image_tag_;
-    std::string docker_container_name_;
-
     void generate_makefile(std::ostream& makefile, Manifest const& manifest) {
         // TODO: make sure it executes in the same dir as the makefile
         // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -801,6 +797,8 @@ class MakefileBuilderTask : public Task {
                 copy_files.push_back(file);
             }
         }
+
+        bool progress = check_docker_buildx();
 
         makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
                  << "CONTAINER_NAME = " << docker_container_name_
@@ -816,7 +814,7 @@ class MakefileBuilderTask : public Task {
                  // clang-format off
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
-                 << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
+                 << "\t@docker build " << (progress ? "--progress=plain" : " ") << " -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
                  // clang-format on
@@ -860,6 +858,21 @@ class MakefileBuilderTask : public Task {
                  << "\t@echo 'Cleaning previous result (if any)'\n"
                  << "\trm -rf $(TARGET_DIR)\n\n";
     }
+
+    static bool check_docker_buildx() {
+        // feels like monkey patching, but in the r2u,
+        // the docker build does not support --progress
+        auto res = Command{"docker"}.arg("build").arg("--help").output(true);
+        if (res.exit_code != 0) {
+            throw TaskException("Unable to run docker build --help");
+        }
+
+        return res.stdout_data.find("--progress") != std::string::npos;
+    }
+
+    fs::path makefile_;
+    std::string docker_image_tag_;
+    std::string docker_container_name_;
 };
 
 class RunMakefileTask : public Task {

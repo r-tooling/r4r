@@ -1,4 +1,4 @@
-NAME := hw
+NAME := r-hello-world
 IMAGE_TAG := r4r/test-$(NAME)
 CONTAINER_NAME := r4r-test-$(NAME)
 R4R ?= ../../build/r4r
@@ -13,11 +13,11 @@ trace:
 		--skip-manifest \
 		--docker-image-tag $(IMAGE_TAG) \
 		--docker-container-name $(CONTAINER_NAME) \
-		./script.sh
+		R -f hello-world.R
 
 .PHONY: check
 check:
-	../snapshot.sh expected actual/result
+	../snapshot.sh --fail expected actual/result
 
 .PHONY: clean
 clean:
