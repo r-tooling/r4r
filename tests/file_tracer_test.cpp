@@ -12,7 +12,8 @@ TEST(FileTracerTest, OpenSyscall) {
 
     SyscallMonitor monitor(
         [&test_file]() {
-            int fd = open(test_file->c_str(), O_RDONLY); // NOLINT(*-pro-type-vararg)
+            // we need to use syscall instead of open which uses openat instead
+            auto fd = syscall(SYS_open, test_file->c_str(), O_RDONLY, 0); // NOLINT(*-pro-type-vararg)
             if (fd == -1) {
                 return 1;
             }
