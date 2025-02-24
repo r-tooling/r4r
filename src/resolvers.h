@@ -186,6 +186,7 @@ inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
 
 class IgnoreFileResolver : public Resolver {
   public:
+    explicit IgnoreFileResolver(FileSystemTrie<bool> const&&) = delete;
     explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list)
         : ignore_file_list_{ignore_file_list} {}
 
