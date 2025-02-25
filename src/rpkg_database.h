@@ -222,9 +222,12 @@ inline std::unordered_set<std::string> RpkgDatabase::get_system_dependencies(
         // TODO: parameterize distribution and release
         std::string url =
             STR("https://packagemanager.posit.co"
-                << "/__api__/repos/" << "cran"
-                << "/sysreqs?all=false&pkgname=" << p->name
-                << "&distribution=" << "ubuntu" << "&release=" << "22.04");
+                << "/__api__/repos/"
+                << "cran"
+                << "/sysreqs?all=false&pkgname=" << p->name << "&distribution="
+                << "ubuntu"
+                << "&release="
+                << "22.04");
         curl.add(p, url);
     }
 

@@ -69,6 +69,7 @@ struct Options {
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
+    bool infer_base_image{false};
     // TODO: make this mutable so more files could be added from command line
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
@@ -535,7 +536,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
     out << "set -e\n\n";
 
     for (auto const& dir : sorted_dirs) {
-        struct stat info{};
+        struct stat info {};
         if (stat(dir.c_str(), &info) != 0) {
             LOG(WARN) << "Warning: Unable to access " << dir << '\n';
             continue;
@@ -804,37 +805,38 @@ class MakefileBuilderTask : public Task {
             }
         }
 
-        makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
-                 << "CONTAINER_NAME = " << docker_container_name_
-                 << "\n"
-                 // TODO: add to settings
-                 << "TARGET_DIR = result"
-                 << "\n\n"
+        makefile
+            << "IMAGE_TAG = " << docker_image_tag_ << "\n"
+            << "CONTAINER_NAME = " << docker_container_name_
+            << "\n"
+            // TODO: add to settings
+            << "TARGET_DIR = result"
+            << "\n\n"
 
-                 << ".PHONY: all build run copy clean\n\n"
+            << ".PHONY: all build run copy clean\n\n"
 
-                 << "all: clean copy\n\n"
+            << "all: clean copy\n\n"
 
-                 // clang-format off
+            // clang-format off
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
-                 // clang-format on
+            // clang-format on
 
-                 // clang-format off
+            // clang-format off
                  << "run: build\n"
                  << "\t@echo 'Running container $(CONTAINER_NAME)'\n"
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
                  << " | tee docker-run.log"
                  << "\n\n"
-                 // clang-format on
+            // clang-format on
 
-                 << "copy: run\n"
-                 // add a new line in case the docker run did
-                 // not finish with one
-                 << "\t@echo\n";
+            << "copy: run\n"
+            // add a new line in case the docker run did
+            // not finish with one
+            << "\t@echo\n";
 
         if (copy_files.empty()) {
             makefile << "\t@echo 'No result files'\n";
@@ -906,11 +908,31 @@ class CaptureEnvironmentTask : public Task {
     CaptureEnvironmentTask() : Task("Capture environment") {}
 
     void run(TracerState& state) override {
+        capture_distribution(state);
         capture_user(state);
         capture_timezone(state);
     }
 
   private:
+    static void capture_distribution(TracerState& state) {
+        auto distribution = Command("lsb_release").arg("-i").arg("-s").output();
+        distribution.check_success("Failed to get distribution name.");
+        auto version = Command("lsb_release").arg("-r").output();
+        version.check_success("Failed to get distribution version.");
+        auto codename = Command("lsb_release").arg("-s").arg("-c").output();
+        codename.check_success("Failed to get distribution codename.");
+
+        auto distro = string_trim(distribution.stdout_data);
+
+        if (distro != "Ubuntu" && distro != "Debian") {
+            LOG(FATAL) << "Unsupported distribution: " << distro;
+        }
+
+        state.manifest.distribution = distro;
+
+        //        UNIMPLEMENTED();
+    }
+
     static void capture_user(TracerState& state) {
         state.manifest.cwd = std::filesystem::current_path();
         LOG(DEBUG) << "Current working directory: " << state.manifest.cwd;

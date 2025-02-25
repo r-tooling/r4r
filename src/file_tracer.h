@@ -16,12 +16,11 @@ struct FileInfo {
 
 // Use classes for each syscall with static methods and a ref to FileTracer
 class FileTracer : public SyscallListener {
-public:
+  public:
     using Files = std::unordered_map<fs::path, FileInfo>;
 
     explicit FileTracer(FileSystemTrie<bool> const& ignore_file_list)
-        : ignore_file_list_{ignore_file_list} {
-    }
+        : ignore_file_list_{ignore_file_list} {}
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override;
@@ -32,7 +31,7 @@ public:
 
     std::uint64_t syscalls_count() const { return syscalls_count_; }
 
-private:
+  private:
     using Warnings = std::vector<std::string>;
     using SyscallState = std::variant<std::monostate, FileInfo>;
     using PidState = std::pair<int, SyscallState>;
@@ -50,8 +49,7 @@ private:
     void generic_open_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
                            bool is_error, SyscallState const& state);
 
-    void syscall_openat_entry(pid_t pid, SyscallArgs args,
-                              SyscallState& state);
+    void syscall_openat_entry(pid_t pid, SyscallArgs args, SyscallState& state);
 
     void syscall_openat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                              SyscallState const& state);
@@ -61,8 +59,7 @@ private:
     void syscall_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                            SyscallState const& state);
 
-    void syscall_execve_entry(pid_t pid, SyscallArgs args,
-                              SyscallState& state);
+    void syscall_execve_entry(pid_t pid, SyscallArgs args, SyscallState& state);
 
     void syscall_execve_exit(pid_t /*unused*/, SyscallRet /*unused*/,
                              bool is_error, SyscallState const& state);
@@ -291,8 +288,7 @@ inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
 
             register_file(info);
         } else {
-            throw std::runtime_error(
-                "execve successful, yet not path stored");
+            throw std::runtime_error("execve successful, yet not path stored");
         }
     }
 }

@@ -17,8 +17,7 @@ class FileSystemTrie {
         std::unordered_map<std::string, std::unique_ptr<Node>> children;
         T const* value;
 
-        explicit Node(T const* value) : value(value) {
-        };
+        explicit Node(T const* value) : value(value){};
         Node(Node const&) = delete;
         Node(Node&&) noexcept = default;
         Node& operator=(Node const&) = delete;
@@ -41,7 +40,7 @@ class FileSystemTrie {
 
         void advance();
 
-    public:
+      public:
         using iterator_category = std::forward_iterator_tag;
         using value_type = NodeView;
         using difference_type = std::ptrdiff_t;
@@ -49,8 +48,7 @@ class FileSystemTrie {
         using reference = NodeView const&;
 
         /// Default constructor creates an "end" iterator.
-        ConstIterator() : current_{kEndSentinel} {
-        }
+        ConstIterator() : current_{kEndSentinel} {}
 
         /// Construct an iterator starting at a given root.
         explicit ConstIterator(Node const* root);
@@ -78,9 +76,8 @@ class FileSystemTrie {
     std::set<T> unique_values_;
     std::unique_ptr<Node> root_;
 
-public:
-    FileSystemTrie() : root_{std::make_unique<Node>(nullptr)} {
-    }
+  public:
+    FileSystemTrie() : root_{std::make_unique<Node>(nullptr)} {}
 
     FileSystemTrie(FileSystemTrie const& other) : FileSystemTrie() {
         // false positive: cannot be in the initializer list:
@@ -150,8 +147,8 @@ void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
             continue;
         }
 
-        auto [it, _] = node->children.try_emplace(
-            part, std::make_unique<Node>(nullptr));
+        auto [it, _] =
+            node->children.try_emplace(part, std::make_unique<Node>(nullptr));
         node = it->second.get();
     }
 

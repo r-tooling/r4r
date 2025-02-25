@@ -69,7 +69,7 @@ class DefaultImageFiles {
 
     void save(std::ostream& dst) const;
 
-private:
+  private:
     std::vector<ImageFileInfo> files_;
 };
 
@@ -92,14 +92,13 @@ inline DefaultImageFiles DefaultImageFiles::from_image(
 
     std::string bf_pattern = string_join(blacklist_patterns, '|');
 
-    auto out =
-        Command("docker")
-        .arg("run")
-        .arg("--rm")
-        .arg(image_name)
-        .arg("bash")
-        .arg("-c")
-        // clang-format off
+    auto out = Command("docker")
+                   .arg("run")
+                   .arg("--rm")
+                   .arg(image_name)
+                   .arg("bash")
+                   .arg("-c")
+                   // clang-format off
         .arg(STR(
             "DELIM='" NBSP "' " << "BF_PATTERN='" << bf_pattern << "' " <<
             R""(
@@ -109,8 +108,8 @@ inline DefaultImageFiles DefaultImageFiles::from_image(
                         echo "$file${DELIM}${stat}${DELIM}${sha1}"
                     done
                 )""))
-        // clang-format on
-        .output();
+                   // clang-format on
+                   .output();
 
     out.check_success("Unable to initialize default file list for " +
                       image_name);
@@ -159,7 +158,7 @@ inline DefaultImageFiles DefaultImageFiles::from_stream(std::istream& stream) {
             size = static_cast<std::uintmax_t>(std::stoull(size_str));
         } catch (std::exception const& e) {
             LOG(WARN) << "Failed to get size: " << path << " - " << size_str
-                          << " - not convertible: " << e.what();
+                      << " - not convertible: " << e.what();
             continue;
         }
 
@@ -168,7 +167,7 @@ inline DefaultImageFiles DefaultImageFiles::from_stream(std::istream& stream) {
             perm = static_cast<unsigned>(std::stoul(perm_str));
         } catch (std::exception const& e) {
             LOG(WARN) << "Failed to get permissions: " << path << " - "
-                          << perm_str << " - not convertible: " << e.what();
+                      << perm_str << " - not convertible: " << e.what();
             continue;
         }
 

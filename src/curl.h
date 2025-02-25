@@ -13,13 +13,13 @@
 #include <variant>
 
 class CURLGlobalInitializer {
-public:
+  public:
     static CURLGlobalInitializer& instance() {
         static CURLGlobalInitializer instance;
         return instance;
     }
 
-private:
+  private:
     CURLGlobalInitializer() { curl_global_init(CURL_GLOBAL_ALL); }
     ~CURLGlobalInitializer() { curl_global_cleanup(); }
 };
@@ -33,7 +33,7 @@ using CURLResult = std::variant<std::string, HttpResult>;
 
 template <typename T>
 class CURLMultipleTransfer {
-public:
+  public:
     explicit CURLMultipleTransfer(size_t parallel);
     CURLMultipleTransfer(CURLMultipleTransfer const&) = delete;
     CURLMultipleTransfer& operator=(CURLMultipleTransfer const&) = delete;
@@ -42,7 +42,7 @@ public:
     void add(T key, std::string const& url);
     std::unordered_map<T, CURLResult> run();
 
-private:
+  private:
     struct Request {
         T key;
         std::string response;
@@ -126,7 +126,7 @@ inline std::unordered_map<T, CURLResult> CURLMultipleTransfer<T>::run() {
 
 template <typename T>
 inline CURLResult CURLMultipleTransfer<T>::process_curl_message(CURLMsg* msg,
-    Request* req) {
+                                                                Request* req) {
     if (msg->msg != CURLMSG_DONE) {
         char const* error = curl_easy_strerror(msg->data.result);
 
@@ -158,8 +158,8 @@ inline CURLResult CURLMultipleTransfer<T>::process_curl_message(CURLMsg* msg,
 
 template <typename T>
 inline size_t CURLMultipleTransfer<T>::write_callback(char* ptr, size_t size,
-    size_t nmemb,
-    std::string* data) {
+                                                      size_t nmemb,
+                                                      std::string* data) {
     data->append(ptr, size * nmemb);
     return size * nmemb;
 }
