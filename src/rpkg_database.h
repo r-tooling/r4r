@@ -440,7 +440,12 @@ RpkgDatabase::dfs_visit(RPackage const* pkg,
 
     for (auto const& d : pkg->dependencies) {
         auto const* d_pkg = find(d);
-        CHECK(d_pkg);
+        if (!d_pkg) {
+            LOG(WARN) << "Failed to find dependency: " << d << " for package "
+                      << pkg->name;
+            continue;
+        }
+        //CHECK(d_pkg);
 
         if (!visited.contains(d_pkg)) {
             dfs_visit(d_pkg, visited, in_stack, dependencies);
