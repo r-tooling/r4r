@@ -46,9 +46,7 @@ class SymlinkResolverTest : public ::testing::Test {
         fs::create_symlink(target_dir, symlink1_dir);
 
         test_file = target_dir / "test";
-        {
-            std::ofstream f(test_file);
-        }
+        { std::ofstream f(test_file); }
 
         symlink2_file = temp_root / "symlink2";
         fs::create_symlink(test_file, symlink2_file);
@@ -70,9 +68,7 @@ class SymlinkResolverTest : public ::testing::Test {
 
 TEST_F(SymlinkResolverTest, ReturnsOriginalPathWhenNoMappingApplies) {
     fs::path outside_file = temp_root / "outside.txt";
-    {
-        std::ofstream f(outside_file);
-    }
+    { std::ofstream f(outside_file); }
     auto results = resolver.resolve_symlinks(outside_file);
 
     ASSERT_EQ(results.size(), 1u);

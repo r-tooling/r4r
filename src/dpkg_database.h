@@ -30,10 +30,10 @@ struct std::hash<DebPackage> {
 };
 
 using DebPackages =
-std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
+    std::unordered_map<std::string, std::unique_ptr<DebPackage>>;
 
 class DpkgDatabase {
-public:
+  public:
     static DpkgDatabase system_database();
     static DpkgDatabase from_path(fs::path const& path);
 
@@ -45,10 +45,9 @@ public:
     DebPackage const* lookup_by_path(fs::path const& path) const;
     DebPackage const* lookup_by_name(std::string const& name) const;
 
-private:
+  private:
     DpkgDatabase(DebPackages packages, FileSystemTrie<DebPackage const*> files)
-        : packages_{std::move(packages)}, files_{std::move(files)} {
-    }
+        : packages_{std::move(packages)}, files_{std::move(files)} {}
 
     static DebPackages load_installed_packages();
     static void
@@ -91,7 +90,7 @@ inline DebPackages parse_dpkg_list_output(std::istream& dpkg_output) {
 }
 
 inline DebPackages DpkgDatabase::load_installed_packages() {
-    const auto out = Command("dpkg").arg("-l").output();
+    auto const out = Command("dpkg").arg("-l").output();
     out.check_success("Unable to execute 'dpkg -l'");
 
     std::istringstream stream{out.stdout_data};

@@ -38,11 +38,11 @@ inline UserInfo UserInfo::get_current_user_info() {
     }
 
     std::vector<char> pw_buffer(static_cast<size_t>(pw_buf_size));
-    struct passwd pwd{};
+    struct passwd pwd {};
     struct passwd* pwd_result = nullptr;
 
-    int pw_status = getpwuid_r(uid, &pwd, pw_buffer.data(),
-                               pw_buffer.size(), &pwd_result);
+    int pw_status =
+        getpwuid_r(uid, &pwd, pw_buffer.data(), pw_buffer.size(), &pwd_result);
     if (pw_status != 0 || pwd_result == nullptr) {
         throw make_system_error(
             errno, STR("Failed to get passwd struct for UID " << uid));
@@ -53,11 +53,11 @@ inline UserInfo UserInfo::get_current_user_info() {
     std::string shell = pwd.pw_shell;
 
     std::vector<char> gr_buffer(static_cast<size_t>(gr_buf_size));
-    struct group grp{};
+    struct group grp {};
     struct group* grp_result = nullptr;
 
-    int gr_status = getgrgid_r(gid, &grp, gr_buffer.data(),
-                               gr_buffer.size(), &grp_result);
+    int gr_status =
+        getgrgid_r(gid, &grp, gr_buffer.data(), gr_buffer.size(), &grp_result);
     if (gr_status != 0 || grp_result == nullptr) {
         throw make_system_error(
             errno, STR("Failed to get group struct for GID " << gid));
@@ -69,34 +69,31 @@ inline UserInfo UserInfo::get_current_user_info() {
     if (getgrouplist(username.c_str(), gid, nullptr, &n_groups) == -1 &&
         n_groups == 0) {
         throw make_system_error(
-            errno,
-            "Failed to determine group list size for user " + username);
+            errno, "Failed to determine group list size for user " + username);
     }
 
     std::vector<gid_t> group_ids(n_groups);
     if (getgrouplist(username.c_str(), gid, group_ids.data(), &n_groups) ==
         -1) {
-        throw make_system_error(
-            errno, "Failed to get group list for user " + username);
+        throw make_system_error(errno, "Failed to get group list for user " +
+                                           username);
     }
 
     std::vector<GroupInfo> groups;
     groups.reserve(static_cast<size_t>(n_groups));
 
     for (gid_t group_id : group_ids) {
-        struct group temp_grp{};
+        struct group temp_grp {};
         struct group* temp_result = nullptr;
 
         gr_status = getgrgid_r(group_id, &temp_grp, gr_buffer.data(),
                                gr_buffer.size(), &temp_result);
         if (gr_status == 0 && temp_result != nullptr) {
-            std::string grp_name =
-                (temp_grp.gr_name ? temp_grp.gr_name : "");
+            std::string grp_name = (temp_grp.gr_name ? temp_grp.gr_name : "");
             groups.push_back({.gid = group_id, .name = grp_name});
         } else {
             throw make_system_error(
-                errno,
-                STR("Failed to get group info for GID: " << group_id));
+                errno, STR("Failed to get group info for GID: " << group_id));
         }
     }
 
@@ -123,10 +120,10 @@ static std::optional<std::string> get_system_timezone() {
 
     // 3. timedatectl
     auto out = Command("timedatectl")
-               .arg("show")
-               .arg("--property=Timezone")
-               .arg("--value")
-               .output();
+                   .arg("show")
+                   .arg("--property=Timezone")
+                   .arg("--value")
+                   .output();
 
     if (out.exit_code == 0) {
         return out.stdout_data;

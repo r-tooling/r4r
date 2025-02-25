@@ -42,9 +42,8 @@ TEST_F(LoggerTest, FatalAborts) {
 
 TEST_F(LoggerTest, CheckMacro) {
     Logger::get().set_sink(std::make_unique<ConsoleSink>());
-    ASSERT_DEATH(
-        { CHECK(2 + 2 == 5) << "Math broken"; },
-        "Check failed: 2 \\+ 2 == 5 Math broken");
+    ASSERT_DEATH({ CHECK(2 + 2 == 5) << "Math broken"; },
+                 "Check failed: 2 \\+ 2 == 5 Math broken");
 }
 
 TEST_F(LoggerTest, EnableUpToLevel) {

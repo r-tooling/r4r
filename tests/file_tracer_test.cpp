@@ -13,7 +13,8 @@ TEST(FileTracerTest, OpenSyscall) {
     SyscallMonitor monitor(
         [&test_file]() {
             // we need to use syscall instead of open which uses openat instead
-            auto fd = syscall(SYS_open, test_file->c_str(), O_RDONLY, 0); // NOLINT(*-pro-type-vararg)
+            auto fd = syscall(SYS_open, test_file->c_str(), O_RDONLY,
+                              0); // NOLINT(*-pro-type-vararg)
             if (fd == -1) {
                 return 1;
             }
@@ -41,7 +42,8 @@ TEST(FileTracerTest, OpenAtSyscall) {
 
     SyscallMonitor monitor(
         [&test_file]() {
-            int fd = openat(AT_FDCWD, test_file->c_str(), O_RDONLY); // NOLINT(*-pro-type-vararg)
+            int fd = openat(AT_FDCWD, test_file->c_str(),
+                            O_RDONLY); // NOLINT(*-pro-type-vararg)
             if (fd == -1) {
                 return 1;
             }
@@ -62,7 +64,7 @@ TEST(FileTracerTest, OpenAtSyscall) {
 }
 
 TEST(FileTracerTest, ExecveSyscall) {
-    const char* executable = "/bin/true";
+    char const* executable = "/bin/true";
 
     FileTracer tracer{};
 
@@ -70,7 +72,8 @@ TEST(FileTracerTest, ExecveSyscall) {
         [&executable]() {
             pid_t pid = fork();
             if (pid == 0) {
-                execl(executable, executable, nullptr); // NOLINT(*-pro-type-vararg)
+                execl(executable, executable,
+                      nullptr); // NOLINT(*-pro-type-vararg)
                 _exit(127);
             }
             int status{};
@@ -104,13 +107,15 @@ TEST(FileTracerTest, IgnoreFilesExtended) {
 
     SyscallMonitor monitor(
         [&test_file1, &test_file2]() {
-            int fd1 = open(test_file1->c_str(), O_RDONLY); // NOLINT(*-pro-type-vararg)
+            int fd1 = open(test_file1->c_str(),
+                           O_RDONLY); // NOLINT(*-pro-type-vararg)
             if (fd1 == -1) {
                 return 1;
             }
             close(fd1);
 
-            int fd2 = open(test_file2->c_str(), O_RDONLY); // NOLINT(*-pro-type-vararg)
+            int fd2 = open(test_file2->c_str(),
+                           O_RDONLY); // NOLINT(*-pro-type-vararg)
             if (fd2 == -1) {
                 return 1;
             }

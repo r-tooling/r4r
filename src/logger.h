@@ -66,7 +66,7 @@ class LogSink {
   public:
     virtual ~LogSink() = default;
     virtual void sink(LogEvent const& event) = 0;
-    virtual void sync() = 0 ;
+    virtual void sync() = 0;
 };
 
 class ConsoleSink : public LogSink {

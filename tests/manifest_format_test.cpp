@@ -7,23 +7,23 @@ TEST(ManifestFormatTest, ValidAndInvalidSectionNames) {
     EXPECT_NO_THROW({
         ManifestFormat mf;
         mf.add_section({"Section1", "content"});
-        });
+    });
     EXPECT_NO_THROW({
         ManifestFormat mf;
         mf.add_section({"_section", "content"});
-        });
+    });
 
     EXPECT_THROW(
         {
-        ManifestFormat mf;
-        mf.add_section({"1Section", "content"});
+            ManifestFormat mf;
+            mf.add_section({"1Section", "content"});
         },
         std::invalid_argument);
 
     EXPECT_THROW(
         {
-        ManifestFormat mf;
-        mf.add_section({"", "content"});
+            ManifestFormat mf;
+            mf.add_section({"", "content"});
         },
         std::invalid_argument);
 }
@@ -77,20 +77,22 @@ TEST(ManifestFormatTest, WriteOutput) {
     std::string output = oss.str();
 
     std::string expected = "# Manifest preamble\n\n"
-        "Section1:\n"
-        "  Line1\n"
-        "  Line2\n"
-        "\n"
-        "Section2:\n"
-        "  Content of Section2\n"
-        "\n";
+                           "Section1:\n"
+                           "  Line1\n"
+                           "  Line2\n"
+                           "\n"
+                           "Section2:\n"
+                           "  Content of Section2\n"
+                           "\n";
     EXPECT_EQ(output, expected);
 }
 
 TEST(ManifestFormatTest, FromStreamContentBeforeHeader) {
     std::istringstream input("Content before header");
-    EXPECT_THROW({
-                 ManifestFormat format;
-                 input >> format;
-                 }, std::runtime_error);
+    EXPECT_THROW(
+        {
+            ManifestFormat format;
+            input >> format;
+        },
+        std::runtime_error);
 }
