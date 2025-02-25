@@ -12,14 +12,13 @@
 #include <vector>
 
 class ArgumentParserException : public std::runtime_error {
-public:
+  public:
     explicit ArgumentParserException(std::string const& message)
-        : std::runtime_error(message) {
-    }
+        : std::runtime_error(message) {}
 };
 
 class ArgumentParser {
-public:
+  public:
     using Callback = std::function<void(std::string const&)>;
 
     struct Option {
@@ -33,8 +32,7 @@ public:
         std::optional<std::string> value;
 
         Option(std::string sn, std::string ln)
-            : short_name(std::move(sn)), long_name(std::move(ln)) {
-        }
+            : short_name(std::move(sn)), long_name(std::move(ln)) {}
 
         Option& with_help(std::string text) {
             help = std::move(text);
@@ -70,8 +68,7 @@ public:
         Callback callback;
         std::vector<std::string> values;
 
-        explicit Positional(std::string name) : name(std::move(name)) {
-        }
+        explicit Positional(std::string name) : name(std::move(name)) {}
 
         Positional& with_help(std::string text) {
             help = std::move(text);
@@ -98,11 +95,10 @@ public:
         std::vector<Option> const& options_;
         std::vector<Positional> const& positionals_;
 
-    public:
+      public:
         Result(std::vector<Option> const& opts,
                std::vector<Positional> const& pos)
-            : options_(opts), positionals_(pos) {
-        }
+            : options_(opts), positionals_(pos) {}
 
         [[nodiscard]] bool contains(std::string_view name) const;
 
@@ -116,8 +112,7 @@ public:
     explicit ArgumentParser(std::string program_name,
                             std::string description = "")
         : program_name_(std::move(program_name)),
-          description_(std::move(description)) {
-    }
+          description_(std::move(description)) {}
 
     Option& add_option(char short_name);
     Option& add_option(std::string const& long_name);
@@ -128,7 +123,7 @@ public:
 
     [[nodiscard]] std::string help() const;
 
-private:
+  private:
     static std::string format_option_name(Option const& opt);
 
     void parse_short_options(std::string const& arg, size_t& current_arg);
@@ -156,48 +151,44 @@ inline bool ArgumentParser::Result::contains(std::string_view name) const {
         });
 }
 
-inline std::optional<std::string> ArgumentParser::Result::get(
-    std::string_view name) const {
-    auto const it = std::find_if(
-        options_.begin(), options_.end(), [&](Option const& opt) {
+inline std::optional<std::string>
+ArgumentParser::Result::get(std::string_view name) const {
+    auto const it =
+        std::find_if(options_.begin(), options_.end(), [&](Option const& opt) {
             return opt.short_name == name || opt.long_name == name;
         });
-    return it != options_.end()
-               ? it->value
-               : std::optional<std::string>{};
+    return it != options_.end() ? it->value : std::optional<std::string>{};
 }
 
-inline std::vector<std::string> ArgumentParser::Result::get_positional(
-    std::string_view name) const {
-    auto const it = std::find_if(
-        positionals_.begin(), positionals_.end(),
-        [&](Positional const& p) { return p.name == name; });
-    return it != positionals_.end()
-               ? it->values
-               : std::vector<std::string>{};
+inline std::vector<std::string>
+ArgumentParser::Result::get_positional(std::string_view name) const {
+    auto const it =
+        std::find_if(positionals_.begin(), positionals_.end(),
+                     [&](Positional const& p) { return p.name == name; });
+    return it != positionals_.end() ? it->values : std::vector<std::string>{};
 }
 
 inline ArgumentParser::Option& ArgumentParser::add_option(char short_name) {
     return options_.emplace_back(std::string(1, short_name), "");
 }
 
-inline ArgumentParser::Option& ArgumentParser::add_option(
-    std::string const& long_name) {
+inline ArgumentParser::Option&
+ArgumentParser::add_option(std::string const& long_name) {
     return options_.emplace_back("", long_name);
 }
 
-inline ArgumentParser::Option& ArgumentParser::add_option(char short_name,
-    std::string const& long_name) {
+inline ArgumentParser::Option&
+ArgumentParser::add_option(char short_name, std::string const& long_name) {
     return options_.emplace_back(std::string(1, short_name), long_name);
 }
 
-inline ArgumentParser::Positional& ArgumentParser::add_positional(
-    std::string name) {
+inline ArgumentParser::Positional&
+ArgumentParser::add_positional(std::string name) {
     return positionals_.emplace_back(std::move(name));
 }
 
-inline ArgumentParser::Result ArgumentParser::parse(
-    std::span<char const*> argv) {
+inline ArgumentParser::Result
+ArgumentParser::parse(std::span<char const*> argv) {
     args_ = {argv.begin() + 1, argv.end()};
     size_t current_arg = 0;
     size_t positional_index = 0;
@@ -257,8 +248,7 @@ inline std::string ArgumentParser::help() const {
         if (opt.has_arg) {
             opt_line_length += 1 + opt.has_arg->size(); // ' XX'
         }
-        opt_line_max_length =
-            std::max(opt_line_max_length, opt_line_length);
+        opt_line_max_length = std::max(opt_line_max_length, opt_line_length);
     }
 
     if (!options_.empty()) {
@@ -297,16 +287,14 @@ inline std::string ArgumentParser::help() const {
 
     opt_line_max_length = 0;
     for (auto const& opt : positionals_) {
-        opt_line_max_length =
-            std::max(opt_line_max_length, opt.name.size());
+        opt_line_max_length = std::max(opt_line_max_length, opt.name.size());
     }
 
     if (!positionals_.empty()) {
         oss << "\nPositional arguments:\n";
         for (auto const& pos : positionals_) {
             oss << "  " << pos.name
-                << std::string(4 + opt_line_max_length - pos.name.size(),
-                               ' ')
+                << std::string(4 + opt_line_max_length - pos.name.size(), ' ')
                 << pos.help << '\n';
         }
     }
@@ -330,8 +318,8 @@ inline void ArgumentParser::parse_short_options(std::string const& arg,
                 value = args_[++current_arg];
             }
             if (value.empty()) {
-                throw ArgumentParserException(
-                    "Option requires argument: -" + opt.short_name);
+                throw ArgumentParserException("Option requires argument: -" +
+                                              opt.short_name);
             }
             opt.value = value;
             if (opt.callback) {
@@ -387,20 +375,18 @@ inline void ArgumentParser::parse_positional(std::string const& arg,
             positional_index++;
         }
     } else {
-        throw ArgumentParserException("Unexpected positional argument: " +
-                                      arg);
+        throw ArgumentParserException("Unexpected positional argument: " + arg);
     }
 }
 
-inline ArgumentParser::Option& ArgumentParser::find_option(
-    std::string_view name) {
-    auto it = std::find_if(
-        options_.begin(), options_.end(), [&](Option const& opt) {
+inline ArgumentParser::Option&
+ArgumentParser::find_option(std::string_view name) {
+    auto it =
+        std::find_if(options_.begin(), options_.end(), [&](Option const& opt) {
             return opt.short_name == name || opt.long_name == name;
         });
     if (it == options_.end()) {
-        throw ArgumentParserException("Unknown option: " +
-                                      std::string(name));
+        throw ArgumentParserException("Unknown option: " + std::string(name));
     }
     return *it;
 }

@@ -6,9 +6,8 @@
 #include <string>
 
 class ManifestSection {
-public:
-    explicit ManifestSection(std::string name) : name_{std::move(name)} {
-    }
+  public:
+    explicit ManifestSection(std::string name) : name_{std::move(name)} {}
 
     virtual ~ManifestSection() = default;
 
@@ -16,14 +15,13 @@ public:
     virtual bool save(std::ostream& stream, Manifest const& manifest) = 0;
     [[nodiscard]] std::string const& name() const { return name_; }
 
-private:
+  private:
     std::string name_;
 };
 
 class CopyFilesManifestSection : public ManifestSection {
-public:
-    CopyFilesManifestSection() : ManifestSection("copy") {
-    }
+  public:
+    CopyFilesManifestSection() : ManifestSection("copy") {}
 
     void load(std::istream& stream, Manifest& manifest) override;
     bool save(std::ostream& stream, Manifest const& manifest) override;
@@ -70,10 +68,10 @@ inline bool CopyFilesManifestSection::save(std::ostream& stream,
 
     with_prefixed_ostream(stream, ManifestFormat::prefixed_comment(), [&] {
         stream << "The following " << manifest.copy_files.size()
-            << " files has not been resolved.\n"
-            << "# - ignore file.\n"
-            << "C - mark file to be copied into the image.\n"
-            << "R - mark file as a result file.\n";
+               << " files has not been resolved.\n"
+               << "# - ignore file.\n"
+               << "C - mark file to be copied into the image.\n"
+               << "R - mark file as a result file.\n";
     });
 
     std::vector<std::pair<fs::path, FileStatus>> sorted_files;
@@ -82,10 +80,9 @@ inline bool CopyFilesManifestSection::save(std::ostream& stream,
         sorted_files.emplace_back(f);
     }
 
-    std::sort(sorted_files.begin(), sorted_files.end(),
-              [](auto const& lhs, auto const& rhs) {
-                  return lhs.first < rhs.first;
-              });
+    std::sort(
+        sorted_files.begin(), sorted_files.end(),
+        [](auto const& lhs, auto const& rhs) { return lhs.first < rhs.first; });
 
     for (auto const& [path, status] : sorted_files) {
         switch (status) {
@@ -99,9 +96,8 @@ inline bool CopyFilesManifestSection::save(std::ostream& stream,
             // nothing we can do
             break;
         default:
-            stream << ManifestFormat::comment() << ' ' << path.string() <<
-                ' '
-                << ManifestFormat::comment() << ' ' << status << '\n';
+            stream << ManifestFormat::comment() << ' ' << path.string() << ' '
+                   << ManifestFormat::comment() << ' ' << status << '\n';
         }
     }
 

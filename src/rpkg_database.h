@@ -222,9 +222,12 @@ inline std::unordered_set<std::string> RpkgDatabase::get_system_dependencies(
         // TODO: parameterize distribution and release
         std::string url =
             STR("https://packagemanager.posit.co"
-                << "/__api__/repos/" << "cran"
-                << "/sysreqs?all=false&pkgname=" << p->name
-                << "&distribution=" << "ubuntu" << "&release=" << "22.04");
+                << "/__api__/repos/"
+                << "cran"
+                << "/sysreqs?all=false&pkgname=" << p->name << "&distribution="
+                << "ubuntu"
+                << "&release="
+                << "22.04");
         curl.add(p, url);
     }
 
@@ -440,7 +443,12 @@ RpkgDatabase::dfs_visit(RPackage const* pkg,
 
     for (auto const& d : pkg->dependencies) {
         auto const* d_pkg = find(d);
-        CHECK(d_pkg);
+        if (!d_pkg) {
+            LOG(WARN) << "Failed to find dependency: " << d << " for package "
+                      << pkg->name;
+            continue;
+        }
+        // CHECK(d_pkg);
 
         if (!visited.contains(d_pkg)) {
             dfs_visit(d_pkg, visited, in_stack, dependencies);

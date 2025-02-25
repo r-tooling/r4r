@@ -10,7 +10,7 @@
 #include <vector>
 
 class ManifestFormat {
-public:
+  public:
     static constexpr char comment() noexcept { return '#'; }
     static constexpr char const* prefixed_comment() noexcept { return "# "; }
 
@@ -38,7 +38,7 @@ public:
 
     void write(std::ostream& out) const;
 
-private:
+  private:
     std::string preamble_;
     std::vector<Section> sections_;
 
@@ -96,22 +96,20 @@ private:
     static bool is_section_header(std::string_view line);
 };
 
-inline ManifestFormat::Section* ManifestFormat::get_section(
-    std::string const& name) {
-    auto it =
-        std::find_if(sections_.begin(), sections_.end(),
-                     [&](Section const& x) { return x.name == name; });
+inline ManifestFormat::Section*
+ManifestFormat::get_section(std::string const& name) {
+    auto it = std::find_if(sections_.begin(), sections_.end(),
+                           [&](Section const& x) { return x.name == name; });
     if (it == sections_.end()) {
         return nullptr;
     }
     return &*it;
 }
 
-inline ManifestFormat::Section& ManifestFormat::add_section(
-    Section const& section) {
+inline ManifestFormat::Section&
+ManifestFormat::add_section(Section const& section) {
     if (!is_valid_section_name(section.name)) {
-        throw std::invalid_argument("Invalid section name: " +
-                                    section.name);
+        throw std::invalid_argument("Invalid section name: " + section.name);
     }
 
     if (get_section(section.name) != nullptr) {

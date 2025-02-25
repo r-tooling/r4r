@@ -14,7 +14,7 @@
 #include <vector>
 
 class Pipe {
-public:
+  public:
     Pipe();
 
     Pipe(Pipe const&) = delete;
@@ -32,7 +32,7 @@ public:
     void close_write();
     void close();
 
-private:
+  private:
     int read_fd{-1};
     int write_fd{-1};
 };
@@ -46,8 +46,8 @@ inline Pipe::Pipe() {
     write_fd = fds[1];
 }
 
-inline Pipe::Pipe(Pipe&& other) noexcept: read_fd(other.read_fd),
-                                          write_fd(other.write_fd) {
+inline Pipe::Pipe(Pipe&& other) noexcept
+    : read_fd(other.read_fd), write_fd(other.write_fd) {
     other.read_fd = -1;
     other.write_fd = -1;
 }
@@ -83,7 +83,7 @@ inline void Pipe::close() {
 }
 
 class Output {
-public:
+  public:
     std::string stdout_data;
     std::string stderr_data;
     int exit_code{0};
@@ -94,17 +94,17 @@ public:
 inline void Output::check_success(std::string const& message) const {
     if (exit_code != 0) {
         throw std::runtime_error(STR(message << " (exit code: " << exit_code
-            << ")\n""stderr:\n"
-            << stderr_data));
+                                             << ")\n"
+                                                "stderr:\n"
+                                             << stderr_data));
     }
 }
 
 class Child {
-public:
+  public:
     Child(pid_t pid, Pipe stdout_pipe, Pipe stderr_pipe)
         : pid_(pid), stdout_(std::move(stdout_pipe)),
-          stderr_(std::move(stderr_pipe)) {
-    }
+          stderr_(std::move(stderr_pipe)) {}
 
     [[nodiscard]] int wait() const;
     [[nodiscard]] std::optional<int> try_wait() const;
@@ -119,7 +119,7 @@ public:
 
     [[nodiscard]] pid_t pid() const { return pid_; }
 
-private:
+  private:
     static int status_to_exit_code(int status);
 
     static std::string read_all_from_fd(int fd);
@@ -131,12 +131,12 @@ private:
 
 enum class Stdio {
     Inherit, // inherit from parent
-    Pipe, // redirect to a pipe (to capture or read/write)
+    Pipe,    // redirect to a pipe (to capture or read/write)
     Merge // merge this stream with the other (stderr->stdout or stdout->stderr)
 };
 
 class Command {
-public:
+  public:
     explicit Command(std::string const& program);
 
     Command& arg(std::string const& arg);
@@ -149,7 +149,7 @@ public:
     Child spawn();
     Output output(bool redirect_stderr_to_stdout = false);
 
-private:
+  private:
     std::vector<std::string> args_;
     std::map<std::string, std::string> envs_;
     std::optional<std::string> working_dir_;
@@ -228,8 +228,8 @@ inline std::string Child::read_all_from_fd(int fd) {
                 continue;
             }
 
-            throw make_system_error(
-                errno, STR("Failed to read from pipe: " << fd));
+            throw make_system_error(errno,
+                                    STR("Failed to read from pipe: " << fd));
         }
         if (bytes_read == 0) {
             // EOF
