@@ -1,3 +1,4 @@
+#include "../tests/common.h"
 #include "file_tracer.h"
 #include "syscall_monitor.h"
 #include "util_fs.h"
@@ -5,6 +6,8 @@
 #include <gtest/gtest.h>
 
 TEST(FileTracerTest, OpenSyscall) {
+    SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
+
     TempFile test_file{"r4r-test", ""};
     std::ofstream(*test_file) << "test content";
 
@@ -35,6 +38,8 @@ TEST(FileTracerTest, OpenSyscall) {
 }
 
 TEST(FileTracerTest, OpenAtSyscall) {
+    SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
+
     TempFile test_file{"r4r-test-openat", ""};
     std::ofstream(*test_file) << "test content";
 
@@ -130,7 +135,7 @@ TEST(FileTracerTest, IgnoreFilesExtended) {
     ASSERT_EQ(result.detail.value(), 0);
 
     auto const& files = tracer.files();
-    ASSERT_EQ(files.size(), 1);
+    ASSERT_FALSE(files.contains(*test_file1));
     ASSERT_TRUE(files.contains(*test_file2));
     EXPECT_TRUE(files.at(*test_file2).existed_before);
     EXPECT_TRUE(files.at(*test_file2).size.has_value());
