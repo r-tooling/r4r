@@ -66,6 +66,7 @@ class LogSink {
   public:
     virtual ~LogSink() = default;
     virtual void sink(LogEvent const& event) = 0;
+    virtual void sync() = 0;
 };
 
 class ConsoleSink : public LogSink {
@@ -77,6 +78,11 @@ class ConsoleSink : public LogSink {
         auto msg = STR("[" << std::setw(5) << std::right << event.level << "] "
                            << " " << event.message << "\n");
         os << msg;
+    }
+
+    void sync() override {
+        std::cout << std::flush;
+        std::cerr << std::flush;
     }
 };
 
@@ -109,6 +115,8 @@ class StoreSink : public LogSink {
         std::lock_guard lock(mutex_);
         return messages_;
     }
+
+    void sync() override {}
 
   private:
     std::vector<StoredEvent> messages_;
@@ -180,6 +188,7 @@ inline void Logger::log(LogEvent const& event) {
     }
 
     if (event.level == LogLevel::Fatal) {
+        sink_->sync();
         std::abort();
     }
 }

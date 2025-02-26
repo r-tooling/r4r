@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <set>
 #include <string>
@@ -19,18 +20,16 @@ class FileSystemTrie {
 
         explicit Node(T const* value) : value(value){};
         Node(Node const&) = delete;
-        Node(Node&&) noexcept = default;
+        Node(Node&&) noexcept = delete;
         Node& operator=(Node const&) = delete;
-        Node& operator=(Node&&) noexcept = default;
+        Node& operator=(Node&&) noexcept = delete;
     };
 
     struct NodeView {
         fs::path path;
         T const* value;
 
-        bool operator==(NodeView const& other) const {
-            return std::tie(path, value) == std::tie(other.path, other.value);
-        }
+        bool operator==(NodeView const& other) const = default;
     };
 
     class ConstIterator {
@@ -61,37 +60,25 @@ class FileSystemTrie {
             return *this;
         }
 
-        bool operator==(ConstIterator const& other) const {
-            return std::tie(stack_, current_) ==
-                   std::tie(other.stack_, other.current_);
-        }
-
-        bool operator!=(ConstIterator const& other) const {
-            return !(*this == other);
-        }
+        bool operator==(ConstIterator const& other) const = default;
     };
 
     void insert(fs::path const& path, T const* value);
 
     std::set<T> unique_values_;
-    std::unique_ptr<Node> root_;
+    std::unique_ptr<Node> root_{std::make_unique<Node>(nullptr)};
 
   public:
-    FileSystemTrie() : root_{std::make_unique<Node>(nullptr)} {}
+    FileSystemTrie() = default;
 
-    FileSystemTrie(FileSystemTrie const& other) : FileSystemTrie() {
-        // false positive: cannot be in the initializer list:
-        // mem-initializer for ‘FileSystemTrie<T>::unique_values_’ follows
-        // constructor delegation
-        // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-        unique_values_ = other.unique_values_;
-
+    FileSystemTrie(FileSystemTrie const& other)
+        : unique_values_{other.unique_values_} {
         for (auto const& nodeInfo : other) {
             this->insert(nodeInfo.path, nodeInfo.value);
         }
     };
 
-    FileSystemTrie(FileSystemTrie&&) noexcept = default;
+    FileSystemTrie(FileSystemTrie&& other) noexcept = default;
 
     FileSystemTrie& operator=(FileSystemTrie const&) = delete;
     FileSystemTrie& operator=(FileSystemTrie&&) noexcept = default;

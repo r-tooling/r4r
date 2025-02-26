@@ -7,6 +7,24 @@ TEST(FileSystemTrieTest, DefaultInitialization) {
     EXPECT_TRUE(trie.is_empty());
 }
 
+TEST(FileSystemTrieTest, EmptyTrie) {
+    FileSystemTrie<std::string> trie;
+    EXPECT_EQ(trie.find("/a"), nullptr);
+    EXPECT_EQ(trie.find_last_matching("/a/b"), nullptr);
+}
+
+TEST(FileSystemTrieTest, IgnoreRoot) {
+    FileSystemTrie<bool> trie;
+
+    trie.insert("/", true);
+    trie.insert("/foo", false);
+
+    EXPECT_EQ(*trie.find("/"), true);
+    EXPECT_EQ(*trie.find("/foo"), false);
+    EXPECT_EQ(*trie.find_last_matching("/bar"), true);
+    EXPECT_EQ(*trie.find_last_matching("/foo/bar"), false);
+}
+
 TEST(FileSystemTrieTest, InsertAndFind) {
     FileSystemTrie<std::string> trie;
     trie.insert("/a/b/c", "value1");
