@@ -65,7 +65,8 @@ static Options parse_cmd_args(std::span<char const*> args) {
         .with_argument("NAME")
         .with_callback([&](auto& arg) { opts.docker_base_image = arg; });
     parser.add_option("infer-base-image")
-        .with_help("Infer the base image from the R version")
+        .with_help(
+            "Infer the base image from the distribution where r4r is executed.")
         .with_callback([&](auto&) { opts.infer_base_image = true; });
     parser.add_option("result")
         .with_help("Path to a result file")
