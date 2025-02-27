@@ -60,7 +60,7 @@ struct Options {
     LogLevel log_level = LogLevel::Warning;
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
-    std::string docker_base_image{"ubuntu:22.04"};
+    std::string docker_base_image;
     std::string docker_image_tag{STR(kBinaryName << "/test")};
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
@@ -69,7 +69,6 @@ struct Options {
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
-    bool infer_base_image{false};
     // TODO: make this mutable so more files could be added from command line
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
@@ -909,7 +908,9 @@ class CaptureEnvironmentTask : public Task {
   public:
     CaptureEnvironmentTask(std::string const& base_image, bool infer_base_image)
         : Task("Capture environment"), infer_base_image_{infer_base_image},
-          base_image_{base_image} {}
+          base_image_{base_image} {
+        CHECK(!base_image.empty() || !infer_base_image);
+    }
 
     void run(TracerState& state) override {
         capture_distribution(state);
@@ -950,9 +951,9 @@ class CaptureEnvironmentTask : public Task {
             } else {
                 LOG(WARN) << "Failed to infer base image, fallback to "
                           << base_image_;
-                state.manifest.base_image = base_image_;
+                state.manifest.base_image = kBaseImage;
             }
-        } else {
+        } else { // base_image_ is not empty if it is not inferred
             state.manifest.base_image = base_image_;
         }
     }
@@ -992,6 +993,8 @@ class CaptureEnvironmentTask : public Task {
 
     bool infer_base_image_{false};
     fs::path base_image_;
+
+    static inline const fs::path kBaseImage = "ubuntu:22.04";
 };
 
 class Tracer {
@@ -1014,7 +1017,7 @@ class Tracer {
         std::vector<std::unique_ptr<Task>> tasks;
 
         tasks.push_back(std::make_unique<CaptureEnvironmentTask>(
-            options_.docker_base_image, options_.infer_base_image));
+            options_.docker_base_image, options_.docker_base_image.empty()));
 
         tasks.push_back(
             std::make_unique<FileTracingTask>(options_.ignore_file_list));
