@@ -8,6 +8,7 @@
 #include "dpkg_database.h"
 #include "file_tracer.h"
 #include "filesystem_trie.h"
+#include "install_r_package_builder.h"
 #include "logger.h"
 #include "manifest.h"
 #include "manifest_format.h"
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -535,7 +537,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
     out << "set -e\n\n";
 
     for (auto const& dir : sorted_dirs) {
-        struct stat info {};
+        struct stat info{};
         if (stat(dir.c_str(), &info) != 0) {
             LOG(WARN) << "Warning: Unable to access " << dir << '\n';
             continue;
@@ -564,52 +566,16 @@ inline void DockerFileBuilderTask::install_r_packages(
         packages.begin(), packages.end(),
         [](auto const* lhs, auto const* rhs) { return lhs->name < rhs->name; });
 
-    auto all_packages = rpkg_database.get_dependencies(manifest.r_packages);
+    auto plan = rpkg_database.get_installation_plan(manifest.r_packages);
 
-    std::ofstream script(cran_install_script_);
+    {
+        std::ofstream script_out(cran_install_script_);
 
-    // TODO: parameterize the max cores
-    script << "options(Ncpus=min(parallel::detectCores(), 32))\n\n"
-           << "tmp_dir <- tempdir()\n"
-           << "install.packages('remotes', lib = c(tmp_dir))\n"
-           << "require('remotes', lib.loc = c(tmp_dir))\n"
-           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
-           << "\n\n"
-           << "# install wrapper that turns warnings into errors\n"
-           // clang-format off
-        << "CHK <- function(thunk) {\n"
-        << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
-        << "    if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }\n"
-        << "  })\n"
-        << "}\n\n"
-           // clang-format on
-
-           << "# installing packages\n\n";
-
-    std::unordered_set<std::string> seen;
-    for (auto const* pkg : all_packages) {
-        if (pkg->is_base) {
-            continue;
-        }
-
-        if (!seen.insert(pkg->name).second) {
-            continue;
-        }
-
-        std::visit(
-            overloaded{
-                [&](RPackage::GitHub const& gh) {
-                    script << "CHK(install_github('" << gh.org << "/" << gh.name
-                           << "', ref = '" << gh.ref
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
-                },
-                [&](RPackage::CRAN const&) {
-                    script << "CHK(install_version('" << pkg->name << "', '"
-                           << pkg->version
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
-                },
-            },
-            pkg->repository);
+        InstallRPackageScriptBuilder script;
+        script.set_plan(plan)
+            .set_output(script_out)
+            .set_max_parallel(4)
+            .build();
     }
 
     builder.copy({cran_install_script_}, "/");
@@ -804,38 +770,37 @@ class MakefileBuilderTask : public Task {
             }
         }
 
-        makefile
-            << "IMAGE_TAG = " << docker_image_tag_ << "\n"
-            << "CONTAINER_NAME = " << docker_container_name_
-            << "\n"
-            // TODO: add to settings
-            << "TARGET_DIR = result"
-            << "\n\n"
+        makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
+                 << "CONTAINER_NAME = " << docker_container_name_
+                 << "\n"
+                 // TODO: add to settings
+                 << "TARGET_DIR = result"
+                 << "\n\n"
 
-            << ".PHONY: all build run copy clean\n\n"
+                 << ".PHONY: all build run copy clean\n\n"
 
-            << "all: clean copy\n\n"
+                 << "all: clean copy\n\n"
 
-            // clang-format off
+                 // clang-format off
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
-            // clang-format on
+                 // clang-format on
 
-            // clang-format off
+                 // clang-format off
                  << "run: build\n"
                  << "\t@echo 'Running container $(CONTAINER_NAME)'\n"
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
                  << " | tee docker-run.log"
                  << "\n\n"
-            // clang-format on
+                 // clang-format on
 
-            << "copy: run\n"
-            // add a new line in case the docker run did
-            // not finish with one
-            << "\t@echo\n";
+                 << "copy: run\n"
+                 // add a new line in case the docker run did
+                 // not finish with one
+                 << "\t@echo\n";
 
         if (copy_files.empty()) {
             makefile << "\t@echo 'No result files'\n";

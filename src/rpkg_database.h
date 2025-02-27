@@ -130,18 +130,23 @@ class RpkgDatabase {
     }
 
     explicit RpkgDatabase(RPackages packages)
-        : packages_{std::move(packages)}, files_{build_files_db(packages_)} {}
+        : packages_{std::move(packages)}, files_{build_files_db(packages_)} {
+        LOG(TRACE) << "Initializaed R package database with " << size()
+                   << " packages (" << files_.size() << " files)";
+    }
 
     RPackage const* lookup_by_path(fs::path const& path) const;
 
     static std::unordered_set<std::string>
     get_system_dependencies(std::unordered_set<RPackage const*> const& pkgs);
 
-    // Return all dependencies (recursively) of the given set of packages
-    // in a topologically sorted order. The packages themselves are included.
     template <typename Collection>
     std::vector<RPackage const*>
     get_dependencies(Collection const& pkg_set) const;
+
+    template <typename Collection>
+    std::vector<std::vector<RPackage const*>>
+    get_installation_plan(Collection const& pkg_set) const;
 
     size_t size() const { return packages_.size(); }
 
@@ -163,10 +168,11 @@ class RpkgDatabase {
     static void parse_dependency_field(std::string const& field,
                                        std::set<std::string>& target);
 
-    void dfs_visit(RPackage const* pkg,
-                   std::unordered_set<RPackage const*>& visited,
-                   std::unordered_set<RPackage const*>& in_stack,
-                   std::vector<RPackage const*>& dependencies) const;
+    void
+    dfs_visit(RPackage const* pkg,
+              std::unordered_set<RPackage const*>& in_stack,
+              std::unordered_map<RPackage const*, size_t>& dependency_levels,
+              size_t& max_level) const;
 
     RPackages packages_;
     FileSystemTrie<RPackage const*> files_;
@@ -196,6 +202,7 @@ inline RpkgDatabase RpkgDatabase::from_R(fs::path const& R_bin) {
                                      ),
                                      sep="\U00A0",
                                      quote=FALSE,
+                                     col.names=FALSE,
                                      row.names=FALSE))"")
                    // clang-format on
                    .output();
@@ -270,31 +277,43 @@ inline std::unordered_set<std::string> RpkgDatabase::get_system_dependencies(
 template <typename Collection>
 std::vector<RPackage const*>
 RpkgDatabase::get_dependencies(Collection const& pkg_set) const {
+    auto plan = get_installation_plan(pkg_set);
+    std::vector<RPackage const*> deps;
+    for (auto const& step : plan) {
+        deps.insert(deps.end(), step.begin(), step.end());
+    }
+    return deps;
+}
+
+template <typename Collection>
+std::vector<std::vector<RPackage const*>>
+RpkgDatabase::get_installation_plan(Collection const& pkg_set) const {
     // sort it so we have a deterministic order
     std::vector<RPackage const*> pkgs{pkg_set.begin(), pkg_set.end()};
     std::sort(pkgs.begin(), pkgs.end(),
               [](auto* a, auto* b) { return a->name < b->name; });
 
-    std::vector<RPackage const*> dependencies;
-    std::unordered_set<RPackage const*> visited;
     std::unordered_set<RPackage const*> in_stack;
+    std::unordered_map<RPackage const*, size_t> dependency_levels;
 
+    size_t max_level = 0;
     for (auto const* p : pkgs) {
-        if (!visited.contains(p)) {
-            dfs_visit(p, visited, in_stack, dependencies);
+        if (!dependency_levels.contains(p)) {
+            dfs_visit(p, in_stack, dependency_levels, max_level);
         }
     }
 
-    std::unordered_set<RPackage const*> seen;
-    std::vector<RPackage const*> result;
-    result.reserve(dependencies.size());
-    for (auto const* d : dependencies) {
-        if (!seen.contains(d)) {
-            seen.insert(d);
-            result.push_back(d);
-        }
+    std::vector<std::vector<RPackage const*>> installation_plan(max_level + 1);
+    for (auto const& [pkg, level] : dependency_levels) {
+        installation_plan[level].push_back(pkg);
     }
-    return result;
+
+    for (auto& step : installation_plan) {
+        std::sort(step.begin(), step.end(),
+                  [](auto* a, auto* b) { return a->name < b->name; });
+    }
+
+    return installation_plan;
 }
 
 inline RPackage const* RpkgDatabase::find(std::string const& name) const {
@@ -367,6 +386,18 @@ inline void RpkgDatabase::parse_r_packages(std::istream& input,
                                        is_base, needs_compilation, repo);
         packages.emplace(pkg->name, std::move(pkg));
     }
+
+    // make sure we have all the dependencies
+    for (auto& [_, pkg] : packages) {
+        std::erase_if(pkg->dependencies, [&](auto const& dep) {
+            if (!packages.contains(dep)) {
+                LOG(WARN) << "Missing dependency '" << dep << "' for package '"
+                          << pkg->name << "'";
+                return true;
+            }
+            return false;
+        });
+    }
 }
 
 inline std::optional<RPackage::GitHub>
@@ -433,33 +464,37 @@ RpkgDatabase::parse_dependency_field(std::string const& field,
     dep();
 }
 
-inline void
-RpkgDatabase::dfs_visit(RPackage const* pkg,
-                        std::unordered_set<RPackage const*>& visited,
-                        std::unordered_set<RPackage const*>& in_stack,
-                        std::vector<RPackage const*>& dependencies) const {
-    visited.insert(pkg);
+inline void RpkgDatabase::dfs_visit(
+    RPackage const* pkg, std::unordered_set<RPackage const*>& in_stack,
+    std::unordered_map<RPackage const*, size_t>& dependency_levels,
+    size_t& max_level) const {
     in_stack.insert(pkg);
 
-    for (auto const& d : pkg->dependencies) {
-        auto const* d_pkg = find(d);
-        if (!d_pkg) {
-            LOG(WARN) << "Failed to find dependency: " << d << " for package "
-                      << pkg->name;
-            continue;
-        }
-        // CHECK(d_pkg);
+    size_t level = 0;
+    for (auto const& d_name : pkg->dependencies) {
+        auto const* d_pkg = find(d_name);
+        // FIXME: it should be the responsibility of the database to ensure that
+        // it is consistent
+        CHECK(d_pkg);
 
-        if (!visited.contains(d_pkg)) {
-            dfs_visit(d_pkg, visited, in_stack, dependencies);
-        } else if (in_stack.contains(d_pkg)) {
+        if (in_stack.contains(d_pkg)) {
             throw std::runtime_error(
-                "Cycle detected in package dependencies: " + d);
+                "Cycle detected in package dependencies: " + d_name);
         }
+
+        if (!dependency_levels.contains(d_pkg)) {
+            dfs_visit(d_pkg, in_stack, dependency_levels, max_level);
+        }
+
+        auto it = dependency_levels.find(d_pkg);
+        CHECK(it != dependency_levels.end());
+
+        level = std::max(level, it->second + 1);
     }
 
     in_stack.erase(pkg);
-    dependencies.push_back(pkg);
+    dependency_levels[pkg] = level;
+    max_level = std::max(max_level, level);
 }
 
 #endif // RPKG_DATABASE_
