@@ -55,7 +55,6 @@ struct Manifest {
     std::string timezone;
     std::string distribution;
     std::string distribution_version;
-    std::string distribution_codename;
     fs::path base_image;
 
     Files copy_files;

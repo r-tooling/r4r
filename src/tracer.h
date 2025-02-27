@@ -52,7 +52,7 @@ static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
     // transferable anyway
     trie.insert("/var/cache", true);
     // We should not copy / because it is the root of the filesystem
-    trie.insert("/", true);
+    trie.insert("/", false);
     return trie;
 }();
 
@@ -415,8 +415,8 @@ class DockerFileBuilderTask : public Task {
           archive_{output_dir_ / "archive.tar"},
           permission_script_{output_dir_ / "permissions.sh"},
           cran_install_script_{output_dir_ / "install_r_packages.R"},
-          dockerfile_{output_dir_ / "Dockerfile"},
-          docker_sudo_access_{docker_sudo_access} {}
+          dockerfile_{output_dir_ / "Dockerfile"}, docker_sudo_access_{
+                                                       docker_sudo_access} {}
 
     void run(TracerState& state) override;
 
@@ -919,14 +919,16 @@ class CaptureEnvironmentTask : public Task {
 
   private:
     void capture_distribution(TracerState& state) {
-        auto distribution = Command("lsb_release").arg("-i").arg("-s").output();
-        distribution.check_success("Failed to get distribution name.");
-        auto version = Command("lsb_release").arg("-r").output();
-        version.check_success("Failed to get distribution version.");
-        auto codename = Command("lsb_release").arg("-s").arg("-c").output();
-        codename.check_success("Failed to get distribution codename.");
+        auto os_info = Command("lsb_release").arg("-irs").output();
+        os_info.check_success("Failed to get distribution name and version.");
 
-        auto distro = string_trim(distribution.stdout_data);
+        auto lines = string_split_n<2>(os_info.stdout_data, "\n");
+        if (!lines) {
+            LOG(FATAL) << "Failed to get distribution name and version.";
+        }
+
+        auto distro = string_trim(lines->at(0));
+        auto version = string_trim(lines->at(1));
 
         if (distro != "Ubuntu" && distro != "Debian") {
             LOG(FATAL) << "Unsupported distribution: " << distro;
@@ -934,9 +936,7 @@ class CaptureEnvironmentTask : public Task {
 
         state.manifest.distribution =
             (distro == "Ubuntu") ? "ubuntu" : "debian";
-        state.manifest.distribution_version = string_trim(version.stdout_data);
-        state.manifest.distribution_codename =
-            string_trim(codename.stdout_data);
+        state.manifest.distribution_version = version;
 
         if (infer_base_image_) {
             if (!state.manifest.distribution_version.empty()) {

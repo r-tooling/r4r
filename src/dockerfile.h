@@ -14,8 +14,8 @@ class DockerFile {
     DockerFile(fs::path context_dir, std::string dockerfile,
                std::vector<fs::path> copied_files)
         : context_dir_{std::move(context_dir)},
-          dockerfile_{std::move(dockerfile)},
-          copied_files_{std::move(copied_files)} {}
+          dockerfile_{std::move(dockerfile)}, copied_files_{
+                                                  std::move(copied_files)} {}
 
     [[nodiscard]] std::string const& dockerfile() const { return dockerfile_; }
 
@@ -41,8 +41,8 @@ class DockerFile {
 class DockerFileBuilder {
   public:
     explicit DockerFileBuilder(std::string base_image, fs::path context_dir)
-        : base_image_{std::move(base_image)},
-          context_dir_{std::move(context_dir)} {}
+        : base_image_{std::move(base_image)}, context_dir_{
+                                                  std::move(context_dir)} {}
 
     DockerFileBuilder& run(std::string const& command);
     DockerFileBuilder& run(std::vector<std::string> const& commands);
