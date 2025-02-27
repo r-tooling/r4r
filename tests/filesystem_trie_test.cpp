@@ -183,3 +183,23 @@ TEST(FileSystemTrieCopyConstructorTest, DeepCopy) {
     auto copy_nodes2 = std::vector(copy.begin(), copy.end());
     EXPECT_EQ(copy_nodes2, copy_nodes);
 }
+
+TEST(FileSystemTrieTest, SizeMethod) {
+    FileSystemTrie<std::string> trie;
+    EXPECT_EQ(trie.size(), 0);
+
+    trie.insert("/a", "value1");
+    EXPECT_EQ(trie.size(), 1);
+
+    trie.insert("/b", "value2");
+    EXPECT_EQ(trie.size(), 2);
+
+    trie.insert("/a/b/c", "value3");
+    EXPECT_EQ(trie.size(), 3);
+
+    trie.insert("/a/b/d", "value4");
+    EXPECT_EQ(trie.size(), 4);
+
+    trie.insert("/a/b/c", "new_value3");
+    EXPECT_EQ(trie.size(), 4);
+}

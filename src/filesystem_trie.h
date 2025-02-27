@@ -3,7 +3,6 @@
 
 #include <cassert>
 #include <filesystem>
-#include <iostream>
 #include <memory>
 #include <set>
 #include <string>
@@ -18,7 +17,7 @@ class FileSystemTrie {
         std::unordered_map<std::string, std::unique_ptr<Node>> children;
         T const* value;
 
-        explicit Node(T const* value) : value(value){};
+        explicit Node(T const* value) : value(value) {};
         Node(Node const&) = delete;
         Node(Node&&) noexcept = delete;
         Node& operator=(Node const&) = delete;
@@ -67,6 +66,7 @@ class FileSystemTrie {
 
     std::set<T> unique_values_;
     std::unique_ptr<Node> root_{std::make_unique<Node>(nullptr)};
+    size_t size_{0};
 
   public:
     FileSystemTrie() = default;
@@ -93,6 +93,8 @@ class FileSystemTrie {
     [[nodiscard]] T const* find_last_matching(fs::path const& path) const;
 
     bool is_empty() { return root_->children.empty(); }
+
+    [[nodiscard]] size_t size() { return size_; }
 };
 
 template <typename T>
@@ -126,6 +128,7 @@ FileSystemTrie<T>::ConstIterator::ConstIterator(Node const* root) {
 template <typename T>
 void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
     Node* node = root_.get();
+    bool inserted = false;
 
     for (auto const& path_part : path) {
         auto part = path_part.string();
@@ -134,9 +137,10 @@ void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
             continue;
         }
 
-        auto [it, _] =
+        auto [it, ins] =
             node->children.try_emplace(part, std::make_unique<Node>(nullptr));
         node = it->second.get();
+        inserted |= ins;
     }
 
     // FIXME: Handle the case when this is already set
@@ -144,6 +148,9 @@ void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
     // would handle it? checking if it is a directory or
     // a file? reporting an error if it is a file?
     node->value = value;
+    if (inserted) {
+        size_++;
+    }
 }
 
 template <typename T>
