@@ -1,4 +1,5 @@
 #include "process.h"
+#include "util.h"
 #include <gtest/gtest.h>
 
 TEST(CommandTest, TestOutput) {
@@ -22,8 +23,8 @@ TEST(CommandTest, TestMergeStderrToStdout) {
                    .set_stderr(Stdio::Merge)
                    .output();
 
-    EXPECT_NE(std::string::npos, out.stdout_data.find("STDOUT"));
-    EXPECT_NE(std::string::npos, out.stdout_data.find("STDERR"));
+    EXPECT_TRUE(string_contains(out.stdout_data, "STDOUT"));
+    EXPECT_TRUE(string_contains(out.stdout_data, "STDERR"));
     EXPECT_TRUE(out.stderr_data.empty());
 }
 

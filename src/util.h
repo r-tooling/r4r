@@ -64,6 +64,11 @@ inline std::vector<std::string> string_split(std::string const& str,
     return lines;
 }
 
+inline bool string_contains(std::string const& haystack,
+                            std::string const& needle) {
+    return haystack.find(needle) != std::string::npos;
+}
+
 inline std::string remove_ansi(std::string const& input) {
     // Regular expression to match ANSI escape codes.
     // This regex covers most common ANSI escape sequences:

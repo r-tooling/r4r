@@ -2,6 +2,7 @@
 #define INSTALL_R_PACKAGE_BUILDER_H
 
 #include "rpkg_database.h"
+#include <iterator>
 #include <vector>
 
 // TODO: parameterize - CRAN mirror, temp folder
@@ -47,11 +48,14 @@ class InstallRPackageScriptBuilder {
                 expanded_plan_.push_back(batch);
             } else {
                 for (size_t i = 0; i < batch.size(); i += max_parallel_) {
-                    size_t end = (i + max_parallel_ < batch.size())
-                                     ? (i + max_parallel_)
-                                     : batch.size();
-                    expanded_plan_.emplace_back(batch.begin() + i,
-                                                batch.begin() + end);
+                    auto start = batch.begin();
+                    std::advance(start, i);
+
+                    auto end = batch.begin();
+                    std::advance(end,
+                                 std::min(i + max_parallel_, batch.size()));
+
+                    expanded_plan_.emplace_back(start, end);
                 }
             }
         }
@@ -148,7 +152,6 @@ class InstallRPackageScriptBuilder {
               << "  " << kRHeader;
         *out_ << "  cat(paste0(\"# Batch " << batch_number << "/"
               << total_batches << " FAILED.\\n\"));\n"
-              << "  "
               << "  " << kRHeader;
         *out_ << "\n";
 
@@ -192,11 +195,6 @@ class InstallRPackageScriptBuilder {
                   << "  }\n"
                   << "}\n\n";
         }
-
-        *out_ << kRHeader;
-        *out_ << "cat('# Successfully installed batch " << batch_number << "/"
-              << total_batches << "\\n'));\n";
-        *out_ << kRHeader;
     }
 
     void write_footer() {
@@ -216,8 +214,8 @@ class InstallRPackageScriptBuilder {
 
     std::string out_path_;
     std::ostream* out_{};
-    std::size_t max_parallel_ = 1;
-    std::string tmp_lib_dir_ = "/tmp/r4r-lib";
+    std::size_t max_parallel_{1};
+    std::string tmp_lib_dir_{"/tmp/r4r-lib"};
 };
 
 #endif // INSTALL_R_PACKAGE_BUILDER_H
