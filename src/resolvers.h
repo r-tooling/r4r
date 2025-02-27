@@ -199,7 +199,7 @@ class IgnoreFileResolver : public Resolver {
   private:
     std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
     FileSystemTrie<ImageFileInfo> load_default_files();
-    std::string const& image_name_;
+    std::string const image_name_;
 
     fs::path const image_file_cache_;
 
