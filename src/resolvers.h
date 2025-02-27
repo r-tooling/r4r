@@ -103,6 +103,8 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
             }
         } else if (fs::equivalent(path, manifest.cwd)) {
             status = FileStatus::IgnoreCWD;
+        } else if (fs::is_regular_file(path)) {
+            status = FileStatus::IgnoreDirectory;
         } else {
             switch (check_accessibility(path)) {
             case AccessStatus::Accessible:
