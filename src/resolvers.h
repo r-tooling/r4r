@@ -212,9 +212,11 @@ inline void IgnoreFileResolver::resolve(Files& files,
 
     auto count = files.size();
 
+    // TODO: this shall be already done in FileTracer
     std::erase_if(files, [&](FileInfo const& info) {
         auto const& path = info.path;
-        if (ignore_file_list_.get().find_last_matching(path) != nullptr) {
+        if (auto const* it = ignore_file_list_.get().find_last_matching(path);
+            it && *it) {
             LOG(TRACE) << "Resolving: " << path << " to: ignored";
             return true;
         }

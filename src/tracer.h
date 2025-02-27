@@ -53,8 +53,8 @@ static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
     // this might be a bit too drastic, but cache is usually not
     // transferable anyway
     trie.insert("/var/cache", true);
-    // We should not copy / because it is the root of the filesystem
-    trie.insert("/", true);
+    // we should track the root of the filesystem
+    trie.insert("/", false);
     return trie;
 }();
 
