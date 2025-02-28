@@ -204,7 +204,8 @@ inline void IgnoreFileResolver::resolve(Files& files,
     if (ignore_file_list_) {
         std::erase_if(files, [&](FileInfo const& info) {
             auto const& path = info.path;
-            if (ignore_file_list_->find_last_matching(path) != nullptr) {
+            if (auto const* it = ignore_file_list_->find_last_matching(path);
+                it && *it) {
                 LOG(TRACE) << "Resolving: " << path
                            << " to: ignored (ignore files)";
                 return true;

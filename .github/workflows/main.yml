@@ -83,10 +83,11 @@ jobs:
         with:
           name: code-coverage-report
           path: |
-            build/coverage*
+            build-coverage/coverage*
       - name: Upload to codecov
         uses: codecov/codecov-action@v5
         with:
+          disable_search: true
           files: build-coverage/coverage.info
           token: ${{ secrets.CODECOV_TOKEN }}
 

@@ -16,12 +16,12 @@ struct FileInfo {
 
 // Use classes for each syscall with static methods and a ref to FileTracer
 class FileTracer : public SyscallListener {
-public:
+  public:
     using Files = std::unordered_map<fs::path, FileInfo>;
 
-    explicit FileTracer(FileSystemTrie<bool> const& ignore_file_list)
-        : ignore_file_list_{ignore_file_list} {
-    }
+    explicit FileTracer(
+        FileSystemTrie<bool> const* ignore_file_list = &kNoIgnoreFiles_)
+        : ignore_file_list_{ignore_file_list} {}
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override;
@@ -32,7 +32,9 @@ public:
 
     std::uint64_t syscalls_count() const { return syscalls_count_; }
 
-private:
+  private:
+    static inline FileSystemTrie<bool> const kNoIgnoreFiles_;
+
     using Warnings = std::vector<std::string>;
     using SyscallState = std::variant<std::monostate, FileInfo>;
     using PidState = std::pair<int, SyscallState>;
@@ -50,8 +52,7 @@ private:
     void generic_open_exit([[maybe_unused]] pid_t pid, SyscallRet ret_val,
                            bool is_error, SyscallState const& state);
 
-    void syscall_openat_entry(pid_t pid, SyscallArgs args,
-                              SyscallState& state);
+    void syscall_openat_entry(pid_t pid, SyscallArgs args, SyscallState& state);
 
     void syscall_openat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                              SyscallState const& state);
@@ -61,8 +62,7 @@ private:
     void syscall_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                            SyscallState const& state);
 
-    void syscall_execve_entry(pid_t pid, SyscallArgs args,
-                              SyscallState& state);
+    void syscall_execve_entry(pid_t pid, SyscallArgs args, SyscallState& state);
 
     void syscall_execve_exit(pid_t /*unused*/, SyscallRet /*unused*/,
                              bool is_error, SyscallState const& state);
@@ -84,7 +84,7 @@ private:
 #undef REG_SYSCALL_HANDLER
     };
 
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
+    FileSystemTrie<bool> const* ignore_file_list_;
     std::uint64_t syscalls_count_{0};
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
@@ -185,7 +185,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
         result /= pathname;
     }
 
-    if (bool const* it = ignore_file_list_.get().find_last_matching(result);
+    if (bool const* it = ignore_file_list_->find_last_matching(result);
         it && *it) {
         LOG(DEBUG) << "Ignoring file: " << result;
         return;
@@ -262,7 +262,7 @@ inline void FileTracer::syscall_openat_exit(pid_t pid, SyscallRet ret_val,
 inline void FileTracer::syscall_open_entry(pid_t pid, SyscallArgs args,
                                            SyscallState& state) {
     auto pathname =
-        SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+        SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
     generic_open_entry(pid, AT_FDCWD, pathname, state);
 }
 
@@ -291,8 +291,7 @@ inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
 
             register_file(info);
         } else {
-            throw std::runtime_error(
-                "execve successful, yet not path stored");
+            throw std::runtime_error("execve successful, yet not path stored");
         }
     }
 }

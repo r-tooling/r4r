@@ -4,6 +4,7 @@
 #include "common.h"
 #include <array>
 #include <cstdlib>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -66,6 +67,7 @@ class LogSink {
   public:
     virtual ~LogSink() = default;
     virtual void sink(LogEvent const& event) = 0;
+    virtual void sync() = 0;
 };
 
 class ConsoleSink : public LogSink {
@@ -77,6 +79,11 @@ class ConsoleSink : public LogSink {
         auto msg = STR("[" << std::setw(5) << std::right << event.level << "] "
                            << " " << event.message << "\n");
         os << msg;
+    }
+
+    void sync() override {
+        std::cout << std::flush;
+        std::cerr << std::flush;
     }
 };
 
@@ -100,19 +107,16 @@ class StoreSink : public LogSink {
         }
     };
 
-    void sink(LogEvent const& event) override {
-        std::lock_guard lock(mutex_);
-        messages_.emplace_back(event);
-    }
+    void sink(LogEvent const& event) override { messages_.emplace_back(event); }
 
-    std::vector<StoredEvent> get_messages() const {
-        std::lock_guard lock(mutex_);
+    [[nodiscard]] std::vector<StoredEvent> get_messages() const {
         return messages_;
     }
 
+    void sync() override {}
+
   private:
     std::vector<StoredEvent> messages_;
-    mutable std::mutex mutex_;
 };
 
 class Logger {
@@ -129,6 +133,9 @@ class Logger {
 
     std::unique_ptr<LogSink> set_sink(std::unique_ptr<LogSink> sink);
     [[nodiscard]] LogSink& get_sink() const { return *sink_; }
+    template <typename Sink>
+    [[nodiscard]] std::unique_ptr<Sink>
+    with_sink(std::unique_ptr<Sink> sink, std::function<void()> const& thunk);
 
     void log(LogEvent const& event);
 
@@ -169,6 +176,18 @@ Logger::set_sink(std::unique_ptr<LogSink> sink) {
     return sink;
 }
 
+template <typename Sink>
+std::unique_ptr<Sink> Logger::with_sink(std::unique_ptr<Sink> sink,
+                                        std::function<void()> const& thunk) {
+    auto old_sink = set_sink(std::move(sink));
+
+    thunk();
+
+    auto sink_raw = set_sink(std::move(old_sink)).release();
+    auto sink_raw_cast = dynamic_cast<Sink*>(sink_raw);
+    return std::unique_ptr<Sink>(sink_raw_cast);
+}
+
 inline void Logger::log(LogEvent const& event) {
     std::lock_guard lock(mutex_);
     if (!is_enabled(event.level)) {
@@ -180,6 +199,7 @@ inline void Logger::log(LogEvent const& event) {
     }
 
     if (event.level == LogLevel::Fatal) {
+        sink_->sync();
         std::abort();
     }
 }

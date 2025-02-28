@@ -7,6 +7,24 @@ TEST(FileSystemTrieTest, DefaultInitialization) {
     EXPECT_TRUE(trie.is_empty());
 }
 
+TEST(FileSystemTrieTest, EmptyTrie) {
+    FileSystemTrie<std::string> trie;
+    EXPECT_EQ(trie.find("/a"), nullptr);
+    EXPECT_EQ(trie.find_last_matching("/a/b"), nullptr);
+}
+
+TEST(FileSystemTrieTest, IgnoreRoot) {
+    FileSystemTrie<bool> trie;
+
+    trie.insert("/", true);
+    trie.insert("/foo", false);
+
+    EXPECT_EQ(*trie.find("/"), true);
+    EXPECT_EQ(*trie.find("/foo"), false);
+    EXPECT_EQ(*trie.find_last_matching("/bar"), true);
+    EXPECT_EQ(*trie.find_last_matching("/foo/bar"), false);
+}
+
 TEST(FileSystemTrieTest, InsertAndFind) {
     FileSystemTrie<std::string> trie;
     trie.insert("/a/b/c", "value1");
@@ -164,4 +182,24 @@ TEST(FileSystemTrieCopyConstructorTest, DeepCopy) {
 
     auto copy_nodes2 = std::vector(copy.begin(), copy.end());
     EXPECT_EQ(copy_nodes2, copy_nodes);
+}
+
+TEST(FileSystemTrieTest, SizeMethod) {
+    FileSystemTrie<std::string> trie;
+    EXPECT_EQ(trie.size(), 0);
+
+    trie.insert("/a", "value1");
+    EXPECT_EQ(trie.size(), 1);
+
+    trie.insert("/b", "value2");
+    EXPECT_EQ(trie.size(), 2);
+
+    trie.insert("/a/b/c", "value3");
+    EXPECT_EQ(trie.size(), 3);
+
+    trie.insert("/a/b/d", "value4");
+    EXPECT_EQ(trie.size(), 4);
+
+    trie.insert("/a/b/c", "new_value3");
+    EXPECT_EQ(trie.size(), 4);
 }

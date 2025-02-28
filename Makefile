@@ -47,13 +47,12 @@ coverage: ## Run tests with code coverage
 	$(MAKE) build BUILD_DIR=$(COVERAGE_BUILD_DIR) CMAKE_ARGS='$(CMAKE_ARGS) -DENABLE_COVERAGE=ON'
 	cd $(COVERAGE_BUILD_DIR) && \
 		$(CTEST) --output-on-failure -T Test -T Coverage
-	lcov --directory $(COVERAGE_BUILD_DIR) \
-		--exclude '/usr/*' \
-		--exclude '*/_deps/*' \
-		--exclude '*/tests/*' \
-		--capture \
-		--output-file $(COVERAGE_REPORT) && \
-		genhtml -o $(COVERAGE_REPORT_HTML) $(COVERAGE_REPORT); \
+	lcov --capture --directory $(COVERAGE_BUILD_DIR) --output-file $(COVERAGE_REPORT)
+	lcov --remove $(COVERAGE_REPORT) '/usr/*' --output-file $(COVERAGE_REPORT)
+	lcov --remove $(COVERAGE_REPORT) '*/tests/*' --output-file $(COVERAGE_REPORT)
+	lcov --remove $(COVERAGE_REPORT) '*/_deps/*' --output-file $(COVERAGE_REPORT)
+	lcov --list $(COVERAGE_REPORT) 
+	genhtml -o $(COVERAGE_REPORT_HTML) $(COVERAGE_REPORT); \
 
 install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)

@@ -16,10 +16,9 @@
 class JsonParseError final : public std::runtime_error {
     size_t pos_;
 
-public:
+  public:
     JsonParseError(std::string const& msg, size_t pos)
-        : std::runtime_error(STR(msg << " at offset " << pos)), pos_(pos) {
-    }
+        : std::runtime_error(STR(msg << " at offset " << pos)), pos_(pos) {}
 
     [[nodiscard]] size_t pos() const { return pos_; }
 };
@@ -91,15 +90,14 @@ T json_query(JsonValue const& json, std::string_view path) {
 }
 
 class JsonParser {
-public:
+  public:
     static JsonValue parse(std::string const& input) {
         JsonParser parser{input};
         return parser.parse();
     }
 
-private:
-    explicit JsonParser(std::string const& input) : input_{input} {
-    }
+  private:
+    explicit JsonParser(std::string const& input) : input_{input} {}
 
     JsonValue parse();
 
@@ -200,10 +198,9 @@ struct JsonValuePrinter {
 inline JsonValue JsonParser::parse() {
     JsonValue value = parse_value();
     if (!eof()) {
-        throw JsonParseError(
-            STR("Unexpected reminder after JSON value parsed: "
-                << input_.substr(pos_)),
-            pos_);
+        throw JsonParseError(STR("Unexpected reminder after JSON value parsed: "
+                                 << input_.substr(pos_)),
+                             pos_);
     }
     return value;
 }
@@ -251,8 +248,7 @@ inline JsonValue JsonParser::parse_value() {
     case '9':
         return parse_number();
     default:
-        throw JsonParseError(STR("Unexpected character '" << c << "'"),
-                             pos_);
+        throw JsonParseError(STR("Unexpected character '" << c << "'"), pos_);
     }
 }
 
@@ -433,8 +429,7 @@ inline JsonValue JsonParser::parse_number() {
     }
 
     double res{};
-    auto [end, ec] =
-        std::from_chars(str.data(), str.data() + str.size(), res);
+    auto [end, ec] = std::from_chars(str.data(), str.data() + str.size(), res);
 
     if (ec != std::errc() || end != str.end()) {
         throw JsonParseError("Invalid number format", start);

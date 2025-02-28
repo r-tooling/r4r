@@ -8,6 +8,7 @@
 #include "dpkg_database.h"
 #include "file_tracer.h"
 #include "filesystem_trie.h"
+#include "install_r_package_builder.h"
 #include "logger.h"
 #include "manifest.h"
 #include "manifest_format.h"
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -51,6 +53,8 @@ static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
     // this might be a bit too drastic, but cache is usually not
     // transferable anyway
     trie.insert("/var/cache", true);
+    // we should track the root of the filesystem
+    trie.insert("/", false);
     return trie;
 }();
 
@@ -112,15 +116,14 @@ static constexpr std::string_view kDefaultTimezone{"UTC"};
 
 class FileTracingTask : public Task {
   public:
-    explicit FileTracingTask(FileSystemTrie<bool> const&&) = delete;
-    explicit FileTracingTask(FileSystemTrie<bool> const& ignore_file_list)
+    explicit FileTracingTask(FileSystemTrie<bool> const* ignore_file_list)
         : Task("Trace files"), ignore_file_list_{ignore_file_list} {}
 
     void run(TracerState& state) override;
     void stop() override;
 
   private:
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
+    FileSystemTrie<bool> const* ignore_file_list_;
     SyscallMonitor* monitor_{};
 };
 
@@ -612,52 +615,16 @@ inline void DockerFileBuilderTask::install_r_packages(
         packages.begin(), packages.end(),
         [](auto const* lhs, auto const* rhs) { return lhs->name < rhs->name; });
 
-    auto all_packages = rpkg_database.get_dependencies(manifest.r_packages);
+    auto plan = rpkg_database.get_installation_plan(manifest.r_packages);
 
-    std::ofstream script(cran_install_script_);
+    {
+        std::ofstream script_out(cran_install_script_);
 
-    // TODO: parameterize the max cores
-    script << "options(Ncpus=min(parallel::detectCores(), 32))\n\n"
-           << "tmp_dir <- tempdir()\n"
-           << "install.packages('remotes', lib = c(tmp_dir))\n"
-           << "require('remotes', lib.loc = c(tmp_dir))\n"
-           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
-           << "\n\n"
-           << "# install wrapper that turns warnings into errors\n"
-           // clang-format off
-        << "CHK <- function(thunk) {\n"
-        << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
-        << "    if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }\n"
-        << "  })\n"
-        << "}\n\n"
-           // clang-format on
-
-           << "# installing packages\n\n";
-
-    std::unordered_set<std::string> seen;
-    for (auto const* pkg : all_packages) {
-        if (pkg->is_base) {
-            continue;
-        }
-
-        if (!seen.insert(pkg->name).second) {
-            continue;
-        }
-
-        std::visit(
-            overloaded{
-                [&](RPackage::GitHub const& gh) {
-                    script << "CHK(install_github('" << gh.org << "/" << gh.name
-                           << "', ref = '" << gh.ref
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
-                },
-                [&](RPackage::CRAN const&) {
-                    script << "CHK(install_version('" << pkg->name << "', '"
-                           << pkg->version
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
-                },
-            },
-            pkg->repository);
+        InstallRPackageScriptBuilder script;
+        script.set_plan(plan)
+            .set_output(script_out)
+            .set_max_parallel(4)
+            .build();
     }
 
     builder.copy({cran_install_script_}, "/");
@@ -1028,7 +995,7 @@ class Tracer {
         tasks.push_back(std::make_unique<CaptureEnvironmentTask>());
 
         tasks.push_back(
-            std::make_unique<FileTracingTask>(options_.ignore_file_list));
+            std::make_unique<FileTracingTask>(&options_.ignore_file_list));
 
         tasks.push_back(std::make_unique<ResolveFileTask>(
             options_.R_bin, options_.docker_base_image,

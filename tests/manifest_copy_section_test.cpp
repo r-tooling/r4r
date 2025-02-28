@@ -1,18 +1,17 @@
+#include "manifest_section.h"
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
-#include "manifest_section.h"
 
 class CopyFilesManifestSectionTest : public ::testing::Test {
-protected:
+  protected:
     CopyFilesManifestSection section_;
     Manifest manifest_;
 };
 
 TEST_F(CopyFilesManifestSectionTest, LoadValidLines) {
-    std::string input =
-        "C /path/one\n"
-        "R /path/two\n";
+    std::string input = "C /path/one\n"
+                        "R /path/two\n";
     std::istringstream iss(input);
     section_.load(iss, manifest_);
 
@@ -23,8 +22,7 @@ TEST_F(CopyFilesManifestSectionTest, LoadValidLines) {
 }
 
 TEST_F(CopyFilesManifestSectionTest, LoadQuotedPath) {
-    std::string input =
-        "C \" /path/with spaces \"\n";
+    std::string input = "C \" /path/with spaces \"\n";
     std::istringstream iss(input);
     section_.load(iss, manifest_);
 
@@ -34,9 +32,8 @@ TEST_F(CopyFilesManifestSectionTest, LoadQuotedPath) {
 }
 
 TEST_F(CopyFilesManifestSectionTest, LoadInvalidLines) {
-    std::string input =
-        "XYZ /path/ignored\n"     // no leading 'C' or 'R'
-        "C \"/missing/closing\n"; // incomplete quotes
+    std::string input = "XYZ /path/ignored\n"     // no leading 'C' or 'R'
+                        "C \"/missing/closing\n"; // incomplete quotes
     std::istringstream iss(input);
     section_.load(iss, manifest_);
 
@@ -54,6 +51,6 @@ TEST_F(CopyFilesManifestSectionTest, SaveValidEntries) {
     EXPECT_TRUE(hasContent);
 
     auto lines = string_split(oss.str(), '\n');
-    EXPECT_EQ(lines[lines.size()-2], "C /path/copy");
-    EXPECT_EQ(lines[lines.size()-1], "R /path/result");
+    EXPECT_EQ(lines[lines.size() - 2], "C /path/copy");
+    EXPECT_EQ(lines[lines.size() - 1], "R /path/result");
 }
