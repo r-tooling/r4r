@@ -11,4 +11,6 @@ all: $(SUBDIRS)
 $(SUBDIRS):
 	pwd
 	ls -l
-	$(RUN) make -C /home/r4r/tests/$@ R4R=r4r
+	hostname
+	$(RUN) hostname
+	$(RUN) make -C $@ R4R=r4r
