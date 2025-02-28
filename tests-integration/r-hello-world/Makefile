@@ -1,7 +1,8 @@
 NAME := r-hello-world
-IMAGE_TAG := r4r/test-$(NAME)
-CONTAINER_NAME := r4r-test-$(NAME)
+IMAGE_TAG ?= r4r/test-$(NAME)
+CONTAINER_NAME ?= r4r-test-$(NAME)
 R4R ?= ../../build/r4r
+BASE_IMAGE ?= ubuntu:22.04
 
 all: clean trace check
 
@@ -11,6 +12,7 @@ trace:
 		-vvv \
 		--output actual \
 		--skip-manifest \
+		--default-image-file ../$(BASE_IMAGE).cache \
 		--docker-image-tag $(IMAGE_TAG) \
 		--docker-container-name $(CONTAINER_NAME) \
 		R -f hello-world.R

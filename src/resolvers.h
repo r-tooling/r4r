@@ -11,7 +11,6 @@
 #include "util_fs.h"
 #include <filesystem>
 #include <functional>
-#include <string>
 #include <vector>
 
 class Resolver {
@@ -186,53 +185,49 @@ inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
 
 class IgnoreFileResolver : public Resolver {
   public:
-    explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list)
-        : ignore_file_list_{ignore_file_list} {}
+    IgnoreFileResolver(FileSystemTrie<ImageFileInfo> const* default_file_list,
+                       FileSystemTrie<bool> const* ignore_file_list)
+        : default_file_list_{default_file_list},
+          ignore_file_list_{ignore_file_list} {}
 
     void resolve(Files& files, Manifest& manifest) override;
 
   private:
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
-    static FileSystemTrie<ImageFileInfo> load_default_files();
-    static inline std::string const kImageName = "ubuntu:22.04";
-
-    static inline fs::path const kImageFileCache = []() {
-        return get_user_cache_dir() / "r4r" / (kImageName + ".cache");
-    }();
-
-    static inline std::vector<std::string> const kBlacklistPatterns = {
-        "/dev/*", "/sys/*", "/proc/*"};
+    FileSystemTrie<ImageFileInfo> const* default_file_list_;
+    FileSystemTrie<bool> const* ignore_file_list_;
 };
 
 inline void IgnoreFileResolver::resolve(Files& files,
                                         [[maybe_unused]] Manifest& manifest) {
-    static FileSystemTrie<ImageFileInfo> const kDefaultImageFiles =
-        load_default_files();
-
     auto count = files.size();
 
-    std::erase_if(files, [&](FileInfo const& info) {
-        auto const& path = info.path;
-        if (ignore_file_list_.get().find_last_matching(path) != nullptr) {
-            LOG(TRACE) << "Resolving: " << path << " to: ignored";
-            return true;
-        }
-        return false;
-    });
-
-    SymlinkResolver resolver;
-    std::erase_if(files, [&](FileInfo const& info) {
-        auto const& path = info.path;
-        for (auto const& p : resolver.resolve_symlinks(path)) {
-            if (auto const* f = kDefaultImageFiles.find(p); f) {
-                // TODO: check the size, perm, ...
+    if (ignore_file_list_) {
+        std::erase_if(files, [&](FileInfo const& info) {
+            auto const& path = info.path;
+            if (ignore_file_list_->find_last_matching(path) != nullptr) {
                 LOG(TRACE) << "Resolving: " << path
-                           << " to: ignored - image default";
+                           << " to: ignored (ignore files)";
                 return true;
             }
-        }
-        return false;
-    });
+            return false;
+        });
+    }
+
+    if (default_file_list_) {
+        SymlinkResolver resolver;
+        std::erase_if(files, [&](FileInfo const& info) {
+            auto const& path = info.path;
+            for (auto const& p : resolver.resolve_symlinks(path)) {
+                if (auto const* f = default_file_list_->find(p); f) {
+                    // TODO: check the size, perm, ...
+                    LOG(TRACE) << "Resolving: " << path
+                               << " to: ignored - image default";
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
 
     // ignore the .uuid files from fontconfig
     static std::unordered_set<fs::path> const fontconfig_dirs = {
@@ -253,37 +248,6 @@ inline void IgnoreFileResolver::resolve(Files& files,
 
     LOG(INFO) << "Ignoring " << (count - files.size())
               << " of the traced files";
-}
-
-inline FileSystemTrie<ImageFileInfo> IgnoreFileResolver::load_default_files() {
-    auto default_files = []() {
-        if (fs::exists(kImageFileCache)) {
-            return DefaultImageFiles::from_file(kImageFileCache);
-        }
-
-        LOG(INFO) << "Default image file cache " << kImageFileCache
-                  << " does not exists, creating from image " << kImageName;
-
-        auto files =
-            DefaultImageFiles::from_image(kImageName, kBlacklistPatterns);
-        try {
-            fs::create_directories(kImageFileCache.parent_path());
-            std::ofstream out{kImageFileCache};
-            files.save(out);
-        } catch (std::exception const& e) {
-            LOG(WARN) << "Failed to store default image file list to "
-                      << kImageFileCache << ": " << e.what();
-        }
-        return files;
-    }();
-
-    LOG(DEBUG) << "Loaded " << default_files.size() << " default files";
-
-    FileSystemTrie<ImageFileInfo> trie;
-    for (auto const& info : default_files.files()) {
-        trie.insert(info.path, info);
-    }
-    return trie;
 }
 
 #endif // RESOLVERS_H

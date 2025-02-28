@@ -63,6 +63,8 @@ struct Options {
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
     fs::path makefile;
+    fs::path default_image_file{get_user_cache_dir() / kBinaryName /
+                                (docker_base_image + ".cache")};
     AbsolutePathSet results;
     bool docker_sudo_access{true};
     bool run_make{true};
@@ -70,6 +72,10 @@ struct Options {
     // TODO: make this mutable so more files could be added from command line
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };
+
+// static inline fs::path const kImageFileCache = []() {
+//     return get_user_cache_dir() / "r4r" / (kImageName + ".cache");
+// }();
 
 struct TracerState {
     DpkgDatabase dpkg_database;
@@ -106,6 +112,7 @@ static constexpr std::string_view kDefaultTimezone{"UTC"};
 
 class FileTracingTask : public Task {
   public:
+    explicit FileTracingTask(FileSystemTrie<bool> const&&) = delete;
     explicit FileTracingTask(FileSystemTrie<bool> const& ignore_file_list)
         : Task("Trace files"), ignore_file_list_{ignore_file_list} {}
 
@@ -187,23 +194,66 @@ inline void FileTracingTask::stop() {
 // We do not need this composition, each of the resolver can now be a task
 class ResolveFileTask : public Task {
   public:
-    ResolveFileTask(fs::path R_bin,
-                    FileSystemTrie<bool> const& ignore_file_list)
+    ResolveFileTask(fs::path R_bin, std::string docker_base_image,
+                    fs::path default_image_file,
+                    FileSystemTrie<bool> const* ignore_file_list)
         : Task("Resolve files"), R_bin_{std::move(R_bin)},
+          docker_base_image_(std::move(docker_base_image)),
+          default_image_file_{std::move(default_image_file)},
           ignore_file_list_{ignore_file_list} {}
 
     void run(TracerState& state) override;
 
   private:
+    static inline std::vector<std::string> const kBlacklistPatterns = {
+        "/dev/*", "/sys/*", "/proc/*"};
+
     fs::path R_bin_;
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
+    std::string docker_base_image_;
+    fs::path default_image_file_;
+    FileSystemTrie<bool> const* ignore_file_list_;
+    FileSystemTrie<ImageFileInfo> load_default_files();
 };
+
+inline FileSystemTrie<ImageFileInfo> ResolveFileTask::load_default_files() {
+    auto default_files = [&]() {
+        if (fs::exists(default_image_file_)) {
+            return DefaultImageFiles::from_file(default_image_file_);
+        }
+
+        LOG(INFO) << "Default image file cache " << default_image_file_
+                  << " does not exists, creating from image "
+                  << docker_base_image_;
+
+        auto files = DefaultImageFiles::from_image(docker_base_image_,
+                                                   kBlacklistPatterns);
+        try {
+            fs::create_directories(default_image_file_.parent_path());
+            std::ofstream out{default_image_file_};
+            files.save(out);
+        } catch (std::exception const& e) {
+            LOG(WARN) << "Failed to store default image file list to "
+                      << default_image_file_ << ": " << e.what();
+        }
+        return files;
+    }();
+
+    LOG(DEBUG) << "Loaded " << default_files.size() << " default files";
+
+    FileSystemTrie<ImageFileInfo> trie;
+    for (auto const& info : default_files.files()) {
+        trie.insert(info.path, info);
+    }
+    return trie;
+}
 
 inline void ResolveFileTask::run(TracerState& state) {
     std::vector<std::pair<std::string, std::unique_ptr<Resolver>>> resolvers;
 
-    resolvers.emplace_back(
-        "ignore", std::make_unique<IgnoreFileResolver>(ignore_file_list_));
+    auto default_files = load_default_files();
+
+    resolvers.emplace_back("ignore", std::make_unique<IgnoreFileResolver>(
+                                         &default_files, ignore_file_list_));
 
     resolvers.emplace_back(
         "deb", std::make_unique<DebPackageResolver>(state.dpkg_database));
@@ -712,12 +762,12 @@ inline void DockerFileBuilderTask::set_environment(DockerFileBuilder& builder,
         "XDG_SESSION_ID",
         "XDG_SESSION_TYPE"};
 
-    std::vector<std::string> sorted_env;
+    std::vector<std::pair<std::string, std::string>> sorted_env;
     sorted_env.reserve(envir.size());
 
     for (auto const& [k, v] : envir) {
         if (!ignored_env.contains(k)) {
-            sorted_env.push_back(STR(k << "=\"" << v << "\""));
+            sorted_env.emplace_back(k, v);
         }
     }
 
@@ -981,7 +1031,8 @@ class Tracer {
             std::make_unique<FileTracingTask>(options_.ignore_file_list));
 
         tasks.push_back(std::make_unique<ResolveFileTask>(
-            options_.R_bin, options_.ignore_file_list));
+            options_.R_bin, options_.docker_base_image,
+            options_.default_image_file, &options_.ignore_file_list));
 
         tasks.push_back(std::make_unique<ResolveRPackageSystemDependencies>());
 

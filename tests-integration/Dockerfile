@@ -8,7 +8,13 @@ RUN make clean install
 
 FROM ubuntu:22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+  LANG=en_US.UTF-8
+
+RUN apt-get update -y && \
+  apt-get install -y --no-install-recommends locales tzdata && \
+  locale-gen $LANG && \
+  update-locale LANG=$LANG
 
 # install docker
 RUN apt-get update && \
@@ -28,8 +34,8 @@ RUN apt-get update && \
   apt-get update && \
   apt-get install -y --no-install-recommends docker-ce-cli
 
-# installl dependencies for the integration tests
-RUN R -e 'install.packages("stringi")'
+# install R dependencies for the integration tests
+RUN R -e 'install.packages("stringi", Ncpus=8)'
 
 COPY --from=builder /workspace/build/r4r /usr/local/bin
 
@@ -44,6 +50,6 @@ RUN groupadd -g $USER_GID $USERNAME && \
   echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
   chmod 0440 /etc/sudoers.d/$USERNAME
 
-COPY tests-integration/entrypoint.sh /entrypoint.sh
+COPY tests-integration/entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/local/bin/r4r"]

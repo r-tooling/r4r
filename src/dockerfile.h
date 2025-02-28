@@ -2,21 +2,20 @@
 #define DOCKERFILE_H
 
 #include "common.h"
-#include "util_fs.h"
 #include "util.h"
+#include "util_fs.h"
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 class DockerFile {
-public:
+  public:
     DockerFile(fs::path context_dir, std::string dockerfile,
                std::vector<fs::path> copied_files)
         : context_dir_{std::move(context_dir)},
           dockerfile_{std::move(dockerfile)},
-          copied_files_{std::move(copied_files)} {
-    }
+          copied_files_{std::move(copied_files)} {}
 
     [[nodiscard]] std::string const& dockerfile() const { return dockerfile_; }
 
@@ -33,24 +32,24 @@ public:
 
     void save() const { save(context_dir_ / "Dockerfile"); }
 
-private:
+  private:
     fs::path context_dir_;
     std::string dockerfile_;
     std::vector<fs::path> copied_files_;
 };
 
 class DockerFileBuilder {
-public:
+  public:
     explicit DockerFileBuilder(std::string base_image, fs::path context_dir)
         : base_image_{std::move(base_image)},
-          context_dir_{std::move(context_dir)} {
-    }
+          context_dir_{std::move(context_dir)} {}
 
     DockerFileBuilder& run(std::string const& command);
     DockerFileBuilder& run(std::vector<std::string> const& commands);
     DockerFileBuilder& cmd(std::vector<std::string> const& commands);
     DockerFileBuilder& env(std::string const& key, std::string const& value);
-    DockerFileBuilder& env(std::vector<std::string> const& envs);
+    DockerFileBuilder&
+    env(std::vector<std::pair<std::string, std::string>> const& envs);
     DockerFileBuilder& add(std::string const& src, std::string const& dest);
     DockerFileBuilder& copy(std::vector<fs::path> const& srcs,
                             std::string const& dest);
@@ -62,22 +61,22 @@ public:
 
     [[nodiscard]] DockerFile build() const;
 
-private:
+  private:
     std::string base_image_;
     fs::path context_dir_;
     std::vector<std::string> commands_;
     std::vector<fs::path> copied_files_;
 };
 
-inline DockerFileBuilder& DockerFileBuilder::run(
-    std::vector<std::string> const& commands) {
+inline DockerFileBuilder&
+DockerFileBuilder::run(std::vector<std::string> const& commands) {
     std::string cmds = string_join(commands, " && \\\n  ");
     commands_.emplace_back("RUN " + cmds);
     return *this;
 }
 
-inline DockerFileBuilder& DockerFileBuilder::cmd(
-    std::vector<std::string> const& commands) {
+inline DockerFileBuilder&
+DockerFileBuilder::cmd(std::vector<std::string> const& commands) {
     std::string cmd;
     for (size_t i = 0; auto const& c : commands) {
         cmd += escape_cmd_arg(c, false, true);
@@ -92,14 +91,27 @@ inline DockerFileBuilder& DockerFileBuilder::cmd(
 
 inline DockerFileBuilder& DockerFileBuilder::env(std::string const& key,
                                                  std::string const& value) {
-    commands_.emplace_back("ENV " + key + "=" + value);
+    env({{key, value}});
     return *this;
 }
 
 inline DockerFileBuilder& DockerFileBuilder::env(
-    std::vector<std::string> const& envs) {
-    std::string cmd = string_join(envs, " \\\n  ");
-    commands_.emplace_back("ENV " + cmd);
+    std::vector<std::pair<std::string, std::string>> const& envs) {
+    if (envs.empty()) {
+        return *this;
+    }
+
+    std::ostringstream s;
+    s << "ENV ";
+
+    for (size_t i = 0; auto const& [k, v] : envs) {
+        s << k << "=" << escape_cmd_arg(v);
+        if (++i < envs.size()) {
+            s << " \\\n  ";
+        }
+    }
+
+    commands_.emplace_back(s.str());
     return *this;
 }
 
@@ -109,17 +121,18 @@ inline DockerFileBuilder& DockerFileBuilder::add(std::string const& src,
     return *this;
 }
 
-inline DockerFileBuilder& DockerFileBuilder::copy(
-    std::vector<fs::path> const& srcs, std::string const& dest) {
+inline DockerFileBuilder&
+DockerFileBuilder::copy(std::vector<fs::path> const& srcs,
+                        std::string const& dest) {
     std::vector<std::string> names;
     names.reserve(srcs.size());
 
     for (auto const& src : srcs) {
         if (!is_sub_path(src, context_dir_)) {
             throw std::runtime_error(
-                STR("Source path "
-                    << src << " is not a subpath of context directory "
-                    << context_dir_));
+                STR("Source path " << src
+                                   << " is not a subpath of context directory "
+                                   << context_dir_));
         }
         names.push_back(fs::relative(src, context_dir_).string());
         copied_files_.push_back(src);
@@ -131,8 +144,8 @@ inline DockerFileBuilder& DockerFileBuilder::copy(
     return *this;
 }
 
-inline DockerFileBuilder& DockerFileBuilder::entrypoint(
-    std::string const& command) {
+inline DockerFileBuilder&
+DockerFileBuilder::entrypoint(std::string const& command) {
     commands_.emplace_back("ENTRYPOINT " + command);
     return *this;
 }

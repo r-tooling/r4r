@@ -74,6 +74,9 @@ clean: ## Clean build artifacts
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(COVERAGE_BUILD_DIR)
 
+docker-image-integration-test:
+	docker build --rm -t ghcr.io/r-tooling/r4r-it:latest -f tests-integration/Dockerfile .
+
 help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
