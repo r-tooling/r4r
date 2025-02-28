@@ -4,6 +4,7 @@
 #include "archive.h"
 #include "common.h"
 #include "config.h"
+#include "config_file.h"
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
@@ -920,24 +921,23 @@ class CaptureEnvironmentTask : public Task {
 
   private:
     void capture_distribution(TracerState& state) {
-        auto os_info = Command("lsb_release").arg("-irs").output();
-        os_info.check_success("Failed to get distribution name and version.");
-
-        auto lines = string_split_n<2>(os_info.stdout_data, "\n");
-        if (!lines) {
-            LOG(FATAL) << "Failed to get distribution name and version.";
+        auto os_info = ConfigFile::from_file("/etc/os-release");
+        if (!os_info) {
+            LOG(FATAL) << "Failed to read /etc/os-release";
         }
 
-        auto distro = string_trim(lines->at(0));
-        auto version = string_trim(lines->at(1));
+        auto distro = os_info->get("ID");
 
-        if (distro != "Ubuntu" && distro != "Debian") {
+        if (distro != "ubuntu" && distro != "debian") {
             LOG(FATAL) << "Unsupported distribution: " << distro;
         }
 
-        state.manifest.distribution =
-            (distro == "Ubuntu") ? "ubuntu" : "debian";
-        state.manifest.distribution_version = version;
+        state.manifest.distribution = distro;
+        state.manifest.distribution_version =
+            string_trim(os_info->get("VERSION_ID"));
+
+        LOG(DEBUG) << "Distribution: " << state.manifest.distribution
+                   << " version: " << state.manifest.distribution_version;
 
         if (infer_base_image_) {
             if (!state.manifest.distribution_version.empty()) {
