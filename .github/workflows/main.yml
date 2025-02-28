@@ -108,7 +108,7 @@ jobs:
         with:
           # Adjust the cache path as needed
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-it-${{ hashFiles('tests-integration/Dockerfile', 'tests-integration/entrypoint.sh') }}
+          key: ${{ runner.os }}-docker-it-${{ hashFiles('tests-integration/Dockerfile') }}
           restore-keys: |
             ${{ runner.os }}-docker-it-
 
