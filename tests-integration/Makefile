@@ -13,4 +13,5 @@ $(SUBDIRS):
 	ls -l
 	hostname
 	$(RUN) hostname
+	(RUN) ls -l /home/r4r/tests
 	$(RUN) make -C $@ R4R=r4r
