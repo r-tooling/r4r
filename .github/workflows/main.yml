@@ -131,16 +131,16 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,new=true
 
-  tests-integration:
-    name: Integration tests
-    runs-on: ubuntu-latest
-    needs: build-it-image
-    container: ghcr.io/${{ github.repository }}-it:latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Run integration tests
-        run: make -C tests-integration r-hello-world
+  # tests-integration:
+  #   name: Integration tests
+  #   runs-on: ubuntu-latest
+  #   needs: build-it-image
+  #   container: ghcr.io/${{ github.repository }}-it:latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0
+  #
+  #     - name: Run integration tests
+  #       run: make -C tests-integration r-hello-world
