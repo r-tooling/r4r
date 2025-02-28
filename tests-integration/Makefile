@@ -1,6 +1,6 @@
 .SUFFIXES:
 
-RUN := docker run --rm -ti -v $$(pwd):/home/r4r/tests -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/r-tooling/r4r-it:latest
+RUN := docker run --rm -v $$(pwd):/home/r4r/tests -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/r-tooling/r4r-it:latest
 
 SUBDIRS := $(patsubst %/,%,$(sort $(dir $(wildcard */Makefile))))
 
