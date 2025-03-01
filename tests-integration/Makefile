@@ -12,7 +12,7 @@ all: $(SUBDIRS)
 
 $(SUBDIRS):
 	pwd
-	ls -l
+	ls -lR /__w
 	hostname
 	$(RUN) hostname
 	$(RUN) ls -l /var/run/docker.sock
