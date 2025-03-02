@@ -9,7 +9,7 @@ all: clean trace check
 .PHONY: trace
 trace:
 	$(R4R) \
-		-vvv \
+		-vv \
 		--output actual \
 		--skip-manifest \
 		--default-image-file ../$(BASE_IMAGE).cache \

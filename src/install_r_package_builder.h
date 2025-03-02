@@ -117,18 +117,21 @@ class InstallRPackageScriptBuilder {
         for (RPackage const* pkg : batch_vec) {
             std::string log_file =
                 "/tmp/r4r-install-" + pkg->name + "-" + pkg->version + ".log";
-            shell_cmd << "Rscript -e \"";
+            shell_cmd << "Rscript -e \\\"";
 
             std::visit(
                 overloaded{
                     [&](RPackage::GitHub const& gh) {
+                        shell_cmd << "require('remotes', lib.loc = '"
+                                  << tmp_lib_dir_ << "');";
                         shell_cmd
-                            << "require('remotes', lib.loc = '" << tmp_lib_dir_
-                            << "');remotes::install_github('" << gh.org << "/"
+                            << "remotes::install_github('" << gh.org << "/"
                             << gh.name << "', ref = '" << gh.ref
                             << "', upgrade = 'never', dependencies = FALSE)\n";
                     },
                     [&](RPackage::CRAN const&) {
+                        shell_cmd << "require('remotes', lib.loc = '"
+                                  << tmp_lib_dir_ << "');";
                         shell_cmd
                             << "remotes::install_version('" << pkg->name
                             << "', '" << pkg->version
@@ -137,7 +140,7 @@ class InstallRPackageScriptBuilder {
                 },
                 pkg->repository);
 
-            shell_cmd << "\"";
+            shell_cmd << "\\\"";
             shell_cmd << " > " + log_file + " 2>&1 & ";
         }
         shell_cmd << "wait";
@@ -146,8 +149,8 @@ class InstallRPackageScriptBuilder {
         *out_ << "status <- system(\"" << shell_cmd.str() << "\")\n"
               << "if (status != 0) {\n"
               << "  " << kRHeader;
-        *out_ << "  cat(paste0(\"# Batch " << batch_number << "/"
-              << total_batches << " FAILED.\\n\");\n"
+        *out_ << "  cat('# Batch " << batch_number << "/" << total_batches
+              << " FAILED.\\n');\n"
               << "  "
               << "  " << kRHeader;
         *out_ << "\n";

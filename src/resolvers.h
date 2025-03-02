@@ -100,8 +100,6 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
             } else {
                 status = FileStatus::IgnoreDidNotExistBefore;
             }
-        } else if (fs::equivalent(path, manifest.cwd)) {
-            status = FileStatus::IgnoreCWD;
         } else {
             switch (check_accessibility(path)) {
             case AccessStatus::Accessible:
