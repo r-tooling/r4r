@@ -10,7 +10,6 @@
 #include "rpkg_database.h"
 #include "util_fs.h"
 #include <filesystem>
-#include <functional>
 #include <vector>
 
 class Resolver {
@@ -24,13 +23,13 @@ class Resolver {
 
 class DebPackageResolver : public Resolver {
   public:
-    explicit DebPackageResolver(DpkgDatabase const& dpkg_database)
+    explicit DebPackageResolver(DpkgDatabase const* dpkg_database)
         : dpkg_database_(dpkg_database) {}
 
     void resolve(Files& files, Manifest& manifest) override;
 
   private:
-    std::reference_wrapper<DpkgDatabase const> dpkg_database_;
+    DpkgDatabase const* dpkg_database_;
 };
 
 inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
@@ -41,7 +40,7 @@ inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
     auto resolved = [&](FileInfo const& info) {
         auto& path = info.path;
         for (auto const& p : symlink_resolver.resolve_symlinks(path)) {
-            if (auto const* pkg = dpkg_database_.get().lookup_by_path(p); pkg) {
+            if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
                 LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
 
                 // TODO: check that the file size is the same
@@ -137,15 +136,13 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
 
 class RPackageResolver : public Resolver {
   public:
-    explicit RPackageResolver(RpkgDatabase const& rpkg_database,
-                              DpkgDatabase const& dpkg_database)
-        : rpkg_database_{rpkg_database}, dpkg_database_{dpkg_database} {}
+    explicit RPackageResolver(RpkgDatabase const* rpkg_database)
+        : rpkg_database_{rpkg_database} {}
 
     void resolve(Files& files, Manifest& manifest) override;
 
   private:
-    std::reference_wrapper<RpkgDatabase const> rpkg_database_;
-    std::reference_wrapper<DpkgDatabase const> dpkg_database_;
+    RpkgDatabase const* rpkg_database_;
     void
     check_system_dependencies(std::unordered_set<RPackage const*> const& pkgs,
                               Manifest& manifest);
@@ -159,7 +156,7 @@ inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
     auto resolved = [&](FileInfo const& info) {
         auto& path = info.path;
         for (auto const& p : symlink_resolved.resolve_symlinks(path)) {
-            if (auto const* pkg = rpkg_database_.get().lookup_by_path(p); pkg) {
+            if (auto const* pkg = rpkg_database_->lookup_by_path(p); pkg) {
 
                 LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
 

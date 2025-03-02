@@ -259,10 +259,10 @@ inline void ResolveFileTask::run(TracerState& state) {
                                          &default_files, ignore_file_list_));
 
     resolvers.emplace_back(
-        "deb", std::make_unique<DebPackageResolver>(state.dpkg_database));
+        "deb", std::make_unique<DebPackageResolver>(&state.dpkg_database));
 
-    resolvers.emplace_back("R", std::make_unique<RPackageResolver>(
-                                    state.rpkg_database, state.dpkg_database));
+    resolvers.emplace_back(
+        "R", std::make_unique<RPackageResolver>(&state.rpkg_database));
 
     resolvers.emplace_back("copy", std::make_unique<CopyFileResolver>());
 
