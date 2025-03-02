@@ -11,9 +11,4 @@ SUBDIRS := $(patsubst %/,%,$(sort $(dir $(wildcard */Makefile))))
 all: $(SUBDIRS)
 
 $(SUBDIRS):
-	pwd
-	hostname
-	$(RUN) hostname
-	$(RUN) ls -l /var/run/docker.sock
-	$(RUN) ls -lR /home
 	$(RUN) make -C /home/r4r/tests/$@ R4R=r4r

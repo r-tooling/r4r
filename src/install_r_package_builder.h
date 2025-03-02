@@ -43,7 +43,12 @@ class InstallRPackageScriptBuilder {
         expanded_plan_.clear();
         expanded_plan_.reserve(plan_.size());
 
-        for (auto const& batch : plan_) {
+        for (auto batch : plan_) {
+            std::erase_if(batch, [](auto const* pkg) { return pkg->is_base; });
+            if (batch.empty()) {
+                continue;
+            }
+
             if (batch.size() <= max_parallel_) {
                 expanded_plan_.push_back(batch);
             } else {
