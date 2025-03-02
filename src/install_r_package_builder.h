@@ -107,7 +107,7 @@ class InstallRPackageScriptBuilder {
         *out_ << kRHeader;
         *out_ << "cat('# Installing batch " << batch_number << "/"
               << total_batches << " with " << batch_size
-              << " packages...\\n'));\n";
+              << " packages...\\n');\n";
         *out_ << kRHeader;
         *out_ << "\n";
 
@@ -147,7 +147,7 @@ class InstallRPackageScriptBuilder {
               << "if (status != 0) {\n"
               << "  " << kRHeader;
         *out_ << "  cat(paste0(\"# Batch " << batch_number << "/"
-              << total_batches << " FAILED.\\n\"));\n"
+              << total_batches << " FAILED.\\n\");\n"
               << "  "
               << "  " << kRHeader;
         *out_ << "\n";
@@ -158,7 +158,7 @@ class InstallRPackageScriptBuilder {
                 "/tmp/r4r-install-" + pkg->name + "-" + pkg->version + ".log";
             *out_ << "  " << kRHeader;
             *out_ << "  cat('# Logs for package " << pkg->name << " version "
-                  << pkg->version << " (" << log_file << ")" << "\\n'));\n";
+                  << pkg->version << " (" << log_file << ")" << "\\n');\n";
             *out_ << "  " << kRHeader;
             *out_ << "  cat(readLines('" << log_file << "'), sep='\\n')\n"
                   << "  cat('\\n')\n";
@@ -195,7 +195,7 @@ class InstallRPackageScriptBuilder {
 
         *out_ << kRHeader;
         *out_ << "cat('# Successfully installed batch " << batch_number << "/"
-              << total_batches << "\\n'));\n";
+              << total_batches << "\\n');\n";
         *out_ << kRHeader;
     }
 

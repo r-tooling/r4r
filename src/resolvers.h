@@ -42,7 +42,7 @@ inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
         auto& path = info.path;
         for (auto const& p : symlink_resolver.resolve_symlinks(path)) {
             if (auto const* pkg = dpkg_database_.get().lookup_by_path(p); pkg) {
-                LOG(TRACE) << "Resolved: " << path << " to: " << pkg->name;
+                LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
 
                 // TODO: check that the file size is the same
 
@@ -119,7 +119,7 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
             }
         }
 
-        LOG(TRACE) << "Resolved: " << path << " to: " << status;
+        LOG(DEBUG) << "Resolved: " << path << " to: " << status;
 
         // TODO: check size / sha1
 
@@ -157,7 +157,7 @@ inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
         for (auto const& p : symlink_resolved.resolve_symlinks(path)) {
             if (auto const* pkg = rpkg_database_.get().lookup_by_path(p); pkg) {
 
-                LOG(TRACE) << "Resolved: " << path << " to: " << pkg->name;
+                LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
 
                 resolved_packages.insert(pkg);
                 resolved_files++;
@@ -206,7 +206,7 @@ inline void IgnoreFileResolver::resolve(Files& files,
             auto const& path = info.path;
             if (auto const* it = ignore_file_list_->find_last_matching(path);
                 it && *it) {
-                LOG(TRACE) << "Resolving: " << path
+                LOG(DEBUG) << "Resolving: " << path
                            << " to: ignored (ignore files)";
                 return true;
             }
@@ -221,7 +221,7 @@ inline void IgnoreFileResolver::resolve(Files& files,
             for (auto const& p : resolver.resolve_symlinks(path)) {
                 if (auto const* f = default_file_list_->find(p); f) {
                     // TODO: check the size, perm, ...
-                    LOG(TRACE) << "Resolving: " << path
+                    LOG(DEBUG) << "Resolving: " << path
                                << " to: ignored - image default";
                     return true;
                 }
@@ -239,7 +239,7 @@ inline void IgnoreFileResolver::resolve(Files& files,
         for (auto const& d : fontconfig_dirs) {
             if (is_sub_path(path, d)) {
                 if (path.filename() == ".uuid") {
-                    LOG(TRACE) << "Resolving: " << path << " to: ignored";
+                    LOG(DEBUG) << "Resolving: " << path << " to: ignored";
                     return true;
                 }
             }

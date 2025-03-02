@@ -161,7 +161,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
                                            FileTracer::SyscallState& state) {
     fs::path result;
 
-    LOG(TRACE) << "Syscall open " << pathname;
+    LOG(DEBUG) << "Syscall open " << pathname;
 
     // the logic comes from the behavior of openat(2):
     if (pathname.is_absolute()) {
