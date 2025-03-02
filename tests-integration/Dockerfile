@@ -6,7 +6,7 @@ COPY . /workspace
 # Build the project
 RUN make clean install
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
   LANG=en_US.UTF-8

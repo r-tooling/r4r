@@ -10,14 +10,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "../tests/common.h"
 #include "syscall_monitor.h"
 #include "util_fs.h"
-
-#ifdef CODE_COVERAGE_ENABLED
-#define SKIP_ON_COVERAGE(message) GTEST_SKIP() << message
-#else
-#define SKIP_ON_COVERAGE(message) (void)0
-#endif
 
 // Global test string in the child process.
 //

@@ -1,18 +1,9 @@
+#include "../tests/common.h"
 #include "util_fs.h"
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <fstream>
-
-#define SKIP_ON_CI(message)                                                    \
-    if (std::getenv("GITHUB_ACTIONS") != nullptr) {                            \
-        GTEST_SKIP() << message;                                               \
-    }
-
-#define SKIP_ON_ROOT(message)                                                  \
-    if (geteuid() == 0) {                                                      \
-        GTEST_SKIP() << message;                                               \
-    }
 
 class CheckAccessibilityTest : public ::testing::Test {
   public:

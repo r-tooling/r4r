@@ -15,6 +15,7 @@ enum class FileStatus {
     IgnoreDidNotExistBefore,
     IgnoreNoLongerExist,
     IgnoreNotAccessible,
+    IgnoreDirectory
 };
 
 namespace std {
@@ -34,6 +35,9 @@ inline std::ostream& operator<<(std::ostream& os, FileStatus status) {
         break;
     case FileStatus::IgnoreNotAccessible:
         os << "Ignore, not accessible";
+        break;
+    case FileStatus::IgnoreDirectory:
+        os << "Ignore, it is a directory";
         break;
     }
     return os;

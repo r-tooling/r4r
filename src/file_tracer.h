@@ -6,6 +6,7 @@
 #include "syscall_monitor.h"
 #include <fcntl.h>
 #include <filesystem>
+#include <system_error>
 #include <variant>
 
 struct FileInfo {
@@ -182,6 +183,14 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
             }
             result = *d;
         }
+
+        std::error_code ec;
+        result = fs::absolute(result, ec);
+        if (ec) {
+            LOG(WARN) << "Failed to resolve absolute file path : " << result
+                      << " - " << ec.message();
+        }
+
         result /= pathname;
     }
 

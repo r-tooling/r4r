@@ -62,7 +62,7 @@ struct Options {
     LogLevel log_level = LogLevel::Warning;
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
-    std::string docker_base_image{"ubuntu:22.04"};
+    std::string docker_base_image{"ubuntu:24.04"};
     std::string docker_image_tag{STR(kBinaryName << "/test")};
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
@@ -293,7 +293,9 @@ inline void ResolveFileTask::run(TracerState& state) {
 
 class EditManifestTask : public Task {
   public:
-    EditManifestTask() : Task("Edit manifest") {
+    EditManifestTask(fs::path manifest_path, bool interactive)
+        : Task("Edit manifest"), manifest_path_(std::move(manifest_path)),
+          interactive_(interactive) {
         sections_.push_back(std::make_unique<CopyFilesManifestSection>());
     }
 
@@ -306,6 +308,8 @@ class EditManifestTask : public Task {
     bool save_manifest(std::ostream& stream, Manifest const& manifest);
 
     std::vector<std::unique_ptr<ManifestSection>> sections_;
+    fs::path manifest_path_;
+    bool interactive_;
 };
 
 inline void EditManifestTask::load_manifest(std::istream& stream,
@@ -351,12 +355,15 @@ inline bool EditManifestTask::save_manifest(std::ostream& stream,
 }
 
 inline void EditManifestTask::run(TracerState& state) {
-    auto manifest_file = TempFile{"r4r-manifest", ".conf"};
     bool any_content{false};
     {
-        LOG(DEBUG) << "Saving manifest to: " << *manifest_file;
-        std::ofstream stream{*manifest_file};
-        any_content = save_manifest(stream, state.manifest);
+        LOG(DEBUG) << "Saving manifest to: " << manifest_path_;
+        std::ofstream manifest_file{manifest_path_};
+        any_content = save_manifest(manifest_file, state.manifest);
+    }
+
+    if (!interactive_) {
+        return;
     }
 
     if (!any_content) {
@@ -364,12 +371,12 @@ inline void EditManifestTask::run(TracerState& state) {
         return;
     }
 
-    auto ts = fs::last_write_time(*manifest_file);
+    auto ts = fs::last_write_time(manifest_path_);
 
-    if (open_manifest(*manifest_file) &&
-        fs::last_write_time(*manifest_file) != ts) {
-        LOG(DEBUG) << "Rereading manifest from: " << *manifest_file;
-        std::ifstream stream{*manifest_file};
+    if (open_manifest(manifest_path_) &&
+        fs::last_write_time(manifest_path_) != ts) {
+        LOG(DEBUG) << "Rereading manifest from: " << manifest_path_;
+        std::ifstream stream{manifest_path_};
         load_manifest(stream, state.manifest);
     }
 }
@@ -824,9 +831,15 @@ class MakefileBuilderTask : public Task {
                  << "TARGET_DIR = result"
                  << "\n\n"
 
-                 << ".PHONY: all build run copy clean\n\n"
+                 << "SHELL := /bin/bash\n"
+                 << ".SHELLFLAGS := -o pipefail -c"
+                 << "\n\n"
 
-                 << "all: clean copy\n\n"
+                 << ".PHONY: all build run copy clean"
+                 << "\n\n"
+
+                 << "all: clean copy"
+                 << "\n\n"
 
                  // clang-format off
                  << "build:\n"
@@ -1003,9 +1016,8 @@ class Tracer {
 
         tasks.push_back(std::make_unique<ResolveRPackageSystemDependencies>());
 
-        if (!options_.skip_manifest) {
-            tasks.push_back(std::make_unique<EditManifestTask>());
-        }
+        tasks.push_back(std::make_unique<EditManifestTask>(
+            options_.output_dir / "manifest.conf", !options_.skip_manifest));
 
         tasks.push_back(std::make_unique<DockerFileBuilderTask>(
             options_.output_dir, options_.docker_base_image,

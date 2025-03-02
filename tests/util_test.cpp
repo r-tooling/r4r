@@ -1,31 +1,49 @@
 #include "util.h"
 #include <gtest/gtest.h>
 
-TEST(UtilTest, EscapeCmdArg) {
-    // clang-format off
-    EXPECT_EQ(escape_cmd_arg("no special chars"), "'no special chars'");
-    EXPECT_EQ(escape_cmd_arg("arg with spaces"), "'arg with spaces'");
-    EXPECT_EQ(escape_cmd_arg("arg with \"quotes\""), "'arg with \"quotes\"'");
-    EXPECT_EQ(escape_cmd_arg("arg with $dollar"), "'arg with $dollar'");
-    EXPECT_EQ(escape_cmd_arg("arg with back\\slash"), "'arg with back\\slash'");
-    EXPECT_EQ(escape_cmd_arg("arg with `backtick`"), "'arg with `backtick`'");
-    EXPECT_EQ(escape_cmd_arg("arg with ;semicolon"), "'arg with ;semicolon'");
-    EXPECT_EQ(escape_cmd_arg("arg with &ampersand"), "'arg with &ampersand'");
-    EXPECT_EQ(escape_cmd_arg("arg with |pipe"), "'arg with |pipe'");
-    EXPECT_EQ(escape_cmd_arg("arg with *asterisk"), "'arg with *asterisk'");
-    EXPECT_EQ(escape_cmd_arg("arg with ?question"), "'arg with ?question'");
-    EXPECT_EQ(escape_cmd_arg("arg with [brackets]"), "'arg with [brackets]'");
-    EXPECT_EQ(escape_cmd_arg("arg with (parenthesis)"), "'arg with (parenthesis)'");
-    EXPECT_EQ(escape_cmd_arg("arg with <less"), "'arg with <less'");
-    EXPECT_EQ(escape_cmd_arg("arg with >greater"), "'arg with >greater'");
-    EXPECT_EQ(escape_cmd_arg("arg with #hash"), "'arg with #hash'");
-    EXPECT_EQ(escape_cmd_arg("arg with !exclamation"), "'arg with !exclamation'");
-    EXPECT_EQ(escape_cmd_arg("arg with 'single quote'"), "'arg with \\'single quote\\''");
-    EXPECT_EQ(escape_cmd_arg(""), "''");
-    EXPECT_EQ(escape_cmd_arg("'already quoted'"), "'\\'already quoted\\''");
+TEST(EscapeCmdArgTest, NoEscapeNeeded) {
+    EXPECT_EQ(escape_cmd_arg("simple"), "simple");
+    EXPECT_EQ(escape_cmd_arg(""), "");
+}
 
-    EXPECT_EQ(escape_cmd_arg("arg with \"quotes\"", false), "\"arg with \\\"quotes\\\"\"");
-    // clang-format on
+TEST(EscapeCmdArgTest, ForceEscape) {
+    EXPECT_EQ(escape_cmd_arg("simple", true, true), "'simple'");
+    EXPECT_EQ(escape_cmd_arg("", true, true), "''");
+}
+
+TEST(EscapeCmdArgTest, SingleQuoteEscape) {
+    EXPECT_EQ(escape_cmd_arg("needs escaping"), "'needs escaping'");
+    EXPECT_EQ(escape_cmd_arg("contains'quote"), "'contains'\\''quote'");
+    EXPECT_EQ(escape_cmd_arg("complex example with 'single quotes'"),
+              "'complex example with '\\''single quotes'\\'''");
+}
+
+TEST(EscapeCmdArgTest, DoubleQuoteEscape) {
+    EXPECT_EQ(escape_cmd_arg("needs escaping", false), "\"needs escaping\"");
+    EXPECT_EQ(escape_cmd_arg("contains\"quote", false),
+              "\"contains\\\"quote\"");
+    EXPECT_EQ(escape_cmd_arg("complex example with \"double quotes\"", false),
+              "\"complex example with \\\"double quotes\\\"\"");
+    EXPECT_EQ(escape_cmd_arg("special chars $ ` \\ !", false),
+              "\"special chars \\$ \\` \\\\ \\!\"");
+}
+
+TEST(EscapeCmdArgTest, MixedContent) {
+    std::string cmd =
+        "--bind ctrl-/:toggle-preview --preview 'if [[ -d {} ]]; then command "
+        "ls --group-directories-first --color=always -CF {}; else command "
+        "batcat --color=always --line-range :500 {}; fi' --bind "
+        "ctrl-/:toggle-preview --preview 'if [[ -d {} ]]; then command ls "
+        "--group-directories-first --color=always -CF {}; else command batcat "
+        "--color=always --line-range :500 {}; fi'";
+    std::string expected =
+        "\"--bind ctrl-/:toggle-preview --preview 'if [[ -d {} ]]; then "
+        "command ls --group-directories-first --color=always -CF {}; else "
+        "command batcat --color=always --line-range :500 {}; fi' --bind "
+        "ctrl-/:toggle-preview --preview 'if [[ -d {} ]]; then command ls "
+        "--group-directories-first --color=always -CF {}; else command batcat "
+        "--color=always --line-range :500 {}; fi'\"";
+    EXPECT_EQ(escape_cmd_arg(cmd, false), expected);
 }
 
 TEST(CollectionToCArrayTest, EmptyTest) {

@@ -97,14 +97,19 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         if (!f.existed_before) {
             if (fs::is_regular_file(f.path)) {
                 status = FileStatus::Result;
+                result_cnt++;
             } else {
-                status = FileStatus::IgnoreDidNotExistBefore;
+                status = FileStatus::IgnoreDirectory;
             }
         } else {
             switch (check_accessibility(path)) {
             case AccessStatus::Accessible:
-                status = FileStatus::Copy;
-                copy_cnt++;
+                if (fs::is_regular_file(path)) {
+                    status = FileStatus::Copy;
+                    copy_cnt++;
+                } else {
+                    status = FileStatus::IgnoreDirectory;
+                }
                 break;
             case AccessStatus::DoesNotExist:
                 status = FileStatus::IgnoreNoLongerExist;
@@ -125,6 +130,7 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         return true;
     });
 
+    // TODO: out of how many result files
     LOG(INFO) << "Found " << result_cnt << " result files";
     LOG(INFO) << "Will copy " << copy_cnt << " files into the image";
 }

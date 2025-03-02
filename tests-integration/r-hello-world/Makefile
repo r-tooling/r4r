@@ -2,7 +2,7 @@ NAME := r-hello-world
 IMAGE_TAG ?= r4r/test-$(NAME)
 CONTAINER_NAME ?= r4r-test-$(NAME)
 R4R ?= ../../build/r4r
-BASE_IMAGE ?= ubuntu:22.04
+BASE_IMAGE ?= ubuntu:24.04
 
 all: clean trace check
 
