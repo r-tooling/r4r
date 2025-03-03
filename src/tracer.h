@@ -415,8 +415,8 @@ class DockerFileBuilderTask : public Task {
           archive_{output_dir_ / "archive.tar"},
           permission_script_{output_dir_ / "permissions.sh"},
           cran_install_script_{output_dir_ / "install_r_packages.R"},
-          dockerfile_{output_dir_ / "Dockerfile"}, docker_sudo_access_{
-                                                       docker_sudo_access} {}
+          dockerfile_{output_dir_ / "Dockerfile"},
+          docker_sudo_access_{docker_sudo_access} {}
 
     void run(TracerState& state) override;
 
@@ -807,38 +807,37 @@ class MakefileBuilderTask : public Task {
             }
         }
 
-        makefile
-            << "IMAGE_TAG = " << docker_image_tag_ << "\n"
-            << "CONTAINER_NAME = " << docker_container_name_
-            << "\n"
-            // TODO: add to settings
-            << "TARGET_DIR = result"
-            << "\n\n"
+        makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
+                 << "CONTAINER_NAME = " << docker_container_name_
+                 << "\n"
+                 // TODO: add to settings
+                 << "TARGET_DIR = result"
+                 << "\n\n"
 
-            << ".PHONY: all build run copy clean\n\n"
+                 << ".PHONY: all build run copy clean\n\n"
 
-            << "all: clean copy\n\n"
+                 << "all: clean copy\n\n"
 
-            // clang-format off
+                 // clang-format off
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
-            // clang-format on
+                 // clang-format on
 
-            // clang-format off
+                 // clang-format off
                  << "run: build\n"
                  << "\t@echo 'Running container $(CONTAINER_NAME)'\n"
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
                  << " | tee docker-run.log"
                  << "\n\n"
-            // clang-format on
+                 // clang-format on
 
-            << "copy: run\n"
-            // add a new line in case the docker run did
-            // not finish with one
-            << "\t@echo\n";
+                 << "copy: run\n"
+                 // add a new line in case the docker run did
+                 // not finish with one
+                 << "\t@echo\n";
 
         if (copy_files.empty()) {
             makefile << "\t@echo 'No result files'\n";
@@ -994,7 +993,7 @@ class CaptureEnvironmentTask : public Task {
     bool infer_base_image_{false};
     fs::path base_image_;
 
-    static inline const fs::path kBaseImage = "ubuntu:22.04";
+    static inline fs::path const kBaseImage = "ubuntu:22.04";
 };
 
 class Tracer {

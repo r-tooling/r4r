@@ -55,7 +55,7 @@ struct Manifest {
     std::string timezone;
     std::string distribution;
     std::string distribution_version;
-    fs::path base_image;
+    std::string base_image;
 
     Files copy_files;
     std::unordered_set<RPackage const*> r_packages;
