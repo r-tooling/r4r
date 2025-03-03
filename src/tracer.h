@@ -4,6 +4,7 @@
 #include "archive.h"
 #include "common.h"
 #include "config.h"
+#include "config_file.h"
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
@@ -52,7 +53,7 @@ static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
     // transferable anyway
     trie.insert("/var/cache", true);
     // We should not copy / because it is the root of the filesystem
-    trie.insert("/", true);
+    trie.insert("/", false);
     return trie;
 }();
 
@@ -60,7 +61,7 @@ struct Options {
     LogLevel log_level = LogLevel::Warning;
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
-    std::string docker_base_image{"ubuntu:22.04"};
+    std::string docker_base_image;
     std::string docker_image_tag{STR(kBinaryName << "/test")};
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
@@ -204,8 +205,9 @@ class ResolveFileTask : public Task {
 inline void ResolveFileTask::run(TracerState& state) {
     std::vector<std::pair<std::string, std::unique_ptr<Resolver>>> resolvers;
 
-    resolvers.emplace_back(
-        "ignore", std::make_unique<IgnoreFileResolver>(ignore_file_list_));
+    resolvers.emplace_back("ignore",
+                           std::make_unique<IgnoreFileResolver>(
+                               ignore_file_list_, state.manifest.base_image));
 
     resolvers.emplace_back(
         "deb", std::make_unique<DebPackageResolver>(state.dpkg_database));
@@ -382,8 +384,9 @@ inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
               << " R packages that needs compilation, need to "
                  "pull system dependencies";
 
-    auto deb_packages =
-        RpkgDatabase::get_system_dependencies(compiled_packages);
+    auto deb_packages = RpkgDatabase::get_system_dependencies(
+        compiled_packages, manifest.distribution,
+        manifest.distribution_version);
 
     // bring in R headers and R development dependencies (includes
     // build-essential, gfortran, ...)
@@ -407,14 +410,12 @@ inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
 
 class DockerFileBuilderTask : public Task {
   public:
-    explicit DockerFileBuilderTask(fs::path output_dir, std::string base_image,
-                                   bool docker_sudo_access)
+    explicit DockerFileBuilderTask(fs::path output_dir, bool docker_sudo_access)
         : Task("Create Dockerfile"), output_dir_{std::move(output_dir)},
           archive_{output_dir_ / "archive.tar"},
           permission_script_{output_dir_ / "permissions.sh"},
           cran_install_script_{output_dir_ / "install_r_packages.R"},
           dockerfile_{output_dir_ / "Dockerfile"},
-          base_image_{std::move(base_image)},
           docker_sudo_access_{docker_sudo_access} {}
 
     void run(TracerState& state) override;
@@ -455,6 +456,8 @@ class DockerFileBuilderTask : public Task {
 
 inline void DockerFileBuilderTask::run(TracerState& state) {
     LOG(INFO) << "Generating Dockerfile: " << dockerfile_;
+
+    base_image_ = state.manifest.base_image;
 
     DockerFileBuilder builder{base_image_, output_dir_};
 
@@ -804,38 +807,37 @@ class MakefileBuilderTask : public Task {
             }
         }
 
-        makefile
-            << "IMAGE_TAG = " << docker_image_tag_ << "\n"
-            << "CONTAINER_NAME = " << docker_container_name_
-            << "\n"
-            // TODO: add to settings
-            << "TARGET_DIR = result"
-            << "\n\n"
+        makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
+                 << "CONTAINER_NAME = " << docker_container_name_
+                 << "\n"
+                 // TODO: add to settings
+                 << "TARGET_DIR = result"
+                 << "\n\n"
 
-            << ".PHONY: all build run copy clean\n\n"
+                 << ".PHONY: all build run copy clean\n\n"
 
-            << "all: clean copy\n\n"
+                 << "all: clean copy\n\n"
 
-            // clang-format off
+                 // clang-format off
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
                  << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
-            // clang-format on
+                 // clang-format on
 
-            // clang-format off
+                 // clang-format off
                  << "run: build\n"
                  << "\t@echo 'Running container $(CONTAINER_NAME)'\n"
                  << "\t@docker run -t --name $(CONTAINER_NAME) $(IMAGE_TAG) 2>&1"
                  << " | tee docker-run.log"
                  << "\n\n"
-            // clang-format on
+                 // clang-format on
 
-            << "copy: run\n"
-            // add a new line in case the docker run did
-            // not finish with one
-            << "\t@echo\n";
+                 << "copy: run\n"
+                 // add a new line in case the docker run did
+                 // not finish with one
+                 << "\t@echo\n";
 
         if (copy_files.empty()) {
             makefile << "\t@echo 'No result files'\n";
@@ -904,14 +906,57 @@ class RunMakefileTask : public Task {
 
 class CaptureEnvironmentTask : public Task {
   public:
-    CaptureEnvironmentTask() : Task("Capture environment") {}
+    CaptureEnvironmentTask(std::string const& base_image, bool infer_base_image)
+        : Task("Capture environment"), infer_base_image_{infer_base_image},
+          base_image_{base_image} {
+        CHECK(!base_image.empty() || !infer_base_image);
+    }
 
     void run(TracerState& state) override {
+        capture_distribution(state);
         capture_user(state);
         capture_timezone(state);
     }
 
   private:
+    void capture_distribution(TracerState& state) {
+        auto os_info = ConfigFile::from_file("/etc/os-release");
+        if (!os_info) {
+            LOG(FATAL) << "Failed to read /etc/os-release";
+        }
+
+        auto distro = os_info->get("ID");
+
+        if (distro != "ubuntu" && distro != "debian") {
+            LOG(FATAL) << "Unsupported distribution: " << distro;
+        }
+
+        state.manifest.distribution = distro;
+        state.manifest.distribution_version =
+            string_trim(os_info->get("VERSION_ID"));
+
+        LOG(DEBUG) << "Distribution: " << state.manifest.distribution
+                   << " version: " << state.manifest.distribution_version;
+
+        if (infer_base_image_) {
+            if (!state.manifest.distribution_version.empty()) {
+                state.manifest.base_image =
+                    STR(state.manifest.distribution
+                        << ":" << state.manifest.distribution_version);
+            } else if (state.manifest.distribution ==
+                       "Debian") { // version is empty so it must be Debian
+                                   // unstable
+                state.manifest.base_image = "debian:sid";
+            } else {
+                LOG(WARN) << "Failed to infer base image, fallback to "
+                          << base_image_;
+                state.manifest.base_image = kBaseImage;
+            }
+        } else { // base_image_ is not empty if it is not inferred
+            state.manifest.base_image = base_image_;
+        }
+    }
+
     static void capture_user(TracerState& state) {
         state.manifest.cwd = std::filesystem::current_path();
         LOG(DEBUG) << "Current working directory: " << state.manifest.cwd;
@@ -944,6 +989,11 @@ class CaptureEnvironmentTask : public Task {
             state.manifest.timezone = kDefaultTimezone;
         }
     }
+
+    bool infer_base_image_{false};
+    fs::path base_image_;
+
+    static inline fs::path const kBaseImage = "ubuntu:22.04";
 };
 
 class Tracer {
@@ -965,7 +1015,8 @@ class Tracer {
     void run_pipeline() {
         std::vector<std::unique_ptr<Task>> tasks;
 
-        tasks.push_back(std::make_unique<CaptureEnvironmentTask>());
+        tasks.push_back(std::make_unique<CaptureEnvironmentTask>(
+            options_.docker_base_image, options_.docker_base_image.empty()));
 
         tasks.push_back(
             std::make_unique<FileTracingTask>(options_.ignore_file_list));
@@ -980,8 +1031,7 @@ class Tracer {
         }
 
         tasks.push_back(std::make_unique<DockerFileBuilderTask>(
-            options_.output_dir, options_.docker_base_image,
-            options_.docker_sudo_access));
+            options_.output_dir, options_.docker_sudo_access));
 
         tasks.push_back(std::make_unique<MakefileBuilderTask>(
             options_.makefile, options_.docker_image_tag,

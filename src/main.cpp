@@ -59,6 +59,11 @@ static Options parse_cmd_args(std::span<char const*> args) {
         .with_default(opts.docker_container_name)
         .with_argument("NAME")
         .with_callback([&](auto& arg) { opts.docker_container_name = arg; });
+    parser.add_option("docker-base-image")
+        .with_help("The docker base image")
+        .with_default(opts.docker_base_image)
+        .with_argument("NAME")
+        .with_callback([&](auto& arg) { opts.docker_base_image = arg; });
     parser.add_option("result")
         .with_help("Path to a result file")
         .with_argument("PATH")

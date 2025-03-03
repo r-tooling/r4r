@@ -53,6 +53,9 @@ struct Manifest {
     std::unordered_map<std::string, std::string> envir;
     UserInfo user;
     std::string timezone;
+    std::string distribution;
+    std::string distribution_version;
+    std::string base_image;
 
     Files copy_files;
     std::unordered_set<RPackage const*> r_packages;

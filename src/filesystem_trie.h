@@ -18,7 +18,7 @@ class FileSystemTrie {
         std::unordered_map<std::string, std::unique_ptr<Node>> children;
         T const* value;
 
-        explicit Node(T const* value) : value(value){};
+        explicit Node(T const* value) : value(value) {};
         Node(Node const&) = delete;
         Node(Node&&) noexcept = delete;
         Node& operator=(Node const&) = delete;
