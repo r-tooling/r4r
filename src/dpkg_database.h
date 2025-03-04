@@ -55,6 +55,7 @@ class DpkgDatabase {
     static void
     process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
                               fs::path const& file, DebPackage const* pkg);
+    static void load_source_lists(DebPackages& packages);
 
     DebPackages packages_;
     FileSystemTrie<DebPackage const*> files_;
@@ -100,7 +101,7 @@ inline DebPackages DpkgDatabase::load_installed_packages() {
 }
 
 // This assumes an uncompressed _Packages file
-inline void check_in_sources(DebPackages& packages, std::istream& source_list) {
+inline void has_in_sources(DebPackages& packages, std::istream& source_list) {
     std::string line;
     while (std::getline(source_list, line)) {
         if (line.starts_with("Package: ")) {
@@ -117,8 +118,62 @@ inline void check_in_sources(DebPackages& packages, std::istream& source_list) {
                     if (version == it->second->version) {
                         it->second->in_source_list = true;
                     }
+                } else {
+                    LOG(FATAL)
+                        << "Failed to parse version in source list for package "
+                        << name;
                 }
             }
+        }
+    }
+}
+
+inline void DpkgDatabase::load_source_lists(DebPackages& packages) {
+    auto const sources_list_dir = fs::path("/var/lib/apt/lists/");
+    for (auto const& entry : fs::directory_iterator(sources_list_dir)) {
+        // The entry finished by _Packages, possibly followed by .gz, .lz4, .xz
+        std::regex ansi_regex(R"(.+_Packages)(\.(gz|lz4|xz))?$)");
+
+        auto const filename = entry.path().filename().string();
+        if (std::regex_match(filename, ansi_regex)) {
+            // Decompress to stdout if it is compressed
+            auto const path = entry.path().string();
+            std::unique_ptr<std::istream> source_list;
+            if (filename.ends_with(".gz")) {
+                auto const out = Command("gunzip").arg(path).arg("-c").output();
+                out.check_success("Unable to execute 'gunzip'");
+                source_list =
+                    std::make_unique<std::istringstream>(out.stdout_data);
+            } else if (filename.ends_with(".lz4")) {
+                auto const out = Command("lz4").arg(path).arg("-cd").output();
+                out.check_success("Unable to execute 'lz4'");
+                source_list =
+                    std::make_unique<std::istringstream>(out.stdout_data);
+            } else if (filename.ends_with(".xz")) {
+                // lzcat is equivalent to xz --decompress --stdout
+                auto const out = Command("xzcat").arg(path).output();
+                out.check_success("Unable to execute 'xzcat'");
+                source_list =
+                    std::make_unique<std::istringstream>(out.stdout_data);
+            } else {
+                std::ifstream source_list_file(path);
+                if (!source_list_file.is_open()) {
+                    throw std::runtime_error("Error opening file: " + path);
+                }
+                source_list = std::make_unique<std::ifstream>(
+                    std::move(source_list_file));
+            };
+
+            has_in_sources(packages, *source_list);
+        }
+    }
+
+    // Remove all the packages that are not in a source list
+    for (auto it = packages.begin(); it != packages.end();) {
+        if (!it->second->in_source_list) {
+            it = packages.erase(it);
+        } else {
+            ++it;
         }
     }
 }
@@ -148,6 +203,7 @@ inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
     FileSystemTrie<DebPackage const*> trie;
 
     auto packages = load_installed_packages();
+    load_source_lists(packages);
     for (auto& [pkg_name, pkg] : packages) {
         auto list_file = path / (pkg_name + ".list");
         if (fs::is_regular_file(list_file)) {

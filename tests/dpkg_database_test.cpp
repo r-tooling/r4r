@@ -97,7 +97,7 @@ Description-md5: 57a60fed811a55649354f3eb48ae78ff
 
 )"};
 
-    check_in_sources(packages, source_list);
+    has_in_sources(packages, source_list);
 
     EXPECT_TRUE(packages.at("idle-python3.11")->in_source_list);
     EXPECT_FALSE(packages.at("package2")->in_source_list);
