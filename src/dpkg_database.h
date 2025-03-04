@@ -17,6 +17,8 @@
 struct DebPackage {
     std::string name;
     std::string version;
+    bool in_source_list{false}; // installed from a deb file manually
+                                // downloaded?
 
     bool operator==(DebPackage const& other) const = default;
 };
@@ -95,6 +97,30 @@ inline DebPackages DpkgDatabase::load_installed_packages() {
 
     std::istringstream stream{out.stdout_data};
     return parse_dpkg_list_output(stream);
+}
+
+// This assumes an uncompressed _Packages file
+inline void check_in_sources(DebPackages& packages, std::istream& source_list) {
+    std::string line;
+    while (std::getline(source_list, line)) {
+        if (line.starts_with("Package: ")) {
+            std::string name = line.substr(9);
+            auto it = packages.find(name);
+            if (it != packages.end()) {
+                // check the version in the source_list
+                // Version is the 8th line after Package
+                for (int i = 0; i < 7; i++) {
+                    std::getline(source_list, line);
+                }
+                if (line.starts_with("Version: ")) {
+                    std::string version = line.substr(9);
+                    if (version == it->second->version) {
+                        it->second->in_source_list = true;
+                    }
+                }
+            }
+        }
+    }
 }
 
 inline void

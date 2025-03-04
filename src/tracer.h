@@ -70,6 +70,7 @@ struct Options {
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
+    bool copy_deb_sources{false};
     // TODO: make this mutable so more files could be added from command line
     FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
 };

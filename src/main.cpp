@@ -78,6 +78,9 @@ static Options parse_cmd_args(std::span<char const*> args) {
     parser.add_option("skip-manifest")
         .with_help("Do not generate the manifest")
         .with_callback([&](auto&) { opts.skip_manifest = true; });
+    parser.add_option("copy-deb-sources")
+        .with_help("Copy the deb sources to the Docker image.")
+        .with_callback([&](auto&) { opts.copy_deb_sources = true; });
     parser.add_option("help")
         .with_help("Print this message")
         .with_callback([&](auto&) {
