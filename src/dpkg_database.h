@@ -109,19 +109,18 @@ inline void has_in_sources(DebPackages& packages, std::istream& source_list) {
             auto it = packages.find(name);
             if (it != packages.end()) {
                 // check the version in the source_list
-                // Version is the 8th line after Package
-                for (int i = 0; i < 7; i++) {
-                    std::getline(source_list, line);
-                }
-                if (line.starts_with("Version: ")) {
-                    std::string version = line.substr(9);
-                    if (version == it->second->version) {
-                        it->second->in_source_list = true;
+
+                while (std::getline(source_list, line) &&
+                       !line.starts_with("Version: ")) {
+                    if (line.starts_with("Package: ")) {
+                        LOG(FATAL) << "Failed to parse version in source list "
+                                      "for package "
+                                   << name << "in line starting with: " << line;
                     }
-                } else {
-                    LOG(FATAL)
-                        << "Failed to parse version in source list for package "
-                        << name;
+                }
+                std::string version = line.substr(9);
+                if (version == it->second->version) {
+                    it->second->in_source_list = true;
                 }
             }
         }
@@ -132,7 +131,7 @@ inline void DpkgDatabase::load_source_lists(DebPackages& packages) {
     auto const sources_list_dir = fs::path("/var/lib/apt/lists/");
     for (auto const& entry : fs::directory_iterator(sources_list_dir)) {
         // The entry finished by _Packages, possibly followed by .gz, .lz4, .xz
-        std::regex ansi_regex(R"(.+_Packages)(\.(gz|lz4|xz))?$)");
+        std::regex ansi_regex(R"((.+_Packages)(\.(gz|lz4|xz))?$)");
 
         auto const filename = entry.path().filename().string();
         if (std::regex_match(filename, ansi_regex)) {
@@ -171,6 +170,11 @@ inline void DpkgDatabase::load_source_lists(DebPackages& packages) {
     // Remove all the packages that are not in a source list
     for (auto it = packages.begin(); it != packages.end();) {
         if (!it->second->in_source_list) {
+            LOG(WARN)
+                << "Package " << it->first
+                << " is not in a source list, removing it. The package "
+                   "might have been installed manually. Its files will be "
+                   "directly copied in the Docker image.";
             it = packages.erase(it);
         } else {
             ++it;

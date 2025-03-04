@@ -910,7 +910,7 @@ class CaptureEnvironmentTask : public Task {
     CaptureEnvironmentTask(std::string const& base_image, bool infer_base_image)
         : Task("Capture environment"), infer_base_image_{infer_base_image},
           base_image_{base_image} {
-        CHECK(!base_image.empty() || !infer_base_image);
+        CHECK(!base_image.empty() || infer_base_image);
     }
 
     void run(TracerState& state) override {
