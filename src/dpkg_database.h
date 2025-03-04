@@ -103,26 +103,44 @@ inline DebPackages DpkgDatabase::load_installed_packages() {
 // This assumes an uncompressed _Packages file
 inline void has_in_sources(DebPackages& packages, std::istream& source_list) {
     std::string line;
+    std::optional<std::string> name;
+    std::optional<std::string> architecture;
+    std::optional<std::string> version;
+
     while (std::getline(source_list, line)) {
         if (line.starts_with("Package: ")) {
-            std::string name = line.substr(9);
-            auto it = packages.find(name);
+            name = string_trim(line.substr(9));
+            architecture.reset();
+            version.reset();
+        }
+
+        if (line.starts_with("Version: ") && !version.has_value()) {
+            version = string_trim(line.substr(9));
+        }
+
+        if (line.starts_with("Architecture: ") && !architecture.has_value()) {
+            architecture = string_trim(line.substr(14));
+        }
+
+        if (architecture.has_value() && version.has_value() &&
+            name.has_value()) {
+            std::string package = name.value();
+
+            auto it = packages.find(package);
+
+            // if not found, try again with adding the architecture
+            if (it == packages.end()) {
+                package += ":" + architecture.value();
+                it = packages.find(package);
+            }
+
             if (it != packages.end()) {
                 // check the version in the source_list
-
-                while (std::getline(source_list, line) &&
-                       !line.starts_with("Version: ")) {
-                    if (line.starts_with("Package: ")) {
-                        LOG(FATAL) << "Failed to parse version in source list "
-                                      "for package "
-                                   << name << "in line starting with: " << line;
-                    }
-                }
-                std::string version = line.substr(9);
-                if (version == it->second->version) {
+                if (*version == it->second->version) {
                     it->second->in_source_list = true;
                 }
             }
+            name.reset();
         }
     }
 }
@@ -171,10 +189,11 @@ inline void DpkgDatabase::load_source_lists(DebPackages& packages) {
     for (auto it = packages.begin(); it != packages.end();) {
         if (!it->second->in_source_list) {
             LOG(WARN)
-                << "Package " << it->first
+                << "Package " << it->first << " " << it->second->version
                 << " is not in a source list, removing it. The package "
-                   "might have been installed manually. Its files will be "
-                   "directly copied in the Docker image.";
+                   "might have been installed manually. If tracing detects "
+                   "files from the package, they will be directly copied in"
+                   " the Docker image.";
             it = packages.erase(it);
         } else {
             ++it;

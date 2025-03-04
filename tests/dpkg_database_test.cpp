@@ -102,3 +102,41 @@ Description-md5: 57a60fed811a55649354f3eb48ae78ff
     EXPECT_TRUE(packages.at("idle-python3.11")->in_source_list);
     EXPECT_FALSE(packages.at("package2")->in_source_list);
 }
+
+TEST(ParseSourceList, ParseSourceListArchitecture) {
+    DebPackages packages;
+    packages["libjson-c5:amd64"] =
+        std::make_unique<DebPackage>("libjson-c5:amd64", "0.17-1build1");
+    packages["package2"] = std::make_unique<DebPackage>("package2", "1.0.0");
+
+    std::istringstream source_list{
+        R"(Package: libjson-c5                                                                                         
+Architecture: amd64                                                                                         
+Version: 0.17-1build1                                                                                       
+Multi-Arch: same                                                                                            
+Priority: important                                                                                         
+Section: libs                                                                                               
+Source: json-c                                                                                              
+Origin: Ubuntu                                                                                              
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>                                       
+Original-Maintainer: Nicolas Mora <babelouest@debian.org>                                                   
+Bugs: https://bugs.launchpad.net/ubuntu/+filebug                                                            
+Installed-Size: 101                                                                                         
+Depends: libc6 (>= 2.38)                                                                                    
+Filename: pool/main/j/json-c/libjson-c5_0.17-1build1_amd64.deb                                              
+Size: 35340                                                                                                 
+MD5sum: 63671bef505df17530fda4a4d5b4649e                                                                    
+SHA1: 069f16cb55a49374af57326cc423f79d213f9c65                                                              
+SHA256: 3ac608d78e9e981e14ba7ceb141a46e3dd3ae8d6dbb3a7ecafd2698fe9930584                                    
+SHA512: 8e5cde741b12c06e640eae932f12924649f8838436f9473f2cc721b671829bfc6f555852902ac456c340ee34722a8b98f1f2
+Homepage: https://github.com/json-c/json-c/wiki                                                             
+Description: JSON manipulation library - shared library                                                     
+Task: cloud-minimal, minimal, server-minimal                                                                
+Description-md5: ac049068ef755540cdb41614a65accbf                                                           
+    )"};
+
+    has_in_sources(packages, source_list);
+
+    EXPECT_TRUE(packages.at("libjson-c5:amd64")->in_source_list);
+    EXPECT_FALSE(packages.at("package2")->in_source_list);
+}
