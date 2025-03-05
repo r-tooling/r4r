@@ -66,10 +66,14 @@ class InstallRPackageScriptBuilder {
         }
     }
 
-    /**
-     * @brief Writes the entire R script: header, batch installations, and
-     * footer.
-     */
+    // TODO: instead of embedding the script, it would be better to do the
+    // following: have an Rscript which takes a <name>=<version> params of
+    // packages that shall be installed in parallel The script should be
+    // installed together with the tool into some
+    // /usr/share/r4r/install_r_packages.R and copied into the container. The
+    // Dockerfile should then have simply command:
+    // RUN install_r_packages.R pkg1=1.0 pkg2=2.0 &&
+    //     install_r_packages.R pkg3=1.0 pkg4=2.0
     void write_script() {
         write_header();
 
@@ -192,16 +196,21 @@ class InstallRPackageScriptBuilder {
                   // clang-format off
                   << "  installed_ver <- tryCatch(as.character(packageVersion(pkg_name)), error = function(e) NA)\n"
                   // clang-format on
-                  << "  if (is.na(installed_ver) || installed_ver != pkg_ver) "
-                     "{\n";
+                  << "  if (is.na(installed_ver)) {\n";
             *out_ << "    " << kRHeader;
             *out_ << "    cat('# Error: Failed to install ', pkg_name, ' ', "
-                     "pkg_ver, '(installed: ', installed_ver, ')', '\\n');\n";
+                     "pkg_ver, '\\n');\n";
             *out_ << "    " << kRHeader;
             *out_ << "    cat(readLines('" << log_file << "'), sep='\\n')\n"
                   << "    cat('\\n')\n"
                   << "    quit(status = 1)\n"
-                  << "  }\n"
+                  << "} else if (installed_ver != pkg_ver) {\n";
+            *out_ << "    " << kRHeader;
+            *out_ << "    cat('# Warning: Different version of ', pkg_name, ' "
+                     "installed. Expected: ', pkg_ver, ', installed: ', "
+                     "installed_ver, '\\n');\n";
+            *out_ << "    " << kRHeader;
+            *out_ << "  }\n"
                   << "}\n\n";
         }
     }

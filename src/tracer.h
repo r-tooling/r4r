@@ -630,7 +630,8 @@ inline void DockerFileBuilderTask::install_r_packages(
         InstallRPackageScriptBuilder script;
         script.set_plan(plan)
             .set_output(script_out)
-            .set_max_parallel(4)
+            // TODO: make it an option
+            .set_max_parallel(24)
             .build();
     }
 
