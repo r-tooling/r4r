@@ -1,5 +1,6 @@
 #include "../tests/common.h"
 #include "file_tracer.h"
+#include "ignore_file_map.h"
 #include "syscall_monitor.h"
 #include "util_fs.h"
 #include <fstream>
@@ -106,8 +107,8 @@ TEST(FileTracerTest, IgnoreFilesExtended) {
     TempFile test_file2{"r4r-test-ignore2", ""};
     std::ofstream(*test_file2) << "test content 2";
 
-    FileSystemTrie<bool> ignore_files;
-    ignore_files.insert(test_file1->c_str(), true);
+    IgnoreFileMap ignore_files;
+    ignore_files.add_file(*test_file1);
 
     FileTracer tracer{&ignore_files};
 
@@ -181,7 +182,7 @@ TEST(FileTracerTest, ReadlinkSyscall) {
     ASSERT_EQ(result.detail.value(), 0);
 
     auto const& symlinks = tracer.symlinks();
-    ASSERT_TRUE(symlinks.find(*symlink_path) != nullptr);
-    EXPECT_EQ(*symlinks.find(*symlink_path), *symlink_target_path);
-    ASSERT_TRUE(symlinks.find(*nonexistent_symlink) == nullptr);
+    ASSERT_TRUE(symlinks.find(*symlink_path) != symlinks.end());
+    EXPECT_EQ(symlinks.find(*symlink_path)->second, *symlink_target_path);
+    ASSERT_TRUE(symlinks.find(*nonexistent_symlink) == symlinks.end());
 }

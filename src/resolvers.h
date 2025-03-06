@@ -1,24 +1,25 @@
 #ifndef RESOLVERS_H
 #define RESOLVERS_H
 
-#include "default_image_files.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
-#include "filesystem_trie.h"
 #include "logger.h"
 #include "manifest.h"
 #include "rpkg_database.h"
 #include "util_fs.h"
 #include <filesystem>
+#include <system_error>
 #include <vector>
 
 class Resolver {
   public:
     using Files = std::vector<FileInfo>;
+    using Symlinks = std::map<fs::path, fs::path>;
 
     virtual ~Resolver() = default;
 
-    virtual void resolve(Files& files, Manifest& manifest) = 0;
+    virtual void resolve(Files& files, Symlinks& symlinks,
+                         Manifest& manifest) = 0;
 };
 
 class DebPackageResolver : public Resolver {
@@ -26,19 +27,19 @@ class DebPackageResolver : public Resolver {
     explicit DebPackageResolver(DpkgDatabase const* dpkg_database)
         : dpkg_database_(dpkg_database) {}
 
-    void resolve(Files& files, Manifest& manifest) override;
+    void resolve(Files& files, Symlinks& symlinks, Manifest& manifest) override;
 
   private:
     DpkgDatabase const* dpkg_database_;
 };
 
-inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
+inline void DebPackageResolver::resolve(Files& files, Symlinks& symlinks,
+                                        Manifest& manifest) {
     SymlinkResolver symlink_resolver;
     std::unordered_set<DebPackage const*> resolved_packages;
     size_t resolved_files{};
 
-    auto resolved = [&](FileInfo const& info) {
-        auto& path = info.path;
+    auto resolved = [&](fs::path const& path) {
         for (auto const& p : symlink_resolver.resolve_symlinks(path)) {
             if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
                 LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
@@ -53,9 +54,11 @@ inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
         return false;
     };
 
-    std::erase_if(files, resolved);
+    std::erase_if(files, [&](auto const& info) { return resolved(info.path); });
+    std::erase_if(symlinks,
+                  [&](auto const& entry) { return resolved(entry.first); });
 
-    LOG(INFO) << "Resolved " << resolved_files << " files to "
+    LOG(INFO) << "Resolved " << resolved_files << " files and symlinks to "
               << resolved_packages.size() << " deb packages";
 
     if (Logger::get().is_enabled(DEBUG)) {
@@ -69,10 +72,11 @@ inline void DebPackageResolver::resolve(Files& files, Manifest& manifest) {
 
 class CopyFileResolver : public Resolver {
   public:
-    void resolve(Files& files, Manifest& manifest) override;
+    void resolve(Files& files, Symlinks& symlinks, Manifest& manifest) override;
 };
 
-inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
+inline void CopyFileResolver::resolve(Files& files, Symlinks& symlinks,
+                                      Manifest& manifest) {
     size_t copy_cnt = 0;
     size_t result_cnt = 0;
 
@@ -83,7 +87,9 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         }
     }
 
-    std::erase_if(files, [&](auto const& f) {
+    // TODO: split to two smaller functions
+    LOG(DEBUG) << "Resolving files";
+    std::erase_if(files, [&](FileInfo const& f) {
         auto& path = f.path;
         auto status = FileStatus::Copy;
 
@@ -94,7 +100,7 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         }
 
         if (!f.existed_before) {
-            if (fs::is_regular_file(f.path)) {
+            if (fs::is_regular_file(path) || fs::is_symlink(path)) {
                 status = FileStatus::Result;
                 result_cnt++;
             } else {
@@ -103,7 +109,7 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         } else {
             switch (check_accessibility(path)) {
             case AccessStatus::Accessible:
-                if (fs::is_regular_file(path)) {
+                if (fs::is_regular_file(path) || fs::is_symlink(path)) {
                     status = FileStatus::Copy;
                     copy_cnt++;
                 } else {
@@ -129,9 +135,46 @@ inline void CopyFileResolver::resolve(Files& files, Manifest& manifest) {
         return true;
     });
 
+    LOG(DEBUG) << "Resolving symlinks";
+
+    std::erase_if(symlinks, [&](auto const& entry) {
+        std::error_code ec;
+        auto is_link = fs::is_symlink(entry.first, ec);
+        if (ec) {
+            LOG(WARN) << "Failed to check symlink " << entry.first << " - "
+                      << ec.message();
+            return false;
+        }
+
+        if (!is_link) {
+            LOG(WARN) << "Traced symlink " << entry.first
+                      << " is not a symlink anymore";
+            return false;
+        }
+
+        auto exits = fs::exists(entry.second, ec);
+        if (ec) {
+            LOG(WARN) << "Failed to check file " << entry.second << " - "
+                      << ec.message();
+            return false;
+        }
+
+        if (!exits) {
+            LOG(DEBUG) << "Traced symlink " << entry.first << " target "
+                       << entry.second << " no longer exists";
+            return false;
+        }
+
+        LOG(DEBUG) << "Adding symlink " << entry.first;
+
+        manifest.symlinks.insert(entry.first);
+        return true;
+    });
+
     // TODO: out of how many result files
     LOG(INFO) << "Found " << result_cnt << " result files";
     LOG(INFO) << "Will copy " << copy_cnt << " files into the image";
+    LOG(INFO) << "Will install " << manifest.symlinks.size() << " symlinks";
 }
 
 class RPackageResolver : public Resolver {
@@ -139,7 +182,7 @@ class RPackageResolver : public Resolver {
     explicit RPackageResolver(RpkgDatabase const* rpkg_database)
         : rpkg_database_{rpkg_database} {}
 
-    void resolve(Files& files, Manifest& manifest) override;
+    void resolve(Files& files, Symlinks& symlinks, Manifest& manifest) override;
 
   private:
     RpkgDatabase const* rpkg_database_;
@@ -148,7 +191,8 @@ class RPackageResolver : public Resolver {
                               Manifest& manifest);
 };
 
-inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
+inline void RPackageResolver::resolve(Files& files, Symlinks& /*symlinks*/,
+                                      Manifest& manifest) {
     SymlinkResolver symlink_resolved;
     std::unordered_set<RPackage const*> resolved_packages;
     size_t resolved_files{};
@@ -182,74 +226,6 @@ inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
     }
 
     manifest.r_packages.merge(resolved_packages);
-}
-
-class IgnoreFileResolver : public Resolver {
-  public:
-    IgnoreFileResolver(FileSystemTrie<ImageFileInfo> const* default_file_list,
-                       FileSystemTrie<bool> const* ignore_file_list)
-        : default_file_list_{default_file_list},
-          ignore_file_list_{ignore_file_list} {}
-
-    void resolve(Files& files, Manifest& manifest) override;
-
-  private:
-    FileSystemTrie<ImageFileInfo> const* default_file_list_;
-    FileSystemTrie<bool> const* ignore_file_list_;
-};
-
-inline void IgnoreFileResolver::resolve(Files& files,
-                                        [[maybe_unused]] Manifest& manifest) {
-    auto count = files.size();
-
-    if (ignore_file_list_) {
-        std::erase_if(files, [&](FileInfo const& info) {
-            auto const& path = info.path;
-            if (auto const* it = ignore_file_list_->find_last_matching(path);
-                it && *it) {
-                LOG(DEBUG) << "Resolving: " << path
-                           << " to: ignored (ignore files)";
-                return true;
-            }
-            return false;
-        });
-    }
-
-    if (default_file_list_) {
-        SymlinkResolver resolver;
-        std::erase_if(files, [&](FileInfo const& info) {
-            auto const& path = info.path;
-            for (auto const& p : resolver.resolve_symlinks(path)) {
-                if (auto const* f = default_file_list_->find(p); f) {
-                    // TODO: check the size, perm, ...
-                    LOG(DEBUG) << "Resolving: " << path
-                               << " to: ignored - image default";
-                    return true;
-                }
-            }
-            return false;
-        });
-    }
-
-    // ignore the .uuid files from fontconfig
-    static std::unordered_set<fs::path> const fontconfig_dirs = {
-        "/usr/share/fonts", "/usr/share/poppler", "/usr/share/texmf/fonts"};
-
-    std::erase_if(files, [&](FileInfo const& info) {
-        auto const& path = info.path;
-        for (auto const& d : fontconfig_dirs) {
-            if (is_sub_path(path, d)) {
-                if (path.filename() == ".uuid") {
-                    LOG(DEBUG) << "Resolving: " << path << " to: ignored";
-                    return true;
-                }
-            }
-        }
-        return false;
-    });
-
-    LOG(INFO) << "Ignoring " << (count - files.size())
-              << " of the traced files";
 }
 
 #endif // RESOLVERS_H

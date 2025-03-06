@@ -9,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <source_location>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -251,5 +252,16 @@ class LogMessage {
     if (!(condition))                                                          \
     LogMessage(LogLevel::Fatal, __FILE__, __LINE__).stream()                   \
         << "Check failed: " #condition " "
+
+template <typename T>
+constexpr T*
+check_not_null(T* ptr,
+               std::source_location loc = std::source_location::current()) {
+    if (!ptr) {
+        LOG(FATAL) << "Null pointer at" << loc.file_name() << ":"
+                   << std::to_string(loc.line());
+    }
+    return ptr;
+}
 
 #endif // LOGGER_H

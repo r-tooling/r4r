@@ -68,6 +68,11 @@ class DockerFileBuilder {
     std::vector<fs::path> copied_files_;
 };
 
+inline DockerFileBuilder& DockerFileBuilder::run(std::string const& command) {
+    run(std::vector{command});
+    return *this;
+}
+
 inline DockerFileBuilder&
 DockerFileBuilder::run(std::vector<std::string> const& commands) {
     std::string cmds = string_join(commands, " && \\\n  ");

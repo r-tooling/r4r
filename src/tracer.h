@@ -4,10 +4,12 @@
 #include "archive.h"
 #include "common.h"
 #include "config.h"
+#include "default_image_files.h"
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
 #include "filesystem_trie.h"
+#include "ignore_file_map.h"
 #include "install_r_package_builder.h"
 #include "logger.h"
 #include "manifest.h"
@@ -33,31 +35,9 @@
 #include <stdexcept>
 #include <string>
 
-#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-/// The global ignore file list.
-static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
-    FileSystemTrie<bool> trie;
-    trie.insert("/dev", true);
-    trie.insert("/etc/ld.so.cache", true);
-    trie.insert("/etc/nsswitch.conf", true);
-    trie.insert("/etc/passwd", true);
-    trie.insert("/proc", true);
-    trie.insert("/sys", true);
-    // created by locale-gen
-    trie.insert("/usr/lib/locale/locale-archive", true);
-    // fonts should be installed from a package
-    trie.insert("/usr/local/share/fonts", true);
-    // this might be a bit too drastic, but cache is usually not
-    // transferable anyway
-    trie.insert("/var/cache", true);
-    // we should track the root of the filesystem
-    trie.insert("/", false);
-    return trie;
-}();
 
 struct Options {
     LogLevel log_level = LogLevel::Warning;
@@ -74,20 +54,15 @@ struct Options {
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
-    // TODO: make this mutable so more files could be added from command line
-    FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
+    IgnoreFileMap ignore_file_map;
 };
-
-// static inline fs::path const kImageFileCache = []() {
-//     return get_user_cache_dir() / "r4r" / (kImageName + ".cache");
-// }();
 
 struct TracerState {
     DpkgDatabase dpkg_database;
     RpkgDatabase rpkg_database;
 
     std::vector<FileInfo> traced_files;
-    FileSystemTrie<fs::path> traced_symlinks;
+    std::map<fs::path, fs::path> traced_symlinks;
 
     Manifest manifest;
 };
@@ -118,14 +93,14 @@ static constexpr std::string_view kDefaultTimezone{"UTC"};
 
 class FileTracingTask : public Task {
   public:
-    explicit FileTracingTask(FileSystemTrie<bool> const* ignore_file_list)
-        : Task("Trace files"), ignore_file_list_{ignore_file_list} {}
+    explicit FileTracingTask(IgnoreFileMap const* ignore_file_map)
+        : Task("Trace files"), ignore_file_map_{ignore_file_map} {}
 
     void run(TracerState& state) override;
     void stop() override;
 
   private:
-    FileSystemTrie<bool> const* ignore_file_list_;
+    IgnoreFileMap const* ignore_file_map_;
     SyscallMonitor* monitor_{};
 };
 
@@ -136,7 +111,7 @@ inline void FileTracingTask::run(TracerState& state) {
     // output of the traced program
     auto old_log_sink = Logger::get().set_sink(std::make_unique<StoreSink>());
 
-    FileTracer tracer{ignore_file_list_};
+    FileTracer tracer{ignore_file_map_};
     SyscallMonitor monitor{state.manifest.cmd, tracer};
     monitor.redirect_stdout(std::cout);
     monitor.redirect_stderr(std::cerr);
@@ -202,66 +177,17 @@ inline void FileTracingTask::stop() {
 // We do not need this composition, each of the resolver can now be a task
 class ResolveFileTask : public Task {
   public:
-    ResolveFileTask(fs::path R_bin, std::string docker_base_image,
-                    fs::path default_image_file,
-                    FileSystemTrie<bool> const* ignore_file_list)
-        : Task("Resolve files"), R_bin_{std::move(R_bin)},
-          docker_base_image_(std::move(docker_base_image)),
-          default_image_file_{std::move(default_image_file)},
-          ignore_file_list_{ignore_file_list} {}
+    explicit ResolveFileTask(fs::path R_bin)
+        : Task("Resolve files"), R_bin_{std::move(R_bin)} {}
 
     void run(TracerState& state) override;
 
   private:
-    static inline std::vector<std::string> const kBlacklistPatterns = {
-        "/dev/*", "/sys/*", "/proc/*"};
-
     fs::path R_bin_;
-    std::string docker_base_image_;
-    fs::path default_image_file_;
-    FileSystemTrie<bool> const* ignore_file_list_;
-    FileSystemTrie<ImageFileInfo> load_default_files();
 };
-
-inline FileSystemTrie<ImageFileInfo> ResolveFileTask::load_default_files() {
-    auto default_files = [&]() {
-        if (fs::exists(default_image_file_)) {
-            return DefaultImageFiles::from_file(default_image_file_);
-        }
-
-        LOG(INFO) << "Default image file cache " << default_image_file_
-                  << " does not exists, creating from image "
-                  << docker_base_image_;
-
-        auto files = DefaultImageFiles::from_image(docker_base_image_,
-                                                   kBlacklistPatterns);
-        try {
-            fs::create_directories(default_image_file_.parent_path());
-            std::ofstream out{default_image_file_};
-            files.save(out);
-        } catch (std::exception const& e) {
-            LOG(WARN) << "Failed to store default image file list to "
-                      << default_image_file_ << ": " << e.what();
-        }
-        return files;
-    }();
-
-    LOG(DEBUG) << "Loaded " << default_files.size() << " default files";
-
-    FileSystemTrie<ImageFileInfo> trie;
-    for (auto const& info : default_files.files()) {
-        trie.insert(info.path, info);
-    }
-    return trie;
-}
 
 inline void ResolveFileTask::run(TracerState& state) {
     std::vector<std::pair<std::string, std::unique_ptr<Resolver>>> resolvers;
-
-    auto default_files = load_default_files();
-
-    resolvers.emplace_back("ignore", std::make_unique<IgnoreFileResolver>(
-                                         &default_files, ignore_file_list_));
 
     resolvers.emplace_back(
         "deb", std::make_unique<DebPackageResolver>(&state.dpkg_database));
@@ -278,7 +204,8 @@ inline void ResolveFileTask::run(TracerState& state) {
 
     for (auto const& [name, resolver] : resolvers) {
         size_t count = state.traced_files.size();
-        resolver->resolve(state.traced_files, state.manifest);
+        resolver->resolve(state.traced_files, state.traced_symlinks,
+                          state.manifest);
         summary +=
             STR(name << "(" << (count - state.traced_files.size()) << ") ");
     }
@@ -498,9 +425,7 @@ class DockerFileBuilderTask : public Task {
     static void prepare_command(DockerFileBuilder& builder,
                                 Manifest const& manifest);
 
-    void copy_files(DockerFileBuilder& builder,
-                    FileSystemTrie<fs::path> const& symlinks,
-                    Manifest const& manifest) const;
+    void copy_files(DockerFileBuilder& builder, Manifest const& manifest) const;
 
     void install_r_packages(DockerFileBuilder& builder,
                             Manifest const& manifest,
@@ -532,7 +457,7 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
 
     install_deb_packages(builder, manifest);
     install_r_packages(builder, manifest, state.rpkg_database);
-    copy_files(builder, state.traced_symlinks, manifest);
+    copy_files(builder, manifest);
 
     set_environment(builder, manifest);
     prepare_command(builder, manifest);
@@ -541,11 +466,8 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
     docker_file.save(dockerfile_);
 }
 
-inline void
-DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
-                                  FileSystemTrie<fs::path> const& symlinks,
-                                  Manifest const& manifest) const {
-
+inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
+                                              Manifest const& manifest) const {
     std::vector<fs::path> files;
     for (auto const& [path, status] : manifest.copy_files) {
         if (status != FileStatus::Copy) {
@@ -556,41 +478,10 @@ DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
         if (fs::is_symlink(path)) {
             files.push_back(fs::read_symlink(path));
         }
-
-        // fs::path p = path.root_path();
-        // for (auto const& part : path.relative_path()) {
-        //     p /= part;
-        //     if (auto const* it = symlinks.find(p); it) {
-        //         // p is a symlink
-        //         std::error_code ec;
-        //         bool is_link = fs::is_symlink(p, ec);
-        //         if (ec) {
-        //             LOG(WARN)
-        //                 << "Failed to verify that " << p << " is a symlink";
-        //             continue;
-        //         }
-        //         if (!is_link) {
-        //             LOG(WARN) << "Tracing traced " << p
-        //                       << " as a symlink, but not it is not";
-        //             continue;
-        //         }
-        //
-        //         files.push_back(p);
-        //         LOG(DEBUG) << "Adding symlink " << p << " -> " << *it
-        //                    << " into file archive";
-        //     }
-        // }
     }
 
-    for (auto const& node : symlinks) {
-        if (node.value == nullptr) {
-            continue;
-        }
-
-        files.push_back(node.path);
-        LOG(DEBUG) << "Adding symlink " << node.path << " -> " << *node.value
-                   << " into file archive";
-    }
+    std::copy(manifest.symlinks.begin(), manifest.symlinks.end(),
+              std::back_inserter(files));
 
     if (files.empty()) {
         return;
@@ -1048,17 +939,67 @@ class Tracer {
     }
 
   private:
+    static void configure_default_ignore_pattern(IgnoreFileMap& map) {
+        map.add_wildcard("/dev");
+        map.add_wildcard("/etc/ld.so.cache");
+        map.add_wildcard("/etc/nsswitch.conf");
+        map.add_wildcard("/etc/passwd");
+        map.add_wildcard("/proc");
+        map.add_wildcard("/sys");
+        // created by locale-gen
+        map.add_wildcard("/usr/lib/locale/locale-archive");
+        // fonts should be installed from a package
+        map.add_wildcard("/usr/local/share/fonts");
+        // this might be a bit too drastic, but cache is usually not
+        // transferable anyway
+        map.add_wildcard("/var/cache");
+        // we should track the root of the filesystem
+        map.add_file("/");
+
+        map.add_custom(ignore_font_uuid_files);
+    }
+
+    static void load_image_default_files(fs::path const& default_image_file,
+                                         std::string const& docker_base_image,
+                                         IgnoreFileMap& map) {
+        auto default_files = [&]() {
+            if (fs::exists(default_image_file)) {
+                return DefaultImageFiles::from_file(default_image_file);
+            }
+
+            LOG(INFO) << "Default image file cache " << default_image_file
+                      << " does not exists, creating from image "
+                      << docker_base_image;
+
+            auto files = DefaultImageFiles::from_image(docker_base_image);
+
+            try {
+                fs::create_directories(default_image_file.parent_path());
+                std::ofstream out{default_image_file};
+                files.save(out);
+            } catch (std::exception const& e) {
+                LOG(WARN) << "Failed to store default image file list to "
+                          << default_image_file << ": " << e.what();
+            }
+            return files;
+        }();
+
+        LOG(DEBUG) << "Loaded " << default_files.size() << " default files";
+
+        for (auto const& info : default_files.files()) {
+            map.add_file(info.path);
+        }
+    }
+
     void run_pipeline() {
         std::vector<std::unique_ptr<Task>> tasks;
 
         tasks.push_back(std::make_unique<CaptureEnvironmentTask>());
 
         tasks.push_back(
-            std::make_unique<FileTracingTask>(&options_.ignore_file_list));
+            std::make_unique<FileTracingTask>(&options_.ignore_file_map));
 
-        tasks.push_back(std::make_unique<ResolveFileTask>(
-            options_.R_bin, options_.docker_base_image,
-            options_.default_image_file, &options_.ignore_file_list));
+        tasks.push_back(std::make_unique<ResolveFileTask>(options_.R_bin));
 
         tasks.push_back(std::make_unique<ResolveRPackageSystemDependencies>());
 
@@ -1105,6 +1046,11 @@ class Tracer {
         if (options_.makefile.empty()) {
             options_.makefile = options_.output_dir / "Makefile";
         }
+
+        Tracer::configure_default_ignore_pattern(options_.ignore_file_map);
+        Tracer::load_image_default_files(options_.default_image_file,
+                                         options_.docker_base_image,
+                                         options_.ignore_file_map);
     }
 
     void run(Task& task, TracerState& state) {

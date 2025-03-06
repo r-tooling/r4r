@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <string>
 #include <sys/stat.h>
+#include <unordered_set>
 #include <vector>
 
 enum class FileStatus {
@@ -55,6 +56,7 @@ struct Manifest {
     std::string timezone;
 
     Files copy_files;
+    std::unordered_set<fs::path> symlinks;
     std::unordered_set<RPackage const*> r_packages;
     std::unordered_set<DebPackage const*> deb_packages;
 };

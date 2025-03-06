@@ -1,7 +1,7 @@
 #ifndef FILE_TRACER_H
 #define FILE_TRACER_H
 
-#include "filesystem_trie.h"
+#include "ignore_file_map.h"
 #include "logger.h"
 #include "syscall_monitor.h"
 #include <fcntl.h>
@@ -21,8 +21,8 @@ class FileTracer : public SyscallListener {
     using Files = std::unordered_map<fs::path, FileInfo>;
 
     explicit FileTracer(
-        FileSystemTrie<bool> const* ignore_file_list = &kNoIgnoreFiles_)
-        : ignore_file_list_{ignore_file_list} {}
+        IgnoreFileMap const* ignore_file_map = &kDefaultIgnoreFiles_)
+        : ignore_file_map_{check_not_null(ignore_file_map)} {}
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override;
@@ -30,12 +30,12 @@ class FileTracer : public SyscallListener {
     void on_syscall_exit(pid_t pid, SyscallRet ret_val, bool is_error) override;
 
     Files const& files() const { return files_; }
-    FileSystemTrie<fs::path> symlinks() const { return symlinks_; }
+    std::map<fs::path, fs::path> symlinks() const { return symlinks_; }
 
     std::uint64_t syscalls_count() const { return syscalls_count_; }
 
   private:
-    static inline FileSystemTrie<bool> const kNoIgnoreFiles_;
+    static inline IgnoreFileMap const kDefaultIgnoreFiles_;
 
     using Warnings = std::vector<std::string>;
     using SyscallState = std::variant<std::monostate, FileInfo>;
@@ -92,11 +92,11 @@ class FileTracer : public SyscallListener {
 #undef REG_SYSCALL_HANDLER
     };
 
-    FileSystemTrie<bool> const* ignore_file_list_;
+    IgnoreFileMap const* ignore_file_map_;
     std::uint64_t syscalls_count_{0};
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
-    FileSystemTrie<fs::path> symlinks_;
+    std::map<fs::path, fs::path> symlinks_;
     Warnings warnings_;
 };
 
@@ -202,8 +202,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
         result /= pathname;
     }
 
-    if (bool const* it = ignore_file_list_->find_last_matching(result);
-        it && *it) {
+    if (ignore_file_map_->ignore(result)) {
         LOG(DEBUG) << "Ignoring file: " << result;
         return;
     }
@@ -329,9 +328,7 @@ inline void FileTracer::syscall_readlink_entry(pid_t pid, SyscallArgs args,
         return;
     }
 
-    // TODO: make it a function
-    if (bool const* it = ignore_file_list_->find_last_matching(path);
-        it && *it) {
+    if (ignore_file_map_->ignore(path)) {
         LOG(DEBUG) << "Ignoring file: " << path;
         return;
     }
@@ -362,7 +359,12 @@ inline void FileTracer::syscall_readlink_exit(pid_t, SyscallRet, bool is_error,
         return;
     }
 
-    symlinks_.insert(info.path, target);
+    if (ignore_file_map_->ignore(target)) {
+        LOG(DEBUG) << "Ignoring file: " << target;
+        return;
+    }
+
+    symlinks_.emplace(info.path, target);
 }
 
 #endif // FILE_TRACER_H
