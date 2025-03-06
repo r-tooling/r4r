@@ -12,6 +12,7 @@ void create_tar_archive(fs::path const& archive, FileCollection const& files) {
         std::ofstream temp{*temp_file};
         for (auto const& file : files) {
             temp << file.string() << '\n';
+            LOG(DEBUG) << "Adding to tar: " << file;
         }
     }
 

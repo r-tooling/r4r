@@ -186,20 +186,22 @@ inline void RPackageResolver::resolve(Files& files, Manifest& manifest) {
 
 class IgnoreFileResolver : public Resolver {
   public:
-    explicit IgnoreFileResolver(FileSystemTrie<bool> const&&) = delete;
-    explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list)
-        : ignore_file_list_{ignore_file_list} {}
+    explicit IgnoreFileResolver(FileSystemTrie<bool> const&&,
+                                std::string const& image_name) = delete;
+    explicit IgnoreFileResolver(FileSystemTrie<bool> const& ignore_file_list,
+                                std::string const& image_name)
+        : ignore_file_list_{ignore_file_list}, image_name_{image_name},
+          image_file_cache_(get_user_cache_dir() / "r4r" /
+                            (image_name_ + ".cache")) {}
 
     void resolve(Files& files, Manifest& manifest) override;
 
   private:
     std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
-    static FileSystemTrie<ImageFileInfo> load_default_files();
-    static inline std::string const kImageName = "ubuntu:22.04";
+    FileSystemTrie<ImageFileInfo> load_default_files();
+    std::string const image_name_;
 
-    static inline fs::path const kImageFileCache = []() {
-        return get_user_cache_dir() / "r4r" / (kImageName + ".cache");
-    }();
+    fs::path const image_file_cache_;
 
     static inline std::vector<std::string> const kBlacklistPatterns = {
         "/dev/*", "/sys/*", "/proc/*"};
@@ -259,23 +261,23 @@ inline void IgnoreFileResolver::resolve(Files& files,
 }
 
 inline FileSystemTrie<ImageFileInfo> IgnoreFileResolver::load_default_files() {
-    auto default_files = []() {
-        if (fs::exists(kImageFileCache)) {
-            return DefaultImageFiles::from_file(kImageFileCache);
+    auto default_files = [this]() {
+        if (fs::exists(image_file_cache_)) {
+            return DefaultImageFiles::from_file(image_file_cache_);
         }
 
-        LOG(INFO) << "Default image file cache " << kImageFileCache
-                  << " does not exists, creating from image " << kImageName;
+        LOG(INFO) << "Default image file cache " << image_file_cache_
+                  << " does not exists, creating from image " << image_name_;
 
         auto files =
-            DefaultImageFiles::from_image(kImageName, kBlacklistPatterns);
+            DefaultImageFiles::from_image(image_name_, kBlacklistPatterns);
         try {
-            fs::create_directories(kImageFileCache.parent_path());
-            std::ofstream out{kImageFileCache};
+            fs::create_directories(image_file_cache_.parent_path());
+            std::ofstream out{image_file_cache_};
             files.save(out);
         } catch (std::exception const& e) {
             LOG(WARN) << "Failed to store default image file list to "
-                      << kImageFileCache << ": " << e.what();
+                      << image_file_cache_ << ": " << e.what();
         }
         return files;
     }();
