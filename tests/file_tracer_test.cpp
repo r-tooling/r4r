@@ -4,6 +4,7 @@
 #include "util_fs.h"
 #include <fstream>
 #include <gtest/gtest.h>
+#include <linux/limits.h>
 
 TEST(FileTracerTest, OpenSyscall) {
     SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
@@ -139,4 +140,48 @@ TEST(FileTracerTest, IgnoreFilesExtended) {
     ASSERT_TRUE(files.contains(*test_file2));
     EXPECT_TRUE(files.at(*test_file2).existed_before);
     EXPECT_TRUE(files.at(*test_file2).size.has_value());
+}
+
+TEST(FileTracerTest, ReadlinkSyscall) {
+    SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
+
+    TempFile symlink_target_path{"r4r-test-symlink-target", ""};
+    TempFile symlink_path{"r4r-test-symlink", ""};
+
+    fs::create_symlink(*symlink_target_path, *symlink_path);
+
+    TempFile nonexistent_symlink{"r4r-nonexistent-symlink", ""};
+
+    FileTracer tracer{};
+
+    SyscallMonitor monitor(
+        [&symlink_path, &nonexistent_symlink]() {
+            std::array<char, PATH_MAX> buffer{};
+
+            // Successful readlink
+            ssize_t len = readlink(symlink_path->c_str(), buffer.data(),
+                                   sizeof(buffer) - 1);
+            if (len == -1) {
+                return 1;
+            }
+
+            // Unsuccessful readlink
+            ssize_t fail_len = readlink(nonexistent_symlink->c_str(),
+                                        buffer.data(), sizeof(buffer) - 1);
+            if (fail_len != -1) {
+                return 2;
+            }
+
+            return 0;
+        },
+        tracer);
+
+    auto result = monitor.start();
+    ASSERT_EQ(result.kind, SyscallMonitor::Result::Exit);
+    ASSERT_EQ(result.detail.value(), 0);
+
+    auto const& symlinks = tracer.symlinks();
+    ASSERT_TRUE(symlinks.find(*symlink_path) != nullptr);
+    EXPECT_EQ(*symlinks.find(*symlink_path), *symlink_target_path);
+    ASSERT_TRUE(symlinks.find(*nonexistent_symlink) == nullptr);
 }

@@ -33,6 +33,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -86,6 +87,7 @@ struct TracerState {
     RpkgDatabase rpkg_database;
 
     std::vector<FileInfo> traced_files;
+    FileSystemTrie<fs::path> traced_symlinks;
 
     Manifest manifest;
 };
@@ -145,8 +147,9 @@ inline void FileTracingTask::run(TracerState& state) {
     monitor_ = nullptr;
 
     LOG(INFO) << "Finished tracing in " << format_elapsed_time(elapsed);
-    LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls and "
-              << tracer.files().size() << " files";
+    LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls, "
+              << tracer.files().size() << " files, " << tracer.symlinks().size()
+              << " symlinks";
 
     // print the postponed messages
     auto sink = Logger::get().set_sink(std::move(old_log_sink));
@@ -185,6 +188,8 @@ inline void FileTracingTask::run(TracerState& state) {
                   [](auto const& lhs, auto const& rhs) {
                       return lhs.path < rhs.path;
                   });
+
+        state.traced_symlinks = tracer.symlinks();
     }
 }
 
@@ -271,11 +276,11 @@ inline void ResolveFileTask::run(TracerState& state) {
     std::string summary;
     size_t total_count = state.traced_files.size();
 
-    for (auto& [name, resolver] : resolvers) {
+    for (auto const& [name, resolver] : resolvers) {
         size_t count = state.traced_files.size();
         resolver->resolve(state.traced_files, state.manifest);
-        summary += name + "(" +
-                   std::to_string(count - state.traced_files.size()) + ") ";
+        summary +=
+            STR(name << "(" << (count - state.traced_files.size()) << ") ");
     }
 
     LOG(INFO) << "Resolver summary: " << total_count << " file(s): " << summary;
@@ -493,7 +498,9 @@ class DockerFileBuilderTask : public Task {
     static void prepare_command(DockerFileBuilder& builder,
                                 Manifest const& manifest);
 
-    void copy_files(DockerFileBuilder& builder, Manifest const& manifest) const;
+    void copy_files(DockerFileBuilder& builder,
+                    FileSystemTrie<fs::path> const& symlinks,
+                    Manifest const& manifest) const;
 
     void install_r_packages(DockerFileBuilder& builder,
                             Manifest const& manifest,
@@ -525,7 +532,7 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
 
     install_deb_packages(builder, manifest);
     install_r_packages(builder, manifest, state.rpkg_database);
-    copy_files(builder, manifest);
+    copy_files(builder, state.traced_symlinks, manifest);
 
     set_environment(builder, manifest);
     prepare_command(builder, manifest);
@@ -534,8 +541,10 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
     docker_file.save(dockerfile_);
 }
 
-inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
-                                              Manifest const& manifest) const {
+inline void
+DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
+                                  FileSystemTrie<fs::path> const& symlinks,
+                                  Manifest const& manifest) const {
 
     std::vector<fs::path> files;
     for (auto const& [path, status] : manifest.copy_files) {
@@ -547,12 +556,47 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
         if (fs::is_symlink(path)) {
             files.push_back(fs::read_symlink(path));
         }
+
+        // fs::path p = path.root_path();
+        // for (auto const& part : path.relative_path()) {
+        //     p /= part;
+        //     if (auto const* it = symlinks.find(p); it) {
+        //         // p is a symlink
+        //         std::error_code ec;
+        //         bool is_link = fs::is_symlink(p, ec);
+        //         if (ec) {
+        //             LOG(WARN)
+        //                 << "Failed to verify that " << p << " is a symlink";
+        //             continue;
+        //         }
+        //         if (!is_link) {
+        //             LOG(WARN) << "Tracing traced " << p
+        //                       << " as a symlink, but not it is not";
+        //             continue;
+        //         }
+        //
+        //         files.push_back(p);
+        //         LOG(DEBUG) << "Adding symlink " << p << " -> " << *it
+        //                    << " into file archive";
+        //     }
+        // }
+    }
+
+    for (auto const& node : symlinks) {
+        if (node.value == nullptr) {
+            continue;
+        }
+
+        files.push_back(node.path);
+        LOG(DEBUG) << "Adding symlink " << node.path << " -> " << *node.value
+                   << " into file archive";
     }
 
     if (files.empty()) {
         return;
     }
 
+    // 1. copy files
     std::sort(files.begin(), files.end());
 
     create_tar_archive(archive_, files);
@@ -564,6 +608,7 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
                      << " --same-owner --same-permissions --absolute-names"),
                  STR("rm -f " << archive_)});
 
+    // 2. set proper permissions
     {
         std::ofstream permissions{permission_script_};
         generate_permissions_script(files, permissions);
@@ -1037,6 +1082,7 @@ class Tracer {
             .dpkg_database = DpkgDatabase::system_database(),
             .rpkg_database = RpkgDatabase::from_R(options_.R_bin),
             .traced_files = {},
+            .traced_symlinks = {},
             .manifest = {},
         };
 
