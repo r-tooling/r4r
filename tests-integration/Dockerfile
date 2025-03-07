@@ -25,6 +25,7 @@ RUN apt-get update && \
   git \
   gnupg \
   gosu \
+  lz4 \
   r-base-dev \
   libicu-dev \
   sudo && \
