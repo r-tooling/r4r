@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <string>
 #include <sys/stat.h>
+#include <unordered_set>
 #include <vector>
 
 enum class FileStatus {
@@ -15,7 +16,7 @@ enum class FileStatus {
     IgnoreDidNotExistBefore,
     IgnoreNoLongerExist,
     IgnoreNotAccessible,
-    IgnoreCWD
+    IgnoreDirectory
 };
 
 namespace std {
@@ -36,8 +37,8 @@ inline std::ostream& operator<<(std::ostream& os, FileStatus status) {
     case FileStatus::IgnoreNotAccessible:
         os << "Ignore, not accessible";
         break;
-    case FileStatus::IgnoreCWD:
-        os << "Ignore, it is the current working directory";
+    case FileStatus::IgnoreDirectory:
+        os << "Ignore, it is a directory";
         break;
     }
     return os;
@@ -58,6 +59,7 @@ struct Manifest {
     std::string base_image;
 
     Files copy_files;
+    std::unordered_set<fs::path> symlinks;
     std::unordered_set<RPackage const*> r_packages;
     std::unordered_set<DebPackage const*> deb_packages;
 };

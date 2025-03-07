@@ -3,8 +3,8 @@
 
 #include <cassert>
 #include <filesystem>
-#include <iostream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -16,9 +16,10 @@ template <typename T>
 class FileSystemTrie {
     struct Node {
         std::unordered_map<std::string, std::unique_ptr<Node>> children;
-        T const* value;
+        std::optional<T const*> value;
 
-        explicit Node(T const* value) : value(value) {};
+        Node() : value{} {};
+        explicit Node(T const* value) : value{value} {};
         Node(Node const&) = delete;
         Node(Node&&) noexcept = delete;
         Node& operator=(Node const&) = delete;
@@ -29,7 +30,18 @@ class FileSystemTrie {
         fs::path path;
         T const* value;
 
-        bool operator==(NodeView const& other) const = default;
+        bool operator==(NodeView const& other) const {
+            if (path != other.path) {
+                return false;
+            }
+            if (value == nullptr) {
+                return other.value == nullptr;
+            }
+            if (other.value == nullptr) {
+                return false;
+            }
+            return *value == *other.value;
+        };
     };
 
     class ConstIterator {
@@ -66,21 +78,29 @@ class FileSystemTrie {
     void insert(fs::path const& path, T const* value);
 
     std::set<T> unique_values_;
-    std::unique_ptr<Node> root_{std::make_unique<Node>(nullptr)};
+    std::unique_ptr<Node> root_{std::make_unique<Node>()};
+    size_t size_{0};
 
   public:
     FileSystemTrie() = default;
 
-    FileSystemTrie(FileSystemTrie const& other)
-        : unique_values_{other.unique_values_} {
-        for (auto const& nodeInfo : other) {
-            this->insert(nodeInfo.path, nodeInfo.value);
+    FileSystemTrie(FileSystemTrie const& other) : unique_values_{} {
+        for (auto const& info : other) {
+            this->insert(info.path, *info.value);
         }
     };
 
     FileSystemTrie(FileSystemTrie&& other) noexcept = default;
 
-    FileSystemTrie& operator=(FileSystemTrie const&) = delete;
+    FileSystemTrie& operator=(FileSystemTrie const& other) {
+        size_ = 0;
+        unique_values_.clear();
+
+        for (auto const& info : other) {
+            this->insert(info.path, *info.value);
+        }
+    }
+
     FileSystemTrie& operator=(FileSystemTrie&&) noexcept = default;
 
     ConstIterator begin() const { return ConstIterator{root_.get()}; }
@@ -93,39 +113,43 @@ class FileSystemTrie {
     [[nodiscard]] T const* find_last_matching(fs::path const& path) const;
 
     bool is_empty() { return root_->children.empty(); }
+
+    [[nodiscard]] size_t size() { return size_; }
 };
-
-template <typename T>
-void FileSystemTrie<T>::ConstIterator::advance() {
-    if (stack_.empty()) {
-        current_ = kEndSentinel;
-        return;
-    }
-
-    auto [path, node] = stack_.back();
-    stack_.pop_back();
-
-    current_.path = path;
-    current_.value = node->value;
-
-    for (auto const& [key, value] : node->children) {
-        stack_.push_back({path / key, value.get()});
-    }
-}
 
 template <typename T>
 FileSystemTrie<T>::ConstIterator::ConstIterator(Node const* root) {
     assert(root != nullptr && "Node should not be null");
 
-    for (auto const& [key, value] : root->children) {
-        stack_.push_back({key, value.get()});
-    }
+    stack_.push_back({"", root});
+
     advance();
+}
+
+template <typename T>
+void FileSystemTrie<T>::ConstIterator::advance() {
+    while (!stack_.empty()) {
+        auto [path, node] = stack_.back();
+        stack_.pop_back();
+
+        for (auto const& [key, value] : node->children) {
+            stack_.push_back({path / key, value.get()});
+        }
+
+        if (node->value) {
+            current_.path = path;
+            current_.value = *(node->value);
+            return;
+        }
+    }
+
+    current_ = kEndSentinel;
 }
 
 template <typename T>
 void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
     Node* node = root_.get();
+    bool inserted = false;
 
     for (auto const& path_part : path) {
         auto part = path_part.string();
@@ -134,9 +158,10 @@ void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
             continue;
         }
 
-        auto [it, _] =
-            node->children.try_emplace(part, std::make_unique<Node>(nullptr));
+        auto [it, ins] =
+            node->children.try_emplace(part, std::make_unique<Node>());
         node = it->second.get();
+        inserted |= ins;
     }
 
     // FIXME: Handle the case when this is already set
@@ -144,6 +169,9 @@ void FileSystemTrie<T>::insert(fs::path const& path, T const* value) {
     // would handle it? checking if it is a directory or
     // a file? reporting an error if it is a file?
     node->value = value;
+    if (inserted) {
+        size_++;
+    }
 }
 
 template <typename T>
@@ -162,13 +190,13 @@ T const* FileSystemTrie<T>::find(fs::path const& path) const {
         if (part.empty()) {
             continue;
         }
-        if (!node->children.count(part)) {
+        if (!node->children.contains(part)) {
             return {};
         }
         node = node->children[part].get();
     }
 
-    return node->value;
+    return node->value.value_or(nullptr);
 }
 
 template <typename T>
@@ -183,13 +211,13 @@ T const* FileSystemTrie<T>::find_last_matching(fs::path const& path) const {
         }
 
         if (!node->children.contains(part)) {
-            return node->value;
+            return node->value.value_or(nullptr);
         }
 
         node = node->children[part].get();
     }
 
-    return node->value;
+    return node->value.value_or(nullptr);
 }
 
 #endif // FILESYSTEM_TRIE_H

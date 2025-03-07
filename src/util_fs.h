@@ -23,7 +23,7 @@ class SymlinkResolver {
     explicit SymlinkResolver(fs::path const& path = "/")
         : symlinks_{populate_symlinks(path)} {}
 
-    std::unordered_set<fs::path> resolve_symlinks(fs::path const& path) {
+    std::unordered_set<fs::path> resolve_symlinks(fs::path const& path) const {
         // TODO: check the error code and generate warnings
         std::error_code ec;
         std::unordered_set<fs::path> result;

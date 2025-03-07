@@ -140,10 +140,10 @@ TEST(FileSystemTrieTest, IteratorEmptyTrie) {
 TEST(FileSystemTrieIteratorTest, IteratorVisitsAllNodes) {
     FileSystemTrie<int> trie;
 
-    trie.insert("a", 1);
-    trie.insert("a/b", 2);
-    trie.insert("a/c", 3);
-    trie.insert("d", 4);
+    trie.insert("a/b", 1);
+    trie.insert("a/c", 2);
+    trie.insert("d", 3);
+    trie.insert("e", 4);
 
     std::vector<std::pair<fs::path, int>> actual;
     auto exists = [&](auto const& elem) {
@@ -157,29 +157,64 @@ TEST(FileSystemTrieIteratorTest, IteratorVisitsAllNodes) {
     }
 
     EXPECT_EQ(actual.size(), 4);
-    EXPECT_TRUE(exists(std::pair<fs::path, int>{"a", 1}));
+    EXPECT_TRUE(exists(std::pair<fs::path, int>{"a/b", 1}));
+    EXPECT_TRUE(exists(std::pair<fs::path, int>{"a/c", 2}));
+    EXPECT_TRUE(exists(std::pair<fs::path, int>{"d", 3}));
+    EXPECT_TRUE(exists(std::pair<fs::path, int>{"e", 4}));
 }
 
 TEST(FileSystemTrieCopyConstructorTest, DeepCopy) {
-    FileSystemTrie<int> orig;
+    struct A {
+        int n;
+        auto operator<=>(A const& other) const = default;
+    };
+    FileSystemTrie<A> orig;
 
-    orig.insert("a", 1);
-    orig.insert("a/b", 2);
-    orig.insert("a/c", 3);
-    orig.insert("d", 4);
+    orig.insert("a", A{1});
+    orig.insert("a/b", A{2});
+    orig.insert("a/c", A{3});
+    orig.insert("d", A{4});
 
-    FileSystemTrie<int> copy(orig);
+    FileSystemTrie<A> copy(orig);
 
     auto orig_nodes = std::vector(orig.begin(), orig.end());
     auto copy_nodes = std::vector(copy.begin(), copy.end());
 
     EXPECT_EQ(orig_nodes, copy_nodes);
 
-    orig.insert("a/b", 5);
+    EXPECT_EQ(orig_nodes.size(), copy_nodes.size());
+    for (size_t i = 0; i < orig.size(); i++) {
+        // the values must be different
+        EXPECT_NE(orig_nodes[i].value, copy_nodes[i].value);
+        // the value must be the same
+        EXPECT_EQ(*orig_nodes[i].value, *copy_nodes[i].value);
+    }
+
+    orig.insert("a/b", A{5});
 
     auto updated_orig_nodes = std::vector(orig.begin(), orig.end());
     EXPECT_NE(updated_orig_nodes, copy_nodes);
 
     auto copy_nodes2 = std::vector(copy.begin(), copy.end());
     EXPECT_EQ(copy_nodes2, copy_nodes);
+}
+
+TEST(FileSystemTrieTest, SizeMethod) {
+    FileSystemTrie<std::string> trie;
+    EXPECT_EQ(trie.size(), 0);
+
+    trie.insert("/a", "value1");
+    EXPECT_EQ(trie.size(), 1);
+
+    trie.insert("/b", "value2");
+    EXPECT_EQ(trie.size(), 2);
+
+    trie.insert("/a/b/c", "value3");
+    EXPECT_EQ(trie.size(), 3);
+
+    trie.insert("/a/b/d", "value4");
+    EXPECT_EQ(trie.size(), 4);
+
+    trie.insert("/a/b/c", "new_value3");
+    EXPECT_EQ(trie.size(), 4);
 }

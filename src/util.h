@@ -19,36 +19,55 @@ namespace fs = std::filesystem;
 inline std::string escape_cmd_arg(std::string const& arg,
                                   bool single_quote = true,
                                   bool force = false) {
-    std::string quoted = single_quote ? "\\\'" : "\\\"";
-    char quoted_chr = single_quote ? '\'' : '"';
-
-    if (arg.empty()) {
-        // NOLINTNEXTLINE(modernize-return-braced-init-list)
-        return std::string(2, quoted_chr);
+    if (arg.empty() && !force) {
+        return arg;
     }
 
-    bool needs_quoting = false;
-    std::string quoted_arg;
-    for (char c : arg) {
-        if ((std::isspace(c) != 0) || c == '\'' || c == '\\' || c == '"' ||
-            c == '$' || c == '`' || c == ';' || c == '&' || c == '|' ||
-            c == '*' || c == '?' || c == '[' || c == ']' || c == '(' ||
-            c == ')' || c == '<' || c == '>' || c == '#' || c == '!') {
-            needs_quoting = true;
-        }
-
-        if (c == quoted_chr) {
-            quoted_arg += quoted;
-        } else {
-            quoted_arg += c;
+    // Check if escaping is needed
+    bool needsEscaping = force;
+    if (!needsEscaping) {
+        for (char c : arg) {
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\'' || c == '"' ||
+                c == '\\' || c == '$' || c == '`' || c == '&' || c == '|' ||
+                c == '>' || c == '<' || c == '*' || c == '?' || c == '(' ||
+                c == ')' || c == '[' || c == ']' || c == ';' || c == '!' ||
+                c == '#') {
+                needsEscaping = true;
+                break;
+            }
         }
     }
 
-    if (needs_quoting || force) {
-        quoted_arg = quoted_chr + quoted_arg + quoted_chr;
+    if (!needsEscaping) {
+        return arg;
     }
 
-    return quoted_arg;
+    std::string escaped;
+    if (single_quote) {
+        // Use single quotes - everything is literal except single quotes
+        // which must be closed, escaped, and reopened
+        escaped = "'";
+        for (char c : arg) {
+            if (c == '\'') {
+                escaped += "'\\''";
+            } else {
+                escaped += c;
+            }
+        }
+        escaped += "'";
+    } else {
+        // Use double quotes - need to escape $, `, ", \ and !
+        escaped = "\"";
+        for (char c : arg) {
+            if (c == '$' || c == '`' || c == '"' || c == '\\' || c == '!') {
+                escaped += '\\';
+            }
+            escaped += c;
+        }
+        escaped += "\"";
+    }
+
+    return escaped;
 }
 
 inline std::vector<std::string> string_split(std::string const& str,
@@ -62,6 +81,11 @@ inline std::vector<std::string> string_split(std::string const& str,
     }
 
     return lines;
+}
+
+inline bool string_contains(std::string const& haystack,
+                            std::string const& needle) {
+    return haystack.find(needle) != std::string::npos;
 }
 
 inline std::string remove_ansi(std::string const& input) {
