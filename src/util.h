@@ -3,8 +3,10 @@
 
 #include "common.h"
 
+#include <cctype>
 #include <charconv>
 #include <filesystem>
+#include <fstream>
 #include <ranges>
 #include <regex>
 #include <sstream>
@@ -122,24 +124,6 @@ inline fs::path get_user_cache_dir() {
         return fs::path(home) / ".cache";
     }
     throw std::runtime_error("Unable to get user HOME directory");
-}
-
-inline std::string string_trim(std::string const& s) {
-    auto start = s.begin();
-    auto end = s.end();
-
-    while (start != end && (std::isspace(*start) != 0)) {
-        ++start;
-    }
-
-    while (end > start && (std::isspace(*(end - 1)) != 0)) {
-        --end;
-    }
-
-    if (start < end) {
-        return {start, end};
-    }
-    return {};
 }
 
 template <typename T, typename S>
@@ -263,8 +247,113 @@ inline bool string_iequals(std::string const& s1, std::string const& s2) {
                       });
 }
 
+inline std::string string_trim(std::string const& s) {
+    auto start = s.begin();
+    auto end = s.end();
+
+    while (start != end && (std::isspace(*start) != 0)) {
+        ++start;
+    }
+
+    while (end > start && (std::isspace(*(end - 1)) != 0)) {
+        --end;
+    }
+
+    if (start < end) {
+        return {start, end};
+    }
+    return {};
+}
+
+inline std::string string_unquote(std::string const& s) {
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+inline std::string string_tolowercase(std::string const& s) {
+    // from: https://en.cppreference.com/w/cpp/string/byte/tolower
+    std::string res = s;
+    std::transform(res.begin(), res.end(), res.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return res;
+}
+
+inline std::unordered_map<std::string, std::string>
+load_os_release_map(std::istream& input_stream) {
+    std::unordered_map<std::string, std::string> result;
+    std::string line;
+
+    while (std::getline(input_stream, line)) {
+        line = string_trim(line);
+
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        auto pos = line.find('=');
+        if (pos != std::string::npos) {
+            std::string key = string_trim(line.substr(0, pos));
+            std::string value = string_trim(line.substr(pos + 1));
+
+            // sanitize value
+            value = string_unquote(value);
+            value = string_trim(value);
+
+            result[key] = value;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * @brief Parses /etc/os-release or /usr/lib/os-release file into a key-value
+ * map.
+ *
+ * Tries to read from /etc/os-release first, if not found, falls back to
+ * /usr/lib/os-release.
+ *
+ * @return std::unordered_map<std::string, std::string> Map of parsed key-value
+ * pairs or empty map if neither exists
+ */
+inline std::unordered_map<std::string, std::string> load_os_release_map() {
+    std::ifstream file("/etc/os-release");
+    if (!file.is_open()) {
+        file.open("/usr/lib/os-release");
+    }
+
+    if (file.is_open()) {
+        return load_os_release_map(file);
+    }
+
+    return {};
+}
+
+struct OsRelease {
+    std::string distribution;
+    std::string release;
+};
+
+inline std::optional<OsRelease> load_os_release() {
+    auto map = load_os_release_map();
+
+    if (auto it = map.find("ID"); it != map.end()) {
+        OsRelease res;
+        res.distribution = string_tolowercase(it->second);
+
+        if (auto it = map.find("VERSION_ID"); it != map.end()) {
+            res.release = string_tolowercase(it->second);
+        }
+        return res;
+    }
+
+    return {};
+}
+
 template <typename T>
-inline std::optional<T> to_number(std::string_view const& s) {
+std::optional<T> to_number(std::string_view const& s) {
     T num;
     auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), num);
     if (ec == std::errc() && ptr == s.end()) {
@@ -273,19 +362,8 @@ inline std::optional<T> to_number(std::string_view const& s) {
     return {};
 }
 
-// template <typename Func>
-// inline auto stopwatch(Func&& func) {
-//     using clock = std::chrono::steady_clock;
-//
-//     auto start = clock::now();
-//     auto result = std::forward<Func>(func)();
-//     auto end = clock::now();
-//
-//     return std::make_pair(std::move(result), end - start);
-// }
-
 template <typename Func>
-inline auto stopwatch(Func&& func) {
+auto stopwatch(Func&& func) {
     using clock = std::chrono::steady_clock;
     using result_type = std::invoke_result_t<Func>;
 

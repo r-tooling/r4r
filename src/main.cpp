@@ -2,11 +2,13 @@
 #include "common.h"
 #include "config.h"
 #include "tracer.h"
+#include "util.h"
 
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <span>
+#include <stdexcept>
 #include <string>
 
 static void register_error_handler(Tracer& tracer) {
@@ -42,8 +44,33 @@ static void register_error_handler(Tracer& tracer) {
     }
 }
 
-static Options parse_cmd_args(std::span<char const*> args) {
-    Options opts;
+[[nodiscard]] static OsRelease parse_os() {
+    OsRelease os;
+    if (auto it = load_os_release(); it) {
+        os = *it;
+    } else {
+        throw ArgumentParserException("Failed to load OS release information");
+    }
+
+    if (os.distribution != "ubuntu" && os.distribution != "debian") {
+        throw std::runtime_error(
+            STR("Unsupported distribution: " << os.distribution));
+    }
+
+    return os;
+}
+
+[[nodiscard]] static std::string base_image(OsRelease const& os_release) {
+    auto r = os_release.release;
+    if (os_release.distribution == "debian" && os_release.release.empty()) {
+        r = "sid";
+    }
+    return STR(os_release.distribution << ':' << r);
+}
+
+static void parse_cmd_args(Options& opts, std::span<char const*> args) {
+    opts.docker_base_image = base_image(opts.os_release);
+
     ArgumentParser parser{std::string(kBinaryName)};
 
     parser.add_option('v', "verbose")
@@ -96,9 +123,15 @@ static Options parse_cmd_args(std::span<char const*> args) {
         .with_help("The program to trace")
         .with_callback([&](auto& arg) { opts.cmd.push_back(arg); });
 
+    parser.parse(args);
+}
+
+static int do_main(std::span<char const*> args) {
+    Options options;
+
     try {
-        parser.parse(args);
-        return opts;
+        options.os_release = parse_os();
+        parse_cmd_args(options, args);
     } catch (ArgumentParserException const& e) {
         std::cerr << kBinaryName << ": " << e.what() << '\n';
         std::cerr << kBinaryName << ": "
@@ -107,10 +140,7 @@ static Options parse_cmd_args(std::span<char const*> args) {
 
         exit(1);
     }
-}
 
-static int do_main(std::span<char const*> args) {
-    Options options = parse_cmd_args(args);
     Tracer tracer{options};
 
     // Interrupt signals generated in the terminal are delivered to the
@@ -138,8 +168,8 @@ int main(int argc, char* argv[]) {
         std::span<char const*> args(const_cast<char const**>(argv), argc);
 
         return do_main(args);
-    } catch (std::exception const& ex) {
-        std::cerr << "Unhandled exception: " << ex.what() << '\n';
+    } catch (std::exception const& e) {
+        std::cerr << "Unhandled exception: " << e.what() << '\n';
         return EXIT_FAILURE;
     } catch (...) {
         std::cerr << "Unhandled unknown exception." << '\n';

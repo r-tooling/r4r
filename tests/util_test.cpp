@@ -155,3 +155,60 @@ TEST(StringSplitNTest, NonBreakingSpaceDelimiter) {
     EXPECT_EQ(result->at(0), "apple");
     EXPECT_EQ(result->at(1), "banana");
 }
+
+TEST(LoadOsReleaseTest, EmptyInput) {
+    std::istringstream input("");
+    auto result = load_os_release_map(input);
+    EXPECT_TRUE(result.empty());
+}
+
+TEST(LoadOsReleaseTest, OnlyCommentsAndEmptyLines) {
+    std::istringstream input("# This is a comment\n\n# Another comment\n");
+    auto result = load_os_release_map(input);
+    EXPECT_TRUE(result.empty());
+}
+
+TEST(LoadOsReleaseTest, SingleKeyValuePair) {
+    std::istringstream input("NAME=\"Ubuntu\"\n");
+    auto result = load_os_release_map(input);
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result["NAME"], "Ubuntu");
+}
+
+TEST(LoadOsReleaseTest, MultipleKeyValuePairs) {
+    std::istringstream input("NAME=\"Ubuntu\"\nVERSION=\"20.04 LTS\"\n");
+    auto result = load_os_release_map(input);
+    ASSERT_EQ(result.size(), 2);
+    EXPECT_EQ(result["NAME"], "Ubuntu");
+    EXPECT_EQ(result["VERSION"], "20.04 LTS");
+}
+
+TEST(LoadOsReleaseTest, TrimmedKeyValuePairs) {
+    std::istringstream input(R"( NAME = " Ubuntu " )");
+    auto result = load_os_release_map(input);
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result["NAME"], "Ubuntu");
+}
+
+TEST(LoadOsReleaseTest, UnquotedValue) {
+    std::istringstream input("NAME=Ubuntu\n");
+    auto result = load_os_release_map(input);
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result["NAME"], "Ubuntu");
+}
+
+TEST(LoadOsReleaseTest, MixedContent) {
+    std::istringstream input("# Comment\nNAME=\"Ubuntu\"\n\nVERSION=\"20.04 "
+                             "LTS\"\n# Another comment\n");
+    auto result = load_os_release_map(input);
+    ASSERT_EQ(result.size(), 2);
+    EXPECT_EQ(result["NAME"], "Ubuntu");
+    EXPECT_EQ(result["VERSION"], "20.04 LTS");
+}
+
+TEST(LoadOsReleaseTest, InvalidFormat) {
+    std::istringstream input("INVALID_LINE\nNAME=\"Ubuntu\"\n");
+    auto result = load_os_release_map(input);
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result["NAME"], "Ubuntu");
+}

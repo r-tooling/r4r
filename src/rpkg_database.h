@@ -131,7 +131,7 @@ class RpkgDatabase {
 
     explicit RpkgDatabase(RPackages packages)
         : packages_{std::move(packages)}, files_{build_files_db(packages_)} {
-        LOG(TRACE) << "Initializaed R package database with " << size()
+        LOG(TRACE) << "Initialized R package database with " << size()
                    << " packages (" << files_.size() << " files)";
     }
 
