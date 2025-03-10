@@ -131,7 +131,7 @@ TEST(RPackagesTest, SystemDependencies) {
     pkgs.insert(db.find("RPostgres"));
     pkgs.insert(db.find("Matrix"));
     pkgs.insert(db.find("UnknownPackage"));
-    auto res = RpkgDatabase::get_system_dependencies(pkgs);
+    auto res = RpkgDatabase::get_system_dependencies(pkgs, "ubuntu", "24.04");
 
     // TODO: assert no warnings
     ASSERT_EQ(res.size(), 1);

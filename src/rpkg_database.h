@@ -138,7 +138,9 @@ class RpkgDatabase {
     RPackage const* lookup_by_path(fs::path const& path) const;
 
     static std::unordered_set<std::string>
-    get_system_dependencies(std::unordered_set<RPackage const*> const& pkgs);
+    get_system_dependencies(std::unordered_set<RPackage const*> const& pkgs,
+                            std::string const& distrib,
+                            std::string const& release);
 
     template <typename Collection>
     std::vector<RPackage const*>
@@ -220,10 +222,16 @@ RpkgDatabase::lookup_by_path(fs::path const& path) const {
 }
 
 inline std::unordered_set<std::string> RpkgDatabase::get_system_dependencies(
-    std::unordered_set<RPackage const*> const& pkgs) {
+    std::unordered_set<RPackage const*> const& pkgs, std::string const& distrib,
+    std::string const& release) {
     std::unordered_set<std::string> dependencies;
 
     CURLMultipleTransfer<RPackage const*> curl{10};
+
+    // Posit package manager does not support Sid of course, so we put the
+    // latest Debian supported version here.
+    auto posit_release =
+        (distrib == "debian" && release.empty()) ? "12" : release;
 
     for (auto const* p : pkgs) {
         // TODO: parameterize distribution and release
@@ -231,10 +239,8 @@ inline std::unordered_set<std::string> RpkgDatabase::get_system_dependencies(
             STR("https://packagemanager.posit.co"
                 << "/__api__/repos/"
                 << "cran"
-                << "/sysreqs?all=false&pkgname=" << p->name << "&distribution="
-                << "ubuntu"
-                << "&release="
-                << "22.04");
+                << "/sysreqs?all=false&pkgname=" << p->name
+                << "&distribution=" << distrib << "&release=" << posit_release);
         curl.add(p, url);
     }
 
