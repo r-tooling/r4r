@@ -2,6 +2,7 @@
 #define MANIFEST_H
 
 #include "dpkg_database.h"
+#include "ignore_file_map.h"
 #include "rpkg_database.h"
 #include "user.h"
 #include <filesystem>
@@ -57,6 +58,8 @@ struct Manifest {
     std::string distribution;
     std::string distribution_version;
     std::string base_image;
+    fs::path default_image_files_cache;
+    IgnoreFileMap ignore_file_map;
 
     Files copy_files;
     std::unordered_set<fs::path> symlinks;

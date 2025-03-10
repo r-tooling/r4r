@@ -49,13 +49,12 @@ struct Options {
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
     fs::path makefile;
-    fs::path default_image_file{get_user_cache_dir() / kBinaryName /
-                                (docker_base_image + ".cache")};
+    // Set later along with docker_base_image a environment capture time
+    fs::path default_image_files_cache;
     AbsolutePathSet results;
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
-    IgnoreFileMap ignore_file_map;
 };
 
 struct TracerState {
@@ -94,14 +93,12 @@ static constexpr std::string_view kDefaultTimezone{"UTC"};
 
 class FileTracingTask : public Task {
   public:
-    explicit FileTracingTask(IgnoreFileMap const* ignore_file_map)
-        : Task("Trace files"), ignore_file_map_{ignore_file_map} {}
+    explicit FileTracingTask() : Task("Trace files") {}
 
     void run(TracerState& state) override;
     void stop() override;
 
   private:
-    IgnoreFileMap const* ignore_file_map_;
     SyscallMonitor* monitor_{};
 };
 
@@ -112,7 +109,7 @@ inline void FileTracingTask::run(TracerState& state) {
     // output of the traced program
     auto old_log_sink = Logger::get().set_sink(std::make_unique<StoreSink>());
 
-    FileTracer tracer{ignore_file_map_};
+    FileTracer tracer{&state.manifest.ignore_file_map};
     SyscallMonitor monitor{state.manifest.cmd, tracer};
     monitor.redirect_stdout(std::cout);
     monitor.redirect_stderr(std::cerr);
@@ -896,6 +893,11 @@ class CaptureEnvironmentTask : public Task {
         capture_distribution(state);
         capture_user(state);
         capture_timezone(state);
+
+        configure_default_ignore_pattern(state.manifest.ignore_file_map);
+        load_image_default_files(state.manifest.default_image_files_cache,
+                                 state.manifest.base_image,
+                                 state.manifest.ignore_file_map);
     }
 
   private:
@@ -935,6 +937,10 @@ class CaptureEnvironmentTask : public Task {
         } else { // base_image_ is not empty if it is not inferred
             state.manifest.base_image = base_image_;
         }
+
+        state.manifest.default_image_files_cache =
+            get_user_cache_dir() / kBinaryName /
+            (state.manifest.base_image + ".cache");
     }
 
     static void capture_user(TracerState& state) {
@@ -970,28 +976,6 @@ class CaptureEnvironmentTask : public Task {
         }
     }
 
-    bool infer_base_image_{false};
-    fs::path base_image_;
-
-    static inline fs::path const kBaseImage = "ubuntu:22.04";
-};
-
-class Tracer {
-  public:
-    explicit Tracer(Options options) : options_{std::move(options)} {}
-
-    void execute() {
-        configure();
-        run_pipeline();
-    }
-
-    void stop() const {
-        if (current_task_ != nullptr) {
-            current_task_->stop();
-        }
-    }
-
-  private:
     static void configure_default_ignore_pattern(IgnoreFileMap& map) {
         map.add_wildcard("/dev");
         map.add_wildcard("/etc/ld.so.cache");
@@ -1044,14 +1028,35 @@ class Tracer {
         }
     }
 
+    bool infer_base_image_{false};
+    fs::path base_image_;
+
+    static inline fs::path const kBaseImage = "ubuntu:22.04";
+};
+
+class Tracer {
+  public:
+    explicit Tracer(Options options) : options_{std::move(options)} {}
+
+    void execute() {
+        configure();
+        run_pipeline();
+    }
+
+    void stop() const {
+        if (current_task_ != nullptr) {
+            current_task_->stop();
+        }
+    }
+
+  private:
     void run_pipeline() {
         std::vector<std::unique_ptr<Task>> tasks;
 
         tasks.push_back(std::make_unique<CaptureEnvironmentTask>(
             options_.docker_base_image, options_.docker_base_image.empty()));
 
-        tasks.push_back(
-            std::make_unique<FileTracingTask>(&options_.ignore_file_map));
+        tasks.push_back(std::make_unique<FileTracingTask>());
 
         tasks.push_back(std::make_unique<ResolveFileTask>(options_.R_bin));
 
@@ -1099,11 +1104,6 @@ class Tracer {
         if (options_.makefile.empty()) {
             options_.makefile = options_.output_dir / "Makefile";
         }
-
-        Tracer::configure_default_ignore_pattern(options_.ignore_file_map);
-        Tracer::load_image_default_files(options_.default_image_file,
-                                         options_.docker_base_image,
-                                         options_.ignore_file_map);
     }
 
     void run(Task& task, TracerState& state) {
