@@ -50,6 +50,9 @@ struct hash<ImageFileInfo> {
 
 class DefaultImageFiles {
   public:
+    static inline std::vector<std::string> const kBlacklistPatterns = {
+        "/dev/*", "/sys/*", "/proc/*"};
+
     explicit DefaultImageFiles(std::vector<ImageFileInfo> files)
         : files_{std::move(files)} {}
 
@@ -57,7 +60,8 @@ class DefaultImageFiles {
 
     static DefaultImageFiles
     from_image(std::string const& image_name,
-               std::vector<std::string> const& blacklist_patterns);
+               std::vector<std::string> const& blacklist_patterns =
+                   kBlacklistPatterns);
 
     static DefaultImageFiles from_stream(std::istream& stream);
 

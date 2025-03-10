@@ -1,23 +1,25 @@
-NAME := hw
-IMAGE_TAG := r4r/test-$(NAME)
-CONTAINER_NAME := r4r-test-$(NAME)
+NAME := r-hello-world
+IMAGE_TAG ?= r4r/test-$(NAME)
+CONTAINER_NAME ?= r4r-test-$(NAME)
 R4R ?= ../../build/r4r
+BASE_IMAGE ?= ubuntu:24.04
 
 all: clean trace check
 
 .PHONY: trace
 trace:
 	$(R4R) \
-		-vvv \
+		-vv \
 		--output actual \
 		--skip-manifest \
+		--default-image-file ../$(BASE_IMAGE).cache \
 		--docker-image-tag $(IMAGE_TAG) \
 		--docker-container-name $(CONTAINER_NAME) \
-		./script.sh
+		R -f hello-world.R
 
 .PHONY: check
 check:
-	../snapshot.sh expected actual/result
+	../snapshot.sh --fail expected actual/result
 
 .PHONY: clean
 clean:

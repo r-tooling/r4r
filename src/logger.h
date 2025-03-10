@@ -4,10 +4,12 @@
 #include "common.h"
 #include <array>
 #include <cstdlib>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <source_location>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -106,13 +108,9 @@ class StoreSink : public LogSink {
         }
     };
 
-    void sink(LogEvent const& event) override {
-        std::lock_guard lock(mutex_);
-        messages_.emplace_back(event);
-    }
+    void sink(LogEvent const& event) override { messages_.emplace_back(event); }
 
-    std::vector<StoredEvent> get_messages() const {
-        std::lock_guard lock(mutex_);
+    [[nodiscard]] std::vector<StoredEvent> get_messages() const {
         return messages_;
     }
 
@@ -120,7 +118,6 @@ class StoreSink : public LogSink {
 
   private:
     std::vector<StoredEvent> messages_;
-    mutable std::mutex mutex_;
 };
 
 class Logger {
@@ -137,6 +134,9 @@ class Logger {
 
     std::unique_ptr<LogSink> set_sink(std::unique_ptr<LogSink> sink);
     [[nodiscard]] LogSink& get_sink() const { return *sink_; }
+    template <typename Sink>
+    [[nodiscard]] std::unique_ptr<Sink>
+    with_sink(std::unique_ptr<Sink> sink, std::function<void()> const& thunk);
 
     void log(LogEvent const& event);
 
@@ -175,6 +175,18 @@ inline std::unique_ptr<LogSink>
 Logger::set_sink(std::unique_ptr<LogSink> sink) {
     sink_.swap(sink);
     return sink;
+}
+
+template <typename Sink>
+std::unique_ptr<Sink> Logger::with_sink(std::unique_ptr<Sink> sink,
+                                        std::function<void()> const& thunk) {
+    auto old_sink = set_sink(std::move(sink));
+
+    thunk();
+
+    auto sink_raw = set_sink(std::move(old_sink)).release();
+    auto sink_raw_cast = dynamic_cast<Sink*>(sink_raw);
+    return std::unique_ptr<Sink>(sink_raw_cast);
 }
 
 inline void Logger::log(LogEvent const& event) {
@@ -240,5 +252,16 @@ class LogMessage {
     if (!(condition))                                                          \
     LogMessage(LogLevel::Fatal, __FILE__, __LINE__).stream()                   \
         << "Check failed: " #condition " "
+
+template <typename T>
+constexpr T*
+check_not_null(T* ptr,
+               std::source_location loc = std::source_location::current()) {
+    if (!ptr) {
+        LOG(FATAL) << "Null pointer at" << loc.file_name() << ":"
+                   << std::to_string(loc.line());
+    }
+    return ptr;
+}
 
 #endif // LOGGER_H

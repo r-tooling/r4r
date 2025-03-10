@@ -1,11 +1,12 @@
 #ifndef FILE_TRACER_H
 #define FILE_TRACER_H
 
-#include "filesystem_trie.h"
+#include "ignore_file_map.h"
 #include "logger.h"
 #include "syscall_monitor.h"
 #include <fcntl.h>
 #include <filesystem>
+#include <system_error>
 #include <variant>
 
 struct FileInfo {
@@ -19,11 +20,9 @@ class FileTracer : public SyscallListener {
   public:
     using Files = std::unordered_map<fs::path, FileInfo>;
 
-    // FIXME: what is the idiomatic way? use pointers instead?
-    explicit FileTracer(FileSystemTrie<bool> const&&) = delete;
     explicit FileTracer(
-        FileSystemTrie<bool> const& ignore_file_list = kNoIgnoreFiles_)
-        : ignore_file_list_{ignore_file_list} {}
+        IgnoreFileMap const* ignore_file_map = &kDefaultIgnoreFiles_)
+        : ignore_file_map_{check_not_null(ignore_file_map)} {}
 
     void on_syscall_entry(pid_t pid, std::uint64_t syscall,
                           SyscallArgs args) override;
@@ -31,11 +30,12 @@ class FileTracer : public SyscallListener {
     void on_syscall_exit(pid_t pid, SyscallRet ret_val, bool is_error) override;
 
     Files const& files() const { return files_; }
+    std::map<fs::path, fs::path> symlinks() const { return symlinks_; }
 
     std::uint64_t syscalls_count() const { return syscalls_count_; }
 
   private:
-    static inline FileSystemTrie<bool> const kNoIgnoreFiles_;
+    static inline IgnoreFileMap const kDefaultIgnoreFiles_;
 
     using Warnings = std::vector<std::string>;
     using SyscallState = std::variant<std::monostate, FileInfo>;
@@ -69,6 +69,11 @@ class FileTracer : public SyscallListener {
     void syscall_execve_exit(pid_t /*unused*/, SyscallRet /*unused*/,
                              bool is_error, SyscallState const& state);
 
+    void syscall_readlink_entry(pid_t pid, SyscallArgs args,
+                                SyscallState& state);
+
+    void syscall_readlink_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+                               SyscallState const& state);
     // TODO: won't classes be easier? Passing a pointer to this?
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
 #define REG_SYSCALL_HANDLER(nr)                                                \
@@ -82,14 +87,16 @@ class FileTracer : public SyscallListener {
         REG_SYSCALL_HANDLER(open),
         REG_SYSCALL_HANDLER(openat),
         REG_SYSCALL_HANDLER(execve),
+        REG_SYSCALL_HANDLER(readlink),
 
 #undef REG_SYSCALL_HANDLER
     };
 
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
+    IgnoreFileMap const* ignore_file_map_;
     std::uint64_t syscalls_count_{0};
     std::unordered_map<pid_t, PidState> state_;
     Files files_;
+    std::map<fs::path, fs::path> symlinks_;
     Warnings warnings_;
 };
 
@@ -163,7 +170,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
                                            FileTracer::SyscallState& state) {
     fs::path result;
 
-    LOG(TRACE) << "Syscall open " << pathname;
+    LOG(DEBUG) << "Syscall open " << pathname;
 
     // the logic comes from the behavior of openat(2):
     if (pathname.is_absolute()) {
@@ -184,11 +191,18 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
             }
             result = *d;
         }
+
+        std::error_code ec;
+        result = fs::absolute(result, ec);
+        if (ec) {
+            LOG(WARN) << "Failed to resolve absolute file path : " << result
+                      << " - " << ec.message();
+        }
+
         result /= pathname;
     }
 
-    if (bool const* it = ignore_file_list_.get().find_last_matching(result);
-        it && *it) {
+    if (ignore_file_map_->ignore(result)) {
         LOG(DEBUG) << "Ignoring file: " << result;
         return;
     }
@@ -210,40 +224,41 @@ void FileTracer::generic_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
         return;
     }
 
-    if (std::holds_alternative<FileInfo>(state)) {
-        auto const& info = std::get<FileInfo>(state);
-        auto const& entry_file = info.path;
+    if (!std::holds_alternative<FileInfo>(state)) {
+        return;
+    }
 
-        std::error_code ec;
-        if (!fs::exists(entry_file, ec)) {
-            return;
-        }
+    auto const& info = std::get<FileInfo>(state);
+    auto const& entry_file = info.path;
 
-        fs::file_status fs = fs::status(entry_file, ec);
-        if (!(fs::is_regular_file(fs) || fs::is_directory(fs) ||
-              fs::is_symlink(fs))) {
-            LOG(WARN) << "Unsupported file type: " << entry_file << " "
-                      << fs::exists(entry_file, ec);
-            return;
-        }
+    std::error_code ec;
+    if (!fs::exists(entry_file, ec)) {
+        return;
+    }
 
-        if (ret_val >= 0) {
-            auto exit_file =
-                resolve_fd_filename(pid, static_cast<int>(ret_val));
+    fs::file_status fs = fs::status(entry_file, ec);
+    if (!(fs::is_regular_file(fs) || fs::is_directory(fs) ||
+          fs::is_symlink(fs))) {
+        LOG(WARN) << "Unsupported file type: " << entry_file << " "
+                  << fs::exists(entry_file, ec);
+        return;
+    }
 
-            if (!exit_file) {
-                LOG(WARN) << "Failed to resolve fd to a path: " << ret_val;
-            } else if (!fs::equivalent(*exit_file, entry_file, ec)) {
-                if (ec) {
-                    LOG(WARN) << "Failed to comparable files: " << entry_file
-                              << " vs " << *exit_file << " - " << ec.message();
-                } else {
-                    LOG(WARN) << "File entry/exit mismatch: " << entry_file
-                              << " vs " << *exit_file;
-                }
+    if (ret_val >= 0) {
+        auto exit_file = resolve_fd_filename(pid, static_cast<int>(ret_val));
+
+        if (!exit_file) {
+            LOG(WARN) << "Failed to resolve fd to a path: " << ret_val;
+        } else if (!fs::equivalent(*exit_file, entry_file, ec)) {
+            if (ec) {
+                LOG(WARN) << "Failed to comparable files: " << entry_file
+                          << " vs " << *exit_file << " - " << ec.message();
             } else {
-                register_file(info);
+                LOG(WARN) << "File entry/exit mismatch: " << entry_file
+                          << " vs " << *exit_file;
             }
+        } else {
+            register_file(info);
         }
     }
 }
@@ -283,19 +298,73 @@ inline void FileTracer::syscall_execve_entry(pid_t pid, SyscallArgs args,
 
 inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
                                             SyscallState const& state) {
-    if (!is_error) {
-        if (std::holds_alternative<FileInfo>(state)) {
-            auto info = std::get<FileInfo>(state);
-            // it succeeded so it has to exist
-            info.existed_before = true;
-
-            LOG(DEBUG) << "Syscall execve " << info.path;
-
-            register_file(info);
-        } else {
-            throw std::runtime_error("execve successful, yet not path stored");
-        }
+    if (is_error) {
+        return;
     }
+
+    if (std::holds_alternative<FileInfo>(state)) {
+        auto info = std::get<FileInfo>(state);
+        // it succeeded so it has to exist
+        info.existed_before = true;
+
+        LOG(DEBUG) << "Syscall execve " << info.path;
+
+        register_file(info);
+    } else {
+        throw std::runtime_error("execve successful, yet not path stored");
+    }
+}
+
+inline void FileTracer::syscall_readlink_entry(pid_t pid, SyscallArgs args,
+                                               SyscallState& state) {
+    fs::path path =
+        SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
+
+    std::error_code ec;
+    path = fs::absolute(path, ec);
+    if (ec) {
+        LOG(WARN) << "Failed to get absolute path of a symlink: " << path
+                  << " - " << ec.message();
+        return;
+    }
+
+    if (ignore_file_map_->ignore(path)) {
+        LOG(DEBUG) << "Ignoring file: " << path;
+        return;
+    }
+
+    state = FileInfo{.path = path, .size = {}, .existed_before = false};
+}
+
+inline void FileTracer::syscall_readlink_exit(pid_t, SyscallRet, bool is_error,
+                                              SyscallState const& state) {
+    if (is_error) {
+        return;
+    }
+
+    if (!std::holds_alternative<FileInfo>(state)) {
+        return;
+    }
+
+    auto const& info = std::get<FileInfo>(state);
+
+    LOG(DEBUG) << "Syscall readlink " << info.path;
+
+    std::error_code ec;
+    fs::path target = fs::read_symlink(info.path, ec);
+    if (ec) {
+        LOG(WARN) << "Failed to read symlink: " << info.path << " - "
+                  << ec.message()
+                  << " (even though readlink syscall succeeded)";
+        return;
+    }
+
+    if (ignore_file_map_->ignore(target)) {
+        LOG(DEBUG) << "Ignoring file: " << target;
+        return;
+    }
+
+    symlinks_.emplace(info.path, target);
 }
 
 #endif // FILE_TRACER_H

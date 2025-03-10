@@ -78,12 +78,18 @@ static Options parse_cmd_args(std::span<char const*> args) {
     parser.add_option("skip-manifest")
         .with_help("Do not generate the manifest")
         .with_callback([&](auto&) { opts.skip_manifest = true; });
+    parser.add_option("default-image-files-cache")
+        .with_help("Path to the default image file")
+        .with_argument("PATH")
+        .with_callback(
+            [&](auto& arg) { opts.default_image_files_cache = arg; });
     parser.add_option("help")
         .with_help("Print this message")
         .with_callback([&](auto&) {
             std::cout << parser.help();
             exit(0);
         });
+
     parser.add_positional("command")
         .required()
         .multiple()
