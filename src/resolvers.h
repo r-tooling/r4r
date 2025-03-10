@@ -99,19 +99,17 @@ inline void CopyFileResolver::resolve(Files& files, Symlinks& symlinks,
             return true;
         }
 
-        if (!f.existed_before) {
-            if (fs::is_regular_file(path) || fs::is_symlink(path)) {
-                status = FileStatus::Result;
-                result_cnt++;
-            } else {
-                status = FileStatus::IgnoreDirectory;
-            }
-        } else {
+        try {
             switch (check_accessibility(path)) {
             case AccessStatus::Accessible:
                 if (fs::is_regular_file(path) || fs::is_symlink(path)) {
-                    status = FileStatus::Copy;
-                    copy_cnt++;
+                    if (f.existed_before) {
+                        status = FileStatus::Copy;
+                        copy_cnt++;
+                    } else {
+                        status = FileStatus::Result;
+                        result_cnt++;
+                    }
                 } else {
                     status = FileStatus::IgnoreDirectory;
                 }
@@ -125,6 +123,10 @@ inline void CopyFileResolver::resolve(Files& files, Symlinks& symlinks,
             default:
                 UNREACHABLE();
             }
+        } catch (fs::filesystem_error const& e) {
+            LOG(WARN) << "Failed to check file status: " << f.path << " - "
+                      << e.what();
+            status = FileStatus::IgnoreNotAccessible;
         }
 
         LOG(DEBUG) << "Resolved: " << path << " to: " << status;
