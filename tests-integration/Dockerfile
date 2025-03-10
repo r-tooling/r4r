@@ -52,6 +52,9 @@ RUN groupadd -g $USER_GID $USERNAME && \
   echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
   chmod 0440 /etc/sudoers.d/$USERNAME
 
+# allow user installed packages
+RUN gosu r4r R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)'
+
 COPY tests-integration/entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/local/bin/r4r"]

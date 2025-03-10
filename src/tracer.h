@@ -579,9 +579,6 @@ inline void DockerFileBuilderTask::install_r_packages(
     // TODO: simplify
     builder.run({STR("Rscript /" << cran_install_script_.filename().string()),
                  STR("rm -f /" << cran_install_script_.filename().string())});
-    // this will allow user to install packages locally
-    builder.run(
-        R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
 }
 
 inline void
@@ -702,6 +699,9 @@ inline void DockerFileBuilderTask::prepare_command(DockerFileBuilder& builder,
                       << manifest.user.group.name << " " << manifest.cwd)});
     builder.workdir(manifest.cwd);
     builder.user(manifest.user.username);
+    // this will allow user to install packages locally
+    builder.run(
+        R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
     builder.cmd(manifest.cmd);
 }
 
