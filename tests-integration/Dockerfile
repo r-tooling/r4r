@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # The upgrade is there because of https://github.com/r-tooling/r4r/issues/33
 RUN apt-get update -y && \
-  sudo apt-get upgrade && \
+  apt-get upgrade && \
   apt-get install -y --no-install-recommends locales tzdata && \
   locale-gen $LANG && \
   update-locale LANG=$LANG
