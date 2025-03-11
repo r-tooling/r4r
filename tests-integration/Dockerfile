@@ -1,40 +1,60 @@
-FROM r-tooling/r4r-dev AS builder
+FROM ghcr.io/r-tooling/r4r:latest AS builder
 
 WORKDIR /workspace
 COPY . /workspace
 
 # Build the project
-RUN make install
+RUN make clean install
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
-# install runtime time dependencies
+ENV DEBIAN_FRONTEND=noninteractive \
+  LANG=en_US.UTF-8
+
+# The upgrade is there because of https://github.com/r-tooling/r4r/issues/33
+RUN apt-get update -y && \
+  apt-get upgrade -y && \
+  apt-get install -y --no-install-recommends locales tzdata && \
+  locale-gen $LANG && \
+  update-locale LANG=$LANG
+
+# install docker
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        lsb-release \
-        gnupg \
-        gosu && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends docker-ce-cli
+  apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  lsb-release \
+  git \
+  gnupg \
+  gosu \
+  r-base-dev \
+  libicu-dev \
+  sudo && \
+  mkdir -p /etc/apt/keyrings && \
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+  apt-get update && \
+  apt-get install -y --no-install-recommends docker-ce-cli
 
-WORKDIR /
+# install R dependencies for the integration tests
+RUN R -e 'install.packages("stringi", Ncpus=8)'
 
 COPY --from=builder /workspace/build/r4r /usr/local/bin
 
 ARG USERNAME=r4r
-ARG USER_UID=1000
-ARG USER_GID=1000
+ARG USER_UID=1001
+ARG USER_GID=1001
 
 RUN groupadd -g $USER_GID $USERNAME && \
-    useradd -u $USER_UID -g $USERNAME -m -s /bin/bash $USERNAME && \
-    groupadd docker && \
-    usermod -aG docker $USERNAME
+  useradd -u $USER_UID -g $USERNAME -m -s /bin/bash $USERNAME && \
+  groupadd -f docker && \
+  usermod -aG docker $USERNAME && \
+  echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
+  chmod 0440 /etc/sudoers.d/$USERNAME
 
-COPY entrypoint.sh /entrypoint.sh
+# allow user installed packages
+RUN gosu r4r R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)'
+
+COPY tests-integration/entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/local/bin/r4r"]

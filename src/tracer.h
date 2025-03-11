@@ -4,11 +4,12 @@
 #include "archive.h"
 #include "common.h"
 #include "config.h"
-#include "config_file.h"
+#include "default_image_files.h"
 #include "dockerfile.h"
 #include "dpkg_database.h"
 #include "file_tracer.h"
-#include "filesystem_trie.h"
+#include "ignore_file_map.h"
+#include "install_r_package_builder.h"
 #include "logger.h"
 #include "manifest.h"
 #include "manifest_format.h"
@@ -28,6 +29,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -36,28 +38,8 @@
 #include <utility>
 #include <vector>
 
-/// The global ignore file list.
-static inline FileSystemTrie<bool> const kDefaultIgnoredFiles = [] {
-    FileSystemTrie<bool> trie;
-    trie.insert("/dev", true);
-    trie.insert("/etc/ld.so.cache", true);
-    trie.insert("/etc/nsswitch.conf", true);
-    trie.insert("/etc/passwd", true);
-    trie.insert("/proc", true);
-    trie.insert("/sys", true);
-    // created by locale-gen
-    trie.insert("/usr/lib/locale/locale-archive", true);
-    // fonts should be installed from a package
-    trie.insert("/usr/local/share/fonts", true);
-    // this might be a bit too drastic, but cache is usually not
-    // transferable anyway
-    trie.insert("/var/cache", true);
-    // We should not copy / because it is the root of the filesystem
-    trie.insert("/", false);
-    return trie;
-}();
-
 struct Options {
+    OsRelease os_release;
     LogLevel log_level = LogLevel::Warning;
     fs::path R_bin{"R"};
     std::vector<std::string> cmd;
@@ -66,12 +48,13 @@ struct Options {
     std::string docker_container_name{STR(kBinaryName << "-test")};
     fs::path output_dir{"."};
     fs::path makefile;
+    fs::path default_image_file{get_user_cache_dir() / kBinaryName /
+                                (docker_base_image + ".cache")};
     AbsolutePathSet results;
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
-    // TODO: make this mutable so more files could be added from command line
-    FileSystemTrie<bool> ignore_file_list = kDefaultIgnoredFiles;
+    IgnoreFileMap ignore_file_map;
 };
 
 struct TracerState {
@@ -79,6 +62,7 @@ struct TracerState {
     RpkgDatabase rpkg_database;
 
     std::vector<FileInfo> traced_files;
+    std::map<fs::path, fs::path> traced_symlinks;
 
     Manifest manifest;
 };
@@ -109,14 +93,14 @@ static constexpr std::string_view kDefaultTimezone{"UTC"};
 
 class FileTracingTask : public Task {
   public:
-    explicit FileTracingTask(FileSystemTrie<bool> const& ignore_file_list)
-        : Task("Trace files"), ignore_file_list_{ignore_file_list} {}
+    explicit FileTracingTask(IgnoreFileMap const* ignore_file_map)
+        : Task("Trace files"), ignore_file_map_{ignore_file_map} {}
 
     void run(TracerState& state) override;
     void stop() override;
 
   private:
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
+    IgnoreFileMap const* ignore_file_map_;
     SyscallMonitor* monitor_{};
 };
 
@@ -127,7 +111,7 @@ inline void FileTracingTask::run(TracerState& state) {
     // output of the traced program
     auto old_log_sink = Logger::get().set_sink(std::make_unique<StoreSink>());
 
-    FileTracer tracer{ignore_file_list_};
+    FileTracer tracer{ignore_file_map_};
     SyscallMonitor monitor{state.manifest.cmd, tracer};
     monitor.redirect_stdout(std::cout);
     monitor.redirect_stderr(std::cerr);
@@ -138,8 +122,9 @@ inline void FileTracingTask::run(TracerState& state) {
     monitor_ = nullptr;
 
     LOG(INFO) << "Finished tracing in " << format_elapsed_time(elapsed);
-    LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls and "
-              << tracer.files().size() << " files";
+    LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls, "
+              << tracer.files().size() << " files, " << tracer.symlinks().size()
+              << " symlinks";
 
     // print the postponed messages
     auto sink = Logger::get().set_sink(std::move(old_log_sink));
@@ -178,6 +163,8 @@ inline void FileTracingTask::run(TracerState& state) {
                   [](auto const& lhs, auto const& rhs) {
                       return lhs.path < rhs.path;
                   });
+
+        state.traced_symlinks = tracer.symlinks();
     }
 }
 
@@ -190,30 +177,23 @@ inline void FileTracingTask::stop() {
 // We do not need this composition, each of the resolver can now be a task
 class ResolveFileTask : public Task {
   public:
-    ResolveFileTask(fs::path R_bin,
-                    FileSystemTrie<bool> const& ignore_file_list)
-        : Task("Resolve files"), R_bin_{std::move(R_bin)},
-          ignore_file_list_{ignore_file_list} {}
+    explicit ResolveFileTask(fs::path R_bin)
+        : Task("Resolve files"), R_bin_{std::move(R_bin)} {}
 
     void run(TracerState& state) override;
 
   private:
     fs::path R_bin_;
-    std::reference_wrapper<FileSystemTrie<bool> const> ignore_file_list_;
 };
 
 inline void ResolveFileTask::run(TracerState& state) {
     std::vector<std::pair<std::string, std::unique_ptr<Resolver>>> resolvers;
 
-    resolvers.emplace_back("ignore",
-                           std::make_unique<IgnoreFileResolver>(
-                               ignore_file_list_, state.manifest.base_image));
+    resolvers.emplace_back(
+        "deb", std::make_unique<DebPackageResolver>(&state.dpkg_database));
 
     resolvers.emplace_back(
-        "deb", std::make_unique<DebPackageResolver>(state.dpkg_database));
-
-    resolvers.emplace_back("R", std::make_unique<RPackageResolver>(
-                                    state.rpkg_database, state.dpkg_database));
+        "R", std::make_unique<RPackageResolver>(&state.rpkg_database));
 
     resolvers.emplace_back("copy", std::make_unique<CopyFileResolver>());
 
@@ -222,11 +202,12 @@ inline void ResolveFileTask::run(TracerState& state) {
     std::string summary;
     size_t total_count = state.traced_files.size();
 
-    for (auto& [name, resolver] : resolvers) {
+    for (auto const& [name, resolver] : resolvers) {
         size_t count = state.traced_files.size();
-        resolver->resolve(state.traced_files, state.manifest);
-        summary += name + "(" +
-                   std::to_string(count - state.traced_files.size()) + ") ";
+        resolver->resolve(state.traced_files, state.traced_symlinks,
+                          state.manifest);
+        summary +=
+            STR(name << "(" << (count - state.traced_files.size()) << ") ");
     }
 
     LOG(INFO) << "Resolver summary: " << total_count << " file(s): " << summary;
@@ -244,7 +225,9 @@ inline void ResolveFileTask::run(TracerState& state) {
 
 class EditManifestTask : public Task {
   public:
-    EditManifestTask() : Task("Edit manifest") {
+    EditManifestTask(fs::path manifest_path, bool interactive)
+        : Task("Edit manifest"), manifest_path_(std::move(manifest_path)),
+          interactive_(interactive) {
         sections_.push_back(std::make_unique<CopyFilesManifestSection>());
     }
 
@@ -257,6 +240,8 @@ class EditManifestTask : public Task {
     bool save_manifest(std::ostream& stream, Manifest const& manifest);
 
     std::vector<std::unique_ptr<ManifestSection>> sections_;
+    fs::path manifest_path_;
+    bool interactive_;
 };
 
 inline void EditManifestTask::load_manifest(std::istream& stream,
@@ -302,12 +287,15 @@ inline bool EditManifestTask::save_manifest(std::ostream& stream,
 }
 
 inline void EditManifestTask::run(TracerState& state) {
-    auto manifest_file = TempFile{"r4r-manifest", ".conf"};
     bool any_content{false};
     {
-        LOG(DEBUG) << "Saving manifest to: " << *manifest_file;
-        std::ofstream stream{*manifest_file};
-        any_content = save_manifest(stream, state.manifest);
+        LOG(DEBUG) << "Saving manifest to: " << manifest_path_;
+        std::ofstream manifest_file{manifest_path_};
+        any_content = save_manifest(manifest_file, state.manifest);
+    }
+
+    if (!interactive_) {
+        return;
     }
 
     if (!any_content) {
@@ -315,12 +303,12 @@ inline void EditManifestTask::run(TracerState& state) {
         return;
     }
 
-    auto ts = fs::last_write_time(*manifest_file);
+    auto ts = fs::last_write_time(manifest_path_);
 
-    if (open_manifest(*manifest_file) &&
-        fs::last_write_time(*manifest_file) != ts) {
-        LOG(DEBUG) << "Rereading manifest from: " << *manifest_file;
-        std::ifstream stream{*manifest_file};
+    if (open_manifest(manifest_path_) &&
+        fs::last_write_time(manifest_path_) != ts) {
+        LOG(DEBUG) << "Rereading manifest from: " << manifest_path_;
+        std::ifstream stream{manifest_path_};
         load_manifest(stream, state.manifest);
     }
 }
@@ -351,10 +339,14 @@ inline bool EditManifestTask::open_manifest(fs::path const& path) {
 
 class ResolveRPackageSystemDependencies : public Task {
   public:
-    ResolveRPackageSystemDependencies()
-        : Task("Resolve R package system dependencies") {}
+    explicit ResolveRPackageSystemDependencies(OsRelease os_release)
+        : Task("Resolve R package system dependencies"),
+          os_release_{std::move(os_release)} {}
 
     void run(TracerState& state) override;
+
+  private:
+    OsRelease os_release_;
 };
 
 inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
@@ -385,8 +377,7 @@ inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
                  "pull system dependencies";
 
     auto deb_packages = RpkgDatabase::get_system_dependencies(
-        compiled_packages, manifest.distribution,
-        manifest.distribution_version);
+        compiled_packages, os_release_.distribution, os_release_.release);
 
     // bring in R headers and R development dependencies (includes
     // build-essential, gfortran, ...)
@@ -410,12 +401,14 @@ inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
 
 class DockerFileBuilderTask : public Task {
   public:
-    explicit DockerFileBuilderTask(fs::path output_dir, bool docker_sudo_access)
+    explicit DockerFileBuilderTask(fs::path output_dir, std::string base_image,
+                                   bool docker_sudo_access)
         : Task("Create Dockerfile"), output_dir_{std::move(output_dir)},
           archive_{output_dir_ / "archive.tar"},
           permission_script_{output_dir_ / "permissions.sh"},
           cran_install_script_{output_dir_ / "install_r_packages.R"},
           dockerfile_{output_dir_ / "Dockerfile"},
+          base_image_{std::move(base_image)},
           docker_sudo_access_{docker_sudo_access} {}
 
     void run(TracerState& state) override;
@@ -457,8 +450,6 @@ class DockerFileBuilderTask : public Task {
 inline void DockerFileBuilderTask::run(TracerState& state) {
     LOG(INFO) << "Generating Dockerfile: " << dockerfile_;
 
-    base_image_ = state.manifest.base_image;
-
     DockerFileBuilder builder{base_image_, output_dir_};
 
     builder.env("DEBIAN_FRONTEND", "noninteractive");
@@ -481,7 +472,6 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
 
 inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
                                               Manifest const& manifest) const {
-
     std::vector<fs::path> files;
     for (auto const& [path, status] : manifest.copy_files) {
         if (status != FileStatus::Copy) {
@@ -494,10 +484,14 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
         }
     }
 
+    std::copy(manifest.symlinks.begin(), manifest.symlinks.end(),
+              std::back_inserter(files));
+
     if (files.empty()) {
         return;
     }
 
+    // 1. copy files
     std::sort(files.begin(), files.end());
 
     create_tar_archive(archive_, files);
@@ -509,6 +503,7 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
                      << " --same-owner --same-permissions --absolute-names"),
                  STR("rm -f " << archive_)});
 
+    // 2. set proper permissions
     {
         std::ofstream permissions{permission_script_};
         generate_permissions_script(files, permissions);
@@ -538,7 +533,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
     out << "set -e\n\n";
 
     for (auto const& dir : sorted_dirs) {
-        struct stat info {};
+        struct stat info{};
         if (stat(dir.c_str(), &info) != 0) {
             LOG(WARN) << "Warning: Unable to access " << dir << '\n';
             continue;
@@ -567,52 +562,17 @@ inline void DockerFileBuilderTask::install_r_packages(
         packages.begin(), packages.end(),
         [](auto const* lhs, auto const* rhs) { return lhs->name < rhs->name; });
 
-    auto all_packages = rpkg_database.get_dependencies(manifest.r_packages);
+    auto plan = rpkg_database.get_installation_plan(manifest.r_packages);
 
-    std::ofstream script(cran_install_script_);
+    {
+        std::ofstream script_out(cran_install_script_);
 
-    // TODO: parameterize the max cores
-    script << "options(Ncpus=min(parallel::detectCores(), 32))\n\n"
-           << "tmp_dir <- tempdir()\n"
-           << "install.packages('remotes', lib = c(tmp_dir))\n"
-           << "require('remotes', lib.loc = c(tmp_dir))\n"
-           << "on.exit(unlink(tmp_dir, recursive = TRUE))\n"
-           << "\n\n"
-           << "# install wrapper that turns warnings into errors\n"
-           // clang-format off
-        << "CHK <- function(thunk) {\n"
-        << "  withCallingHandlers(force(thunk), warning = function(w) {\n"
-        << "    if (grepl('installation of package ‘.*’ had non-zero exit status', conditionMessage(w))) { stop(w) }\n"
-        << "  })\n"
-        << "}\n\n"
-           // clang-format on
-
-           << "# installing packages\n\n";
-
-    std::unordered_set<std::string> seen;
-    for (auto const* pkg : all_packages) {
-        if (pkg->is_base) {
-            continue;
-        }
-
-        if (!seen.insert(pkg->name).second) {
-            continue;
-        }
-
-        std::visit(
-            overloaded{
-                [&](RPackage::GitHub const& gh) {
-                    script << "CHK(install_github('" << gh.org << "/" << gh.name
-                           << "', ref = '" << gh.ref
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
-                },
-                [&](RPackage::CRAN const&) {
-                    script << "CHK(install_version('" << pkg->name << "', '"
-                           << pkg->version
-                           << "', upgrade = 'never', dependencies = FALSE))\n";
-                },
-            },
-            pkg->repository);
+        InstallRPackageScriptBuilder script;
+        script.set_plan(plan)
+            .set_output(script_out)
+            // TODO: make it an option
+            .set_max_parallel(24)
+            .build();
     }
 
     builder.copy({cran_install_script_}, "/");
@@ -717,12 +677,12 @@ inline void DockerFileBuilderTask::set_environment(DockerFileBuilder& builder,
         "XDG_SESSION_ID",
         "XDG_SESSION_TYPE"};
 
-    std::vector<std::string> sorted_env;
+    std::vector<std::pair<std::string, std::string>> sorted_env;
     sorted_env.reserve(envir.size());
 
     for (auto const& [k, v] : envir) {
         if (!ignored_env.contains(k)) {
-            sorted_env.push_back(STR(k << "=\"" << v << "\""));
+            sorted_env.emplace_back(k, v);
         }
     }
 
@@ -739,6 +699,9 @@ inline void DockerFileBuilderTask::prepare_command(DockerFileBuilder& builder,
                       << manifest.user.group.name << " " << manifest.cwd)});
     builder.workdir(manifest.cwd);
     builder.user(manifest.user.username);
+    // this will allow user to install packages locally
+    builder.run(
+        R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
     builder.cmd(manifest.cmd);
 }
 
@@ -792,10 +755,6 @@ class MakefileBuilderTask : public Task {
     }
 
   private:
-    fs::path makefile_;
-    std::string docker_image_tag_;
-    std::string docker_container_name_;
-
     void generate_makefile(std::ostream& makefile, Manifest const& manifest) {
         // TODO: make sure it executes in the same dir as the makefile
         // MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
@@ -807,6 +766,8 @@ class MakefileBuilderTask : public Task {
             }
         }
 
+        bool progress = check_docker_buildx();
+
         makefile << "IMAGE_TAG = " << docker_image_tag_ << "\n"
                  << "CONTAINER_NAME = " << docker_container_name_
                  << "\n"
@@ -814,14 +775,20 @@ class MakefileBuilderTask : public Task {
                  << "TARGET_DIR = result"
                  << "\n\n"
 
-                 << ".PHONY: all build run copy clean\n\n"
+                 << "SHELL := /bin/bash\n"
+                 << ".SHELLFLAGS := -o pipefail -c"
+                 << "\n\n"
 
-                 << "all: clean copy\n\n"
+                 << ".PHONY: all build run copy clean"
+                 << "\n\n"
+
+                 << "all: clean copy"
+                 << "\n\n"
 
                  // clang-format off
                  << "build:\n"
                  << "\t@echo 'Building docker image $(IMAGE_TAG)'\n"
-                 << "\t@docker build --progress=plain -t $(IMAGE_TAG) . 2>&1"
+                 << "\t@docker build " << (progress ? "--progress=plain" : " ") << " -t $(IMAGE_TAG) . 2>&1"
                  << " | tee docker-build.log"
                  << "\n\n"
                  // clang-format on
@@ -865,6 +832,21 @@ class MakefileBuilderTask : public Task {
                  << "\t@echo 'Cleaning previous result (if any)'\n"
                  << "\trm -rf $(TARGET_DIR)\n\n";
     }
+
+    static bool check_docker_buildx() {
+        // feels like monkey patching, but in the r2u,
+        // the docker build does not support --progress
+        auto res = Command{"docker"}.arg("build").arg("--help").output(true);
+        if (res.exit_code != 0) {
+            throw TaskException("Unable to run docker build --help");
+        }
+
+        return res.stdout_data.find("--progress") != std::string::npos;
+    }
+
+    fs::path makefile_;
+    std::string docker_image_tag_;
+    std::string docker_container_name_;
 };
 
 class RunMakefileTask : public Task {
@@ -906,57 +888,14 @@ class RunMakefileTask : public Task {
 
 class CaptureEnvironmentTask : public Task {
   public:
-    CaptureEnvironmentTask(std::string const& base_image, bool infer_base_image)
-        : Task("Capture environment"), infer_base_image_{infer_base_image},
-          base_image_{base_image} {
-        CHECK(!base_image.empty() || infer_base_image);
-    }
+    CaptureEnvironmentTask() : Task("Capture environment") {}
 
     void run(TracerState& state) override {
-        capture_distribution(state);
         capture_user(state);
         capture_timezone(state);
     }
 
   private:
-    void capture_distribution(TracerState& state) {
-        auto os_info = ConfigFile::from_file("/etc/os-release");
-        if (!os_info) {
-            LOG(FATAL) << "Failed to read /etc/os-release";
-        }
-
-        auto distro = os_info->get("ID");
-
-        if (distro != "ubuntu" && distro != "debian") {
-            LOG(FATAL) << "Unsupported distribution: " << distro;
-        }
-
-        state.manifest.distribution = distro;
-        state.manifest.distribution_version =
-            string_trim(os_info->get("VERSION_ID"));
-
-        LOG(DEBUG) << "Distribution: " << state.manifest.distribution
-                   << " version: " << state.manifest.distribution_version;
-
-        if (infer_base_image_) {
-            if (!state.manifest.distribution_version.empty()) {
-                state.manifest.base_image =
-                    STR(state.manifest.distribution
-                        << ":" << state.manifest.distribution_version);
-            } else if (state.manifest.distribution ==
-                       "Debian") { // version is empty so it must be Debian
-                                   // unstable
-                state.manifest.base_image = "debian:sid";
-            } else {
-                LOG(WARN) << "Failed to infer base image, fallback to "
-                          << base_image_;
-                state.manifest.base_image = kBaseImage;
-            }
-        } else { // base_image_ is not empty if it is not inferred
-            state.manifest.base_image = base_image_;
-        }
-    }
-
     static void capture_user(TracerState& state) {
         state.manifest.cwd = std::filesystem::current_path();
         LOG(DEBUG) << "Current working directory: " << state.manifest.cwd;
@@ -989,11 +928,6 @@ class CaptureEnvironmentTask : public Task {
             state.manifest.timezone = kDefaultTimezone;
         }
     }
-
-    bool infer_base_image_{false};
-    fs::path base_image_;
-
-    static inline fs::path const kBaseImage = "ubuntu:22.04";
 };
 
 class Tracer {
@@ -1012,26 +946,77 @@ class Tracer {
     }
 
   private:
+    static void configure_default_ignore_pattern(IgnoreFileMap& map) {
+        map.add_wildcard("/dev");
+        map.add_wildcard("/etc/ld.so.cache");
+        map.add_wildcard("/etc/nsswitch.conf");
+        map.add_wildcard("/etc/passwd");
+        map.add_wildcard("/proc");
+        map.add_wildcard("/sys");
+        // created by locale-gen
+        map.add_wildcard("/usr/lib/locale/locale-archive");
+        // fonts should be installed from a package
+        map.add_wildcard("/usr/local/share/fonts");
+        // this might be a bit too drastic, but cache is usually not
+        // transferable anyway
+        map.add_wildcard("/var/cache");
+        // we should track the root of the filesystem
+        map.add_file("/");
+
+        map.add_custom(ignore_font_uuid_files);
+    }
+
+    static void load_image_default_files(fs::path const& default_image_file,
+                                         std::string const& docker_base_image,
+                                         IgnoreFileMap& map) {
+        auto default_files = [&]() {
+            if (fs::exists(default_image_file)) {
+                return DefaultImageFiles::from_file(default_image_file);
+            }
+
+            LOG(INFO) << "Default image file cache " << default_image_file
+                      << " does not exists, creating from image "
+                      << docker_base_image;
+
+            auto files = DefaultImageFiles::from_image(docker_base_image);
+
+            try {
+                fs::create_directories(default_image_file.parent_path());
+                std::ofstream out{default_image_file};
+                files.save(out);
+            } catch (std::exception const& e) {
+                LOG(WARN) << "Failed to store default image file list to "
+                          << default_image_file << ": " << e.what();
+            }
+            return files;
+        }();
+
+        LOG(DEBUG) << "Loaded " << default_files.size() << " default files";
+
+        for (auto const& info : default_files.files()) {
+            map.add_file(info.path);
+        }
+    }
+
     void run_pipeline() {
         std::vector<std::unique_ptr<Task>> tasks;
 
-        tasks.push_back(std::make_unique<CaptureEnvironmentTask>(
-            options_.docker_base_image, options_.docker_base_image.empty()));
+        tasks.push_back(std::make_unique<CaptureEnvironmentTask>());
 
         tasks.push_back(
-            std::make_unique<FileTracingTask>(options_.ignore_file_list));
+            std::make_unique<FileTracingTask>(&options_.ignore_file_map));
 
-        tasks.push_back(std::make_unique<ResolveFileTask>(
-            options_.R_bin, options_.ignore_file_list));
+        tasks.push_back(std::make_unique<ResolveFileTask>(options_.R_bin));
 
-        tasks.push_back(std::make_unique<ResolveRPackageSystemDependencies>());
+        tasks.push_back(std::make_unique<ResolveRPackageSystemDependencies>(
+            options_.os_release));
 
-        if (!options_.skip_manifest) {
-            tasks.push_back(std::make_unique<EditManifestTask>());
-        }
+        tasks.push_back(std::make_unique<EditManifestTask>(
+            options_.output_dir / "manifest.conf", !options_.skip_manifest));
 
         tasks.push_back(std::make_unique<DockerFileBuilderTask>(
-            options_.output_dir, options_.docker_sudo_access));
+            options_.output_dir, options_.docker_base_image,
+            options_.docker_sudo_access));
 
         tasks.push_back(std::make_unique<MakefileBuilderTask>(
             options_.makefile, options_.docker_image_tag,
@@ -1046,6 +1031,7 @@ class Tracer {
             .dpkg_database = DpkgDatabase::system_database(),
             .rpkg_database = RpkgDatabase::from_R(options_.R_bin),
             .traced_files = {},
+            .traced_symlinks = {},
             .manifest = {},
         };
 
@@ -1068,6 +1054,11 @@ class Tracer {
         if (options_.makefile.empty()) {
             options_.makefile = options_.output_dir / "Makefile";
         }
+
+        Tracer::configure_default_ignore_pattern(options_.ignore_file_map);
+        Tracer::load_image_default_files(options_.default_image_file,
+                                         options_.docker_base_image,
+                                         options_.ignore_file_map);
     }
 
     void run(Task& task, TracerState& state) {

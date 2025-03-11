@@ -1,18 +1,9 @@
+#include "../tests/common.h"
 #include "util_fs.h"
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <fstream>
-
-#define SKIP_ON_CI(message)                                                    \
-    if (std::getenv("GITHUB_ACTIONS") != nullptr) {                            \
-        GTEST_SKIP() << message;                                               \
-    }
-
-#define SKIP_ON_ROOT(message)                                                  \
-    if (geteuid() == 0) {                                                      \
-        GTEST_SKIP() << message;                                               \
-    }
 
 class CheckAccessibilityTest : public ::testing::Test {
   public:
@@ -36,7 +27,9 @@ TEST_F(CheckAccessibilityTest, non_existent_file) {
 
 TEST_F(CheckAccessibilityTest, existing_file_readable) {
     fs::path readable_file = temp_dir / "readable.txt";
-    { std::ofstream ofs(readable_file); }
+    {
+        std::ofstream ofs(readable_file);
+    }
     auto status = check_accessibility(readable_file);
     EXPECT_EQ(status, AccessStatus::Accessible);
 }
@@ -53,7 +46,9 @@ TEST_F(CheckAccessibilityTest, file_insufficient_permission) {
     SKIP_ON_ROOT("root has access to everything!");
 
     fs::path unreadable_file = temp_dir / "unreadable.txt";
-    { std::ofstream ofs(unreadable_file); }
+    {
+        std::ofstream ofs(unreadable_file);
+    }
 
     fs::permissions(unreadable_file, fs::perms::all, fs::perm_options::remove);
 

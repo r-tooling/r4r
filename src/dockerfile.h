@@ -48,7 +48,8 @@ class DockerFileBuilder {
     DockerFileBuilder& run(std::vector<std::string> const& commands);
     DockerFileBuilder& cmd(std::vector<std::string> const& commands);
     DockerFileBuilder& env(std::string const& key, std::string const& value);
-    DockerFileBuilder& env(std::vector<std::string> const& envs);
+    DockerFileBuilder&
+    env(std::vector<std::pair<std::string, std::string>> const& envs);
     DockerFileBuilder& add(std::string const& src, std::string const& dest);
     DockerFileBuilder& copy(std::vector<fs::path> const& srcs,
                             std::string const& dest);
@@ -66,6 +67,11 @@ class DockerFileBuilder {
     std::vector<std::string> commands_;
     std::vector<fs::path> copied_files_;
 };
+
+inline DockerFileBuilder& DockerFileBuilder::run(std::string const& command) {
+    run(std::vector{command});
+    return *this;
+}
 
 inline DockerFileBuilder&
 DockerFileBuilder::run(std::vector<std::string> const& commands) {
@@ -90,14 +96,27 @@ DockerFileBuilder::cmd(std::vector<std::string> const& commands) {
 
 inline DockerFileBuilder& DockerFileBuilder::env(std::string const& key,
                                                  std::string const& value) {
-    commands_.emplace_back("ENV " + key + "=" + value);
+    env({{key, value}});
     return *this;
 }
 
-inline DockerFileBuilder&
-DockerFileBuilder::env(std::vector<std::string> const& envs) {
-    std::string cmd = string_join(envs, " \\\n  ");
-    commands_.emplace_back("ENV " + cmd);
+inline DockerFileBuilder& DockerFileBuilder::env(
+    std::vector<std::pair<std::string, std::string>> const& envs) {
+    if (envs.empty()) {
+        return *this;
+    }
+
+    std::ostringstream s;
+    s << "ENV ";
+
+    for (size_t i = 0; auto const& [k, v] : envs) {
+        s << k << "=" << escape_cmd_arg(v);
+        if (++i < envs.size()) {
+            s << " \\\n  ";
+        }
+    }
+
+    commands_.emplace_back(s.str());
     return *this;
 }
 

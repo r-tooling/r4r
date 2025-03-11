@@ -38,7 +38,7 @@ inline UserInfo UserInfo::get_current_user_info() {
     }
 
     std::vector<char> pw_buffer(static_cast<size_t>(pw_buf_size));
-    struct passwd pwd {};
+    struct passwd pwd{};
     struct passwd* pwd_result = nullptr;
 
     int pw_status =
@@ -53,7 +53,7 @@ inline UserInfo UserInfo::get_current_user_info() {
     std::string shell = pwd.pw_shell;
 
     std::vector<char> gr_buffer(static_cast<size_t>(gr_buf_size));
-    struct group grp {};
+    struct group grp{};
     struct group* grp_result = nullptr;
 
     int gr_status =
@@ -83,7 +83,7 @@ inline UserInfo UserInfo::get_current_user_info() {
     groups.reserve(static_cast<size_t>(n_groups));
 
     for (gid_t group_id : group_ids) {
-        struct group temp_grp {};
+        struct group temp_grp{};
         struct group* temp_result = nullptr;
 
         gr_status = getgrgid_r(group_id, &temp_grp, gr_buffer.data(),

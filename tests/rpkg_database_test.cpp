@@ -13,13 +13,27 @@ TEST(RPackagesTest, Parsing) {
         "backports" NBSP "/home/user/R/library/4.1" NBSP "1.4.1" NBSP "R (>= 3.0.0)" NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "NA"     NBSP "NA"     NBSP "NA"    NBSP "NA"    NBSP "NA"  "\n"
         "bslib"     NBSP "/home/user/R/library/4.1" NBSP "0.4.2" NBSP "R (>= 2.10)"  NBSP "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>= 0.1.3)" NBSP "NA" NBSP "NA"   NBSP "NA"     NBSP "NA"     NBSP "NA"    NBSP "NA"    NBSP "NA"  "\n"
         "tools"     NBSP "/usr/lib/R/library"       NBSP "4.1.2" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "base" NBSP "NA"     NBSP "NA"     NBSP "NA"    NBSP "NA"    NBSP "NA"  "\n"
-        "rlang"     NBSP "/usr/lib/R/library"       NBSP "0.0.1" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "yes"    NBSP "github" NBSP "r-lib" NBSP "rlang" NBSP "123" "\n";
+        "rlang"     NBSP "/usr/lib/R/library"       NBSP "0.0.1" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "yes"    NBSP "github" NBSP "r-lib" NBSP "rlang" NBSP "123" "\n"
+        "htmltools" NBSP "/usr/lib/R/library"       NBSP "0.5.4" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "yes"    NBSP "github" NBSP "r-lib" NBSP "rlang" NBSP "123" "\n"
+        "jsonlite"  NBSP "/usr/lib/R/library"       NBSP "0.4.0" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "yes"    NBSP "github" NBSP "r-lib" NBSP "rlang" NBSP "123" "\n"
+        "sass"      NBSP "/usr/lib/R/library"       NBSP "0.0.1" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "yes"    NBSP "github" NBSP "r-lib" NBSP "rlang" NBSP "123" "\n"
+        // mising jquerylib on purpose
+        "sys"       NBSP "/usr/lib/R/library"       NBSP "2.1.0" NBSP "NA"           NBSP "NA"                                                                   NBSP "NA" NBSP "NA"   NBSP "yes"    NBSP "github" NBSP "r-lib" NBSP "rlang" NBSP "123" "\n";
     // clang-format on
 
     std::istringstream iss(data);
-    auto packages = RpkgDatabase::from_stream(iss);
 
-    ASSERT_EQ(packages.size(), 5);
+    RpkgDatabase packages{{}};
+    auto log_sink = Logger::get().with_sink(std::make_unique<StoreSink>(), [&] {
+        packages = RpkgDatabase::from_stream(iss);
+    });
+    auto const& msgs = log_sink->get_messages();
+    ASSERT_EQ(msgs.size(), 1);
+    EXPECT_EQ(msgs[0].level, LogLevel::Warning);
+    EXPECT_EQ(msgs[0].message,
+              "Missing dependency 'jquerylib' for package 'bslib'");
+
+    ASSERT_EQ(packages.size(), 9);
 
     // check askpass
     {
@@ -54,11 +68,11 @@ TEST(RPackagesTest, Parsing) {
         // "htmltools (>= 0.5.4), jsonlite, sass (>= 0.4.0),jquerylib (>=
         // 0.1.3)"
         // => "htmltools", "jsonlite", "sass", "jquerylib"
-        ASSERT_EQ(pkg->dependencies.size(), 4);
+        ASSERT_EQ(pkg->dependencies.size(), 3);
         EXPECT_TRUE(pkg->dependencies.contains("htmltools"));
         EXPECT_TRUE(pkg->dependencies.contains("jsonlite"));
         EXPECT_TRUE(pkg->dependencies.contains("sass"));
-        EXPECT_TRUE(pkg->dependencies.contains("jquerylib"));
+        // missing on purpose: jquerylib
         EXPECT_FALSE(pkg->is_base);
         EXPECT_FALSE(pkg->needs_compilation);
         EXPECT_TRUE(std::holds_alternative<RPackage::CRAN>(pkg->repository));
@@ -89,104 +103,133 @@ TEST(RPackagesTest, Parsing) {
     }
 }
 
-// Test topological sorting
-TEST(RPackagesTest, TopologicalSorting) {
+TEST(RPackagesTest, SystemDependencies) {
     // Synthetic data
-    // A depends on B, B depends on C, D no dependencies
-    // So topological ordering for A is [C, B, A], for D alone is [D].
+    // RPostgres package depends on libpq-dev
+    // Matrix package depends on nothing
+    // UnknownPackage package does not exist
     RpkgDatabase::RPackages packages;
-    packages.emplace(
-        "A", std::make_unique<RPackage>(
-                 RPackageBuilder("A", "1.0").with_dependency("B").build()));
-    packages.emplace(
-        "B", std::make_unique<RPackage>(
-                 RPackageBuilder("B", "1.1").with_dependency("C").build()));
-    packages.emplace(
-        "C", std::make_unique<RPackage>(RPackageBuilder("C", "1.2").build()));
-    packages.emplace(
-        "D", std::make_unique<RPackage>(RPackageBuilder("D", "1.3").build()));
+    packages.try_emplace("RPostgres", std::make_unique<RPackage>(
+                                          RPackageBuilder("RPostgres", "1.1")
+                                              .needs_compilation(true)
+                                              .build()));
+
+    packages.try_emplace(
+        "Matrix", std::make_unique<RPackage>(RPackageBuilder("Matrix", "1.4-0")
+                                                 .needs_compilation(true)
+                                                 .build()));
+
+    packages.try_emplace(
+        "UnknownPackage",
+        std::make_unique<RPackage>(RPackageBuilder("UnknownPackage", "0.1")
+                                       .needs_compilation(true)
+                                       .build()));
 
     RpkgDatabase db{std::move(packages)};
-    //
-    // {
-    //     // If we request A, we get A plus B plus C
-    //     std::unordered_set<RPackage const*> pkgs = {db.find("A")};
-    //     auto deps = db.get_dependencies(pkgs);
-    //     // One valid topological order is [C, B, A]
-    //     ASSERT_EQ(deps.size(), 3);
-    //     EXPECT_EQ(deps[0]->name, "C");
-    //     EXPECT_EQ(deps[1]->name, "B");
-    //     EXPECT_EQ(deps[2]->name, "A");
-    // }
-    //
-    // {
-    //     // If we request D, we get just D
-    //     std::unordered_set<RPackage const*> pkgs = {db.find("D")};
-    //     auto deps = db.get_dependencies(pkgs);
-    //     ASSERT_EQ(deps.size(), 1);
-    //     EXPECT_EQ(deps[0]->name, "D");
-    // }
-    //
-    // {
-    //     // If we request A and D at once, a valid topological order is:
-    //     // [C, B, A, D] or [D, C, B, A] as long as dependencies are satisfied
-    //     std::unordered_set<RPackage const*> pkgs = {db.find("A"),
-    //     db.find("D")}; auto deps = db.get_dependencies(pkgs);
-    //     ASSERT_EQ(deps.size(), 4);
-    //
-    //     // We'll verify that C appears before B, which appears before A.
-    //     // And D can appear anywhere as it has no dependencies.
-    //     auto posA = std::find_if(deps.begin(), deps.end(),
-    //                              [](auto* p) { return p->name == "A"; });
-    //     auto posB = std::find_if(deps.begin(), deps.end(),
-    //                              [](auto* p) { return p->name == "B"; });
-    //     auto posC = std::find_if(deps.begin(), deps.end(),
-    //                              [](auto* p) { return p->name == "C"; });
-    //     auto posD = std::find_if(deps.begin(), deps.end(),
-    //                              [](auto* p) { return p->name == "D"; });
-    //     ASSERT_TRUE(posA != deps.end());
-    //     ASSERT_TRUE(posB != deps.end());
-    //     ASSERT_TRUE(posC != deps.end());
-    //     ASSERT_TRUE(posD != deps.end());
-    //     EXPECT_TRUE(posC < posB);
-    //     EXPECT_TRUE(posB < posA);
-    // }
+
+    std::unordered_set<RPackage const*> pkgs;
+    pkgs.insert(db.find("RPostgres"));
+    pkgs.insert(db.find("Matrix"));
+    pkgs.insert(db.find("UnknownPackage"));
+    auto res = RpkgDatabase::get_system_dependencies(pkgs, "ubuntu", "24.04");
+
+    // TODO: assert no warnings
+    ASSERT_EQ(res.size(), 1);
+    ASSERT_TRUE(res.contains("libpq-dev"));
 }
-//
-// TEST(RPackagesTest, SystemDependencies) {
-//     // Synthetic data
-//     // RPostgres package depends on libpq-dev
-//     // Matrix package depends on nothing
-//     // UnknownPackage package does not exist
-//     RpkgDatabase::RPackages packages;
-//     packages.emplace("RPostgres", std::make_unique<RPackage>(
-//                                       "RPostgres",
-//                                       "/home/user/R/library/4.1", "1.1",
-//                                       std::set<std::string>{}, false, true,
-//                                       RPackage::CRAN{}));
-//     packages.emplace(
-//         "Matrix", std::make_unique<RPackage>("Matrix", "/usr/lib/R/library",
-//                                              "1.4-0",
-//                                              std::set<std::string>{}, false,
-//                                              true, RPackage::CRAN{}));
-//     packages.emplace("UnknownPackage",
-//                      std::make_unique<RPackage>("UnknownPackage",
-//                                                 "/usr/lib/R/library", "1.0",
-//                                                 std::set<std::string>{},
-//                                                 false, true,
-//                                                 RPackage::CRAN{}));
-//
-//     RpkgDatabase db{packages};
-//
-//     ASSERT_EQ(packages.size(), 3);
-//
-//     std::unordered_set<RPackage const*> pkgs;
-//     pkgs.insert(db.find("RPostgres"));
-//     pkgs.insert(db.find("Matrix"));
-//     pkgs.insert(db.find("UnknownPackage"));
-//     auto res = RpkgDatabase::get_system_dependencies(pkgs);
-//
-//     // TODO: assert no warnings
-//     ASSERT_EQ(res.size(), 1);
-//     ASSERT_TRUE(res.contains("libpq-dev"));
-// }
+
+class RPackagesParameterizedTest
+    : public ::testing::TestWithParam<std::tuple<
+          std::vector<std::pair<std::string, std::vector<std::string>>>,
+          std::vector<std::vector<std::string>>>> {};
+
+TEST_P(RPackagesParameterizedTest, GetDependencies) {
+    auto [packages, expected_plan] = GetParam();
+
+    RpkgDatabase::RPackages pkg_map;
+    for (auto const& [name, deps] : packages) {
+        RPackageBuilder builder(name, "1.0");
+        for (auto const& dep : deps) {
+            builder.with_dependency(dep);
+        }
+        pkg_map.try_emplace(name, std::make_unique<RPackage>(builder.build()));
+    }
+
+    RpkgDatabase db{std::move(pkg_map)};
+
+    std::unordered_set<RPackage const*> pkg_set;
+    for (auto const& [name, _] : packages) {
+        pkg_set.insert(db.find(name));
+    }
+
+    auto installation_plan = db.get_installation_plan(pkg_set);
+
+    // Debug output
+    //    std::cout << "Installation plan:\n";
+    //    for (size_t i = 0; i < installation_plan.size(); ++i) {
+    //        std::cout << "Level " << i << ": ";
+    //        for (auto const* pkg : installation_plan[i]) {
+    //            std::cout << pkg->name << " ";
+    //        }
+    //        std::cout << '\n';
+    //    }
+
+    ASSERT_EQ(installation_plan.size(), expected_plan.size());
+
+    for (size_t i = 0; i < expected_plan.size(); ++i) {
+        ASSERT_EQ(installation_plan[i].size(), expected_plan[i].size());
+        for (size_t j = 0; j < expected_plan[i].size(); ++j) {
+            EXPECT_EQ(installation_plan[i][j]->name, expected_plan[i][j]);
+        }
+    }
+}
+
+// clang-format off
+ INSTANTIATE_TEST_SUITE_P(
+     RPackagesTestInstance, RPackagesParameterizedTest,
+     ::testing::Values(
+         std::make_tuple(
+             std::vector<std::pair<std::string, std::vector<std::string>>>{
+                 {"A", {"B", "C"}},
+                 {"B", {"D"}},
+                 {"C", {"D"}},
+                 {"D", {}}
+             },
+             std::vector<std::vector<std::string>>{
+                 {"D"},
+                 {"B", "C"},
+                 {"A"}
+             }
+         ),
+         std::make_tuple(
+             std::vector<std::pair<std::string, std::vector<std::string>>>{
+                 {"X", {"Y"}},
+                 {"Y", {"Z"}},
+                 {"Z", {}},
+                 {"W", {"X", "Y"}}
+             },
+             std::vector<std::vector<std::string>>{
+                 {"Z"},
+                 {"Y"},
+                 {"X"},
+                 {"W"}
+             }
+         ),
+         std::make_tuple(
+             std::vector<std::pair<std::string, std::vector<std::string>>>{
+                 {"P", {"Q", "R"}},
+                 {"Q", {"S"}},
+                 {"R", {"S"}},
+                 {"S", {}},
+                 {"T", {"P"}}
+             },
+             std::vector<std::vector<std::string>>{
+                 {"S"},
+                 {"Q", "R"},
+                 {"P"},
+                 {"T"}
+             }
+         )
+     )
+ );
+// clang-format on
