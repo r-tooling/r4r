@@ -55,6 +55,7 @@ struct Options {
     bool docker_sudo_access{true};
     bool run_make{true};
     bool skip_manifest{false};
+    bool detect_manually_installed_debs{false};
 };
 
 struct TracerState {
@@ -697,6 +698,9 @@ inline void DockerFileBuilderTask::prepare_command(DockerFileBuilder& builder,
                       << manifest.user.group.name << " " << manifest.cwd)});
     builder.workdir(manifest.cwd);
     builder.user(manifest.user.username);
+    // this will allow user to install packages locally
+    builder.run(
+        R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
     builder.cmd(manifest.cmd);
 }
 
@@ -1078,7 +1082,8 @@ class Tracer {
         }
 
         TracerState state{
-            .dpkg_database = DpkgDatabase::system_database(),
+            .dpkg_database = DpkgDatabase::system_database(
+                options_.detect_manually_installed_debs),
             .rpkg_database = RpkgDatabase::from_R(options_.R_bin),
             .traced_files = {},
             .traced_symlinks = {},

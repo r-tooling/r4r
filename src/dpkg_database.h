@@ -36,8 +36,9 @@ using DebPackages =
 
 class DpkgDatabase {
   public:
-    static DpkgDatabase system_database();
-    static DpkgDatabase from_path(fs::path const& path);
+    static DpkgDatabase system_database(bool detect_manually_installed_debs);
+    static DpkgDatabase from_path(fs::path const& path,
+                                  bool detect_manually_installed_debs);
 
     DpkgDatabase(DpkgDatabase const&) = delete;
     DpkgDatabase(DpkgDatabase&&) = default;
@@ -145,6 +146,12 @@ inline void has_in_sources(DebPackages& packages, std::istream& source_list) {
     }
 }
 
+/*
+    Unfortunately, if the user update the package lists (with apt update for
+    instance), and there is a new version of a package, the package will be
+    marked as not in a source list. This is because the version in the source
+    list will not match the version in the dpkg database.
+*/
 inline void DpkgDatabase::load_source_lists(DebPackages& packages) {
     auto const sources_list_dir = fs::path("/var/lib/apt/lists/");
     for (auto const& entry : fs::directory_iterator(sources_list_dir)) {
@@ -218,15 +225,20 @@ DpkgDatabase::process_package_list_file(FileSystemTrie<DebPackage const*>& trie,
     }
 }
 
-inline DpkgDatabase DpkgDatabase::system_database() {
-    return DpkgDatabase::from_path("/var/lib/dpkg/info/");
+inline DpkgDatabase
+DpkgDatabase::system_database(bool detect_manually_installed) {
+    return DpkgDatabase::from_path("/var/lib/dpkg/info/",
+                                   detect_manually_installed);
 }
 
-inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path) {
+inline DpkgDatabase DpkgDatabase::from_path(fs::path const& path,
+                                            bool detect_manually_installed) {
     FileSystemTrie<DebPackage const*> trie;
 
     auto packages = load_installed_packages();
-    load_source_lists(packages);
+    if (detect_manually_installed) {
+        load_source_lists(packages);
+    }
     for (auto& [pkg_name, pkg] : packages) {
         auto list_file = path / (pkg_name + ".list");
         if (fs::is_regular_file(list_file)) {

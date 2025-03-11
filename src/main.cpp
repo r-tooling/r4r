@@ -83,6 +83,10 @@ static Options parse_cmd_args(std::span<char const*> args) {
         .with_argument("PATH")
         .with_callback(
             [&](auto& arg) { opts.default_image_files_cache = arg; });
+    parser.add_option("detect-manually-installed-debs")
+        .with_help("Detect manually installed deb packages")
+        .with_callback(
+            [&](auto&) { opts.detect_manually_installed_debs = true; });
     parser.add_option("help")
         .with_help("Print this message")
         .with_callback([&](auto&) {
