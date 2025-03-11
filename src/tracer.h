@@ -455,9 +455,9 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
     set_lang_and_timezone(builder, manifest);
     create_user(builder, manifest);
 
+    copy_files(builder, manifest);
     install_deb_packages(builder, manifest);
     install_r_packages(builder, manifest, state.rpkg_database);
-    copy_files(builder, manifest);
 
     set_environment(builder, manifest);
     prepare_command(builder, manifest);
@@ -575,9 +575,6 @@ inline void DockerFileBuilderTask::install_r_packages(
     // TODO: simplify
     builder.run({STR("Rscript /" << cran_install_script_.filename().string()),
                  STR("rm -f /" << cran_install_script_.filename().string())});
-    // this will allow user to install packages locally
-    builder.run(
-        R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
 }
 
 inline void
@@ -595,7 +592,8 @@ DockerFileBuilderTask::set_lang_and_timezone(DockerFileBuilder& builder,
     builder.env("LANG", lang);
     builder.env("TZ", tz);
     builder.run({"apt-get update -y",
-                 "apt-get install -y --no-install-recommends locales tzdata",
+                 "apt-get install -y --no-install-recommends locales tzdata "
+                 "ca-certificates",
                  "echo $LANG >> /etc/locale.gen", "locale-gen $LANG",
                  "update-locale LANG=$LANG"});
 }
@@ -897,6 +895,7 @@ class CaptureEnvironmentTask : public Task {
         capture_distribution(state);
         capture_user(state);
         capture_timezone(state);
+        capture_source_lists(state);
 
         configure_default_ignore_pattern(state.manifest.ignore_file_map);
         load_image_default_files(state.manifest.default_image_files_cache,
@@ -978,6 +977,39 @@ class CaptureEnvironmentTask : public Task {
                       << kDefaultTimezone;
             state.manifest.timezone = kDefaultTimezone;
         }
+    }
+
+#include <filesystem>
+
+    static void capture_source_lists(TracerState& state) {
+
+        // List of possible paths for APT sources and GPG keys
+        std::vector<std::string> const paths = {
+            "/etc/apt/sources.list", "/etc/apt/sources.list.d/",
+            "/etc/apt/trusted.gpg",  "/etc/apt/trusted.gpg.d/",
+            "/etc/apt/keyrings/",    "/usr/share/keyrings/"};
+
+        LOG(DEBUG) << "Capturing APT sources and GPG keys";
+        for (auto const& path : paths) {
+            if (fs::exists(path)) {
+                if (fs::is_directory(path)) {
+                    // Add all files in the directory
+                    for (auto const& entry : fs::directory_iterator(path)) {
+                        if (fs::is_regular_file(entry)) {
+                            LOG(DEBUG) << "Adding " << entry.path()
+                                       << " to the copy list";
+                            state.manifest.copy_files.emplace(entry.path(),
+                                                              FileStatus::Copy);
+                        }
+                    }
+                } else {
+                    // Add the single file
+                    LOG(DEBUG) << "Adding " << path << " to the copy list";
+                    state.manifest.copy_files.emplace(path, FileStatus::Copy);
+                }
+            }
+        }
+        LOG(DEBUG) << "APT sources and GPG keys captured";
     }
 
     static void configure_default_ignore_pattern(IgnoreFileMap& map) {
