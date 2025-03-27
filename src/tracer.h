@@ -776,7 +776,7 @@ class MakefileBuilderTask : public Task {
                  << ".SHELLFLAGS := -o pipefail -c"
                  << "\n\n"
 
-                 << ".PHONY: all build run copy clean"
+                 << ".PHONY: all build run copy clean-docker clean"
                  << "\n\n"
 
                  << "all: clean copy"
@@ -821,11 +821,14 @@ class MakefileBuilderTask : public Task {
         }
 
         makefile << "\n"
-                 << "clean:\n"
+                 << "clean-docker:\n"
                  << "\t@echo 'Cleaning previous container (if any)'\n"
                  << "\t-docker rm $(CONTAINER_NAME)\n"
                  << "\t@echo 'Cleaning previous image (if any)'\n"
-                 << "\t-docker rmi $(IMAGE_TAG)\n"
+                 << "\t-docker rmi $(IMAGE_TAG)\n";
+
+        makefile << "\n"
+                 << "clean: clean-docker\n"
                  << "\t@echo 'Cleaning previous result (if any)'\n"
                  << "\trm -rf $(TARGET_DIR)\n\n";
     }
