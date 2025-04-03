@@ -200,6 +200,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
         }
 
         result /= pathname;
+        result = result.lexically_normal();
     }
 
     if (ignore_file_map_->ignore(result)) {

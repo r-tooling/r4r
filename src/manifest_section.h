@@ -67,11 +67,10 @@ inline bool CopyFilesManifestSection::save(std::ostream& stream,
     }
 
     with_prefixed_ostream(stream, ManifestFormat::prefixed_comment(), [&] {
-        stream << "The following " << manifest.copy_files.size()
-               << " files has not been resolved.\n"
-               << "# - ignore file.\n"
-               << "C - mark file to be copied into the image.\n"
-               << "R - mark file as a result file.\n";
+        stream << "The following files have not been resolved.\n"
+               << "# - ignores the file.\n"
+               << "C - marks the file to be copied into the image.\n"
+               << "R - marks the file as a result file.\n";
     });
 
     std::vector<std::pair<fs::path, FileStatus>> sorted_files;
