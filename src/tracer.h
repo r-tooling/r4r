@@ -963,6 +963,10 @@ class Tracer {
         // we should track the root of the filesystem
         map.add_file("/");
 
+        if (auto* home_dir = std::getenv("HOME")) {
+            map.add_wildcard(fs::path(home_dir) / ".cache/fontconfig");
+        }
+
         map.add_custom(ignore_font_uuid_files);
     }
 
