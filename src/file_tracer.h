@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <system_error>
 #include <variant>
+#include <asm-generic/unistd.h>
+
 
 struct FileInfo {
     fs::path path;
@@ -48,6 +50,8 @@ class FileTracer : public SyscallListener {
 
     void register_file(FileInfo info);
 
+    std::optional<fs::path> resolve_path_at(pid_t pid, int dirfd, fs::path const& pathname);
+
     void generic_open_entry(pid_t pid, int dirfd, fs::path const& pathname,
                             SyscallState& state);
 
@@ -69,10 +73,10 @@ class FileTracer : public SyscallListener {
     void syscall_execve_exit(pid_t /*unused*/, SyscallRet /*unused*/,
                              bool is_error, SyscallState const& state);
 
-    void syscall_readlink_entry(pid_t pid, SyscallArgs args,
+    void syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
                                 SyscallState& state);
 
-    void syscall_readlink_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+    void syscall_readlinkat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                                SyscallState const& state);
     // TODO: won't classes be easier? Passing a pointer to this?
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
@@ -84,10 +88,12 @@ class FileTracer : public SyscallListener {
         }                                                                      \
     }
 
+    #ifdef __x86_64__
         REG_SYSCALL_HANDLER(open),
+    #endif
         REG_SYSCALL_HANDLER(openat),
         REG_SYSCALL_HANDLER(execve),
-        REG_SYSCALL_HANDLER(readlink),
+        REG_SYSCALL_HANDLER(readlinkat),
 
 #undef REG_SYSCALL_HANDLER
     };
@@ -165,29 +171,26 @@ inline void FileTracer::register_file(FileInfo info) {
     files_.try_emplace(path, info);
 }
 
-inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
-                                           fs::path const& pathname,
-                                           FileTracer::SyscallState& state) {
+inline std::optional<fs::path> FileTracer::resolve_path_at(pid_t pid, int dirfd, fs::path const& pathname) {
     fs::path result;
 
-    LOG(DEBUG) << "Syscall open " << pathname;
-
-    // the logic comes from the behavior of openat(2):
+    // Handle absolute paths directly
     if (pathname.is_absolute()) {
         result = pathname;
     } else {
+        // Handle relative paths based on dirfd
         if (dirfd == AT_FDCWD) {
             auto d = get_process_cwd(pid);
             if (!d) {
                 LOG(WARN) << "Failed to resolve cwd of: " << pid;
-                return;
+                return {};
             }
             result = *d;
         } else {
             auto d = resolve_fd_filename(pid, dirfd);
             if (!d) {
                 LOG(WARN) << "Failed to resolve dir fd: " << dirfd;
-                return;
+                return {};
             }
             result = *d;
         }
@@ -197,6 +200,7 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
         if (ec) {
             LOG(WARN) << "Failed to resolve absolute file path : " << result
                       << " - " << ec.message();
+            return {};
         }
 
         result /= pathname;
@@ -204,21 +208,35 @@ inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
     }
 
     result = result.lexically_normal();
-
+    
+    // Check if file should be ignored
     if (ignore_file_map_->ignore(result)) {
         LOG(DEBUG) << "Ignoring file: " << result;
+        return std::nullopt;
+    }
+
+    return result;
+}
+
+inline void FileTracer::generic_open_entry(pid_t pid, int dirfd,
+                                           fs::path const& pathname,
+                                           FileTracer::SyscallState& state) {
+    LOG(DEBUG) << "Syscall open " << pathname;
+
+    auto result = resolve_path_at(pid, dirfd, pathname);
+    if (!result) {
         return;
     }
 
     std::error_code ec;
-    bool exists = fs::exists(result, ec);
+    bool exists = fs::exists(*result, ec);
     if (ec) {
-        LOG(WARN) << "Failed to check if file exists: " << result << " - "
+        LOG(WARN) << "Failed to check if file exists: " << *result << " - "
                   << ec.message();
         return;
     }
 
-    state = FileInfo{.path = result, .size = {}, .existed_before = exists};
+    state = FileInfo{.path = *result, .size = {}, .existed_before = exists};
 }
 
 void FileTracer::generic_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
@@ -296,7 +314,12 @@ inline void FileTracer::syscall_execve_entry(pid_t pid, SyscallArgs args,
                                              SyscallState& state) {
     auto path =
         SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
-    state = FileInfo{.path = path, .size = {}, .existed_before = false};
+    auto result = resolve_path_at(pid, AT_FDCWD, path);
+    if (!result) {
+        return;
+    }
+    
+    state = FileInfo{.path = *result, .size = {}, .existed_before = false};
 }
 
 inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
@@ -318,28 +341,20 @@ inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
     }
 }
 
-inline void FileTracer::syscall_readlink_entry(pid_t pid, SyscallArgs args,
+inline void FileTracer::syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
                                                SyscallState& state) {
-    fs::path path =
-        SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
+    fs::path path = SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+    int dirfd = static_cast<int>(args[0]);
 
-    std::error_code ec;
-    path = fs::absolute(path, ec);
-    if (ec) {
-        LOG(WARN) << "Failed to get absolute path of a symlink: " << path
-                  << " - " << ec.message();
+    auto result = resolve_path_at(pid, dirfd, path);
+    if (!result) {
         return;
     }
 
-    if (ignore_file_map_->ignore(path)) {
-        LOG(DEBUG) << "Ignoring file: " << path;
-        return;
-    }
-
-    state = FileInfo{.path = path, .size = {}, .existed_before = false};
+    state = FileInfo{.path = *result, .size = {}, .existed_before = false};
 }
 
-inline void FileTracer::syscall_readlink_exit(pid_t, SyscallRet, bool is_error,
+inline void FileTracer::syscall_readlinkat_exit(pid_t, SyscallRet, bool is_error,
                                               SyscallState const& state) {
     if (is_error) {
         return;

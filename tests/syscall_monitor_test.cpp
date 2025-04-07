@@ -126,6 +126,7 @@ TEST(SyscallMonitorTest, OpenSyscall) {
     ASSERT_TRUE(fs::exists(*temp_file));
 }
 
+#ifdef __x86_64__
 TEST(SyscallMonitorTest, CreatSyscall) {
     SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
 
@@ -157,6 +158,7 @@ TEST(SyscallMonitorTest, CreatSyscall) {
 
     ASSERT_TRUE(fs::exists(*temp_file));
 }
+#endif
 
 TEST(SyscallMonitorTest, OpenSyscallFromChild) {
     SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");

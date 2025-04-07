@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ubuntu-22.04
+ARG BASE_IMAGE=ubuntu-24.04
 
 FROM mcr.microsoft.com/devcontainers/base:$BASE_IMAGE
 
@@ -13,5 +13,4 @@ RUN apt-get update -y  && \
   gdb \
   lcov \
   libcurl4-openssl-dev \
-  ninja-build \
-  rr
+  ninja-build

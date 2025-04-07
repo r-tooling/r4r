@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <linux/limits.h>
 
+#ifdef __x86_64__
 TEST(FileTracerTest, OpenSyscall) {
     SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
 
@@ -38,6 +39,7 @@ TEST(FileTracerTest, OpenSyscall) {
     EXPECT_TRUE(files.at(*test_file).existed_before);
     EXPECT_TRUE(files.at(*test_file).size.has_value());
 }
+#endif
 
 TEST(FileTracerTest, OpenAtSyscall) {
     SKIP_ON_COVERAGE("Instrumented code changes the number of syscalls");
