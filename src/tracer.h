@@ -23,6 +23,7 @@
 #include "util_fs.h"
 #include "util_io.h"
 
+#include <cassert>
 #include <filesystem>
 
 #include <cstdlib>
@@ -59,7 +60,7 @@ struct Options {
 
 struct TracerState {
     DpkgDatabase dpkg_database;
-    RpkgDatabase rpkg_database;
+    std::unique_ptr<RpkgDatabase> rpkg_database;
 
     std::vector<FileInfo> traced_files;
     std::map<fs::path, fs::path> traced_symlinks;
@@ -189,11 +190,14 @@ class ResolveFileTask : public Task {
 inline void ResolveFileTask::run(TracerState& state) {
     std::vector<std::pair<std::string, std::unique_ptr<Resolver>>> resolvers;
 
+    state.rpkg_database =
+        std::make_unique<RpkgDatabase>(RpkgDatabase::from_R(R_bin_));
+
     resolvers.emplace_back(
         "deb", std::make_unique<DebPackageResolver>(&state.dpkg_database));
 
     resolvers.emplace_back(
-        "R", std::make_unique<RPackageResolver>(&state.rpkg_database));
+        "R", std::make_unique<RPackageResolver>(state.rpkg_database.get()));
 
     resolvers.emplace_back("copy", std::make_unique<CopyFileResolver>());
 
@@ -350,11 +354,13 @@ class ResolveRPackageSystemDependencies : public Task {
 };
 
 inline void ResolveRPackageSystemDependencies::run(TracerState& state) {
+    assert(state.rpkg_database);
+
     auto& manifest = state.manifest;
 
     std::unordered_set<RPackage const*> compiled_packages;
     for (auto const* pkg :
-         state.rpkg_database.get_dependencies(manifest.r_packages)) {
+         state.rpkg_database->get_dependencies(manifest.r_packages)) {
         if (pkg->is_base) {
             continue;
         }
@@ -448,6 +454,8 @@ class DockerFileBuilderTask : public Task {
 };
 
 inline void DockerFileBuilderTask::run(TracerState& state) {
+    assert(state.rpkg_database);
+
     LOG(INFO) << "Generating Dockerfile: " << dockerfile_;
 
     DockerFileBuilder builder{base_image_, output_dir_};
@@ -460,7 +468,7 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
     create_user(builder, manifest);
 
     install_deb_packages(builder, manifest);
-    install_r_packages(builder, manifest, state.rpkg_database);
+    install_r_packages(builder, manifest, *state.rpkg_database);
     copy_files(builder, manifest);
 
     set_environment(builder, manifest);
@@ -1036,7 +1044,7 @@ class Tracer {
 
         TracerState state{
             .dpkg_database = DpkgDatabase::system_database(),
-            .rpkg_database = RpkgDatabase::from_R(options_.R_bin),
+            .rpkg_database = nullptr,
             .traced_files = {},
             .traced_symlinks = {},
             .manifest = {},
