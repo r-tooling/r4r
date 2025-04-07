@@ -474,13 +474,16 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
                                               Manifest const& manifest) const {
     std::vector<fs::path> files;
     for (auto const& [path, status] : manifest.copy_files) {
-        if (status != FileStatus::Copy) {
+        if (status == FileStatus::Result) {
+            files.push_back(path.parent_path());
             continue;
         }
 
-        files.push_back(path);
-        if (fs::is_symlink(path)) {
-            files.push_back(fs::read_symlink(path));
+        if (status == FileStatus::Copy) {
+            files.push_back(path);
+            if (fs::is_symlink(path)) {
+                files.push_back(fs::read_symlink(path));
+            }
         }
     }
 
