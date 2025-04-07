@@ -86,6 +86,7 @@ class Output {
   public:
     std::string stdout_data;
     std::string stderr_data;
+    bool redirected;
     int exit_code{0};
 
     void check_success(std::string const& message) const;
@@ -93,10 +94,11 @@ class Output {
 
 inline void Output::check_success(std::string const& message) const {
     if (exit_code != 0) {
-        throw std::runtime_error(STR(message << " (exit code: " << exit_code
-                                             << ")\n"
-                                                "stderr:\n"
-                                             << stderr_data));
+        throw std::runtime_error(
+            STR(message << " (exit code: " << exit_code
+                        << ")\n"
+                           "stderr:\n"
+                        << (redirected ? stdout_data : stderr_data)));
     }
 }
 
@@ -354,6 +356,7 @@ inline Output Command::output(bool redirect_stderr_to_stdout) {
 
     return {.stdout_data = std::move(out),
             .stderr_data = std::move(err),
+            .redirected = redirect_stderr_to_stdout,
             .exit_code = exit_code};
 }
 
