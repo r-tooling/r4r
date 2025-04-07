@@ -121,7 +121,9 @@ inline void FileTracingTask::run(TracerState& state) {
     auto [result, elapsed] = stopwatch([&] { return monitor_->start(); });
     monitor_ = nullptr;
 
-    LOG(INFO) << "Finished tracing in " << format_elapsed_time(elapsed);
+    LOG(INFO) << "Finished tracing in "
+              << duration_cast<std::chrono::milliseconds>(elapsed).count()
+              << "ms = " << format_elapsed_time(elapsed);
     LOG(INFO) << "Traced " << tracer.syscalls_count() << " syscalls, "
               << tracer.files().size() << " files, " << tracer.symlinks().size()
               << " symlinks";
@@ -536,7 +538,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
     out << "set -e\n\n";
 
     for (auto const& dir : sorted_dirs) {
-        struct stat info{};
+        struct stat info {};
         if (stat(dir.c_str(), &info) != 0) {
             LOG(WARN) << "Warning: Unable to access " << dir << '\n';
             continue;

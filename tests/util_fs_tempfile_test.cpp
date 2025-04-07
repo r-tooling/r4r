@@ -5,9 +5,7 @@ TEST(TempFileTest, DeletesFileOnDestruction) {
     fs::path tempPath;
     {
         TempFile temp("test_delete_", ".tmp");
-        {
-            std::ofstream ofs{*temp};
-        }
+        { std::ofstream ofs{*temp}; }
         tempPath = *temp;
         EXPECT_TRUE(fs::exists(tempPath))
             << "File should exist before TempFile object is destroyed";
@@ -20,9 +18,7 @@ TEST(TempFileTest, KeepsFileIfDeletionDisabled) {
     fs::path temp_path;
     {
         TempFile temp("test_keep_", ".tmp", false);
-        {
-            std::ofstream ofs{*temp};
-        }
+        { std::ofstream ofs{*temp}; }
         temp_path = *temp;
         EXPECT_TRUE(fs::exists(temp_path))
             << "File should exist before TempFile object is destroyed";
