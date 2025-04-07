@@ -78,6 +78,13 @@ class FileTracer : public SyscallListener {
 
     void syscall_readlinkat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                                SyscallState const& state);
+
+    void syscall_newfstatat_entry(pid_t pid, SyscallArgs args,
+                                  SyscallState& state);
+
+    void syscall_newfstatat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+                                 SyscallState const& state);
+
     // TODO: won't classes be easier? Passing a pointer to this?
     static inline std::unordered_map<uint64_t, SyscallHandler> const kHandlers_{
 #define REG_SYSCALL_HANDLER(nr)                                                \
@@ -94,6 +101,7 @@ class FileTracer : public SyscallListener {
         REG_SYSCALL_HANDLER(openat),
         REG_SYSCALL_HANDLER(execve),
         REG_SYSCALL_HANDLER(readlinkat),
+        REG_SYSCALL_HANDLER(newfstatat)
 
 #undef REG_SYSCALL_HANDLER
     };
@@ -383,6 +391,43 @@ inline void FileTracer::syscall_readlinkat_exit(pid_t, SyscallRet, bool is_error
     }
 
     symlinks_.emplace(info.path, target);
+}
+
+inline void FileTracer::syscall_newfstatat_entry(pid_t pid, SyscallArgs args,
+                                                 SyscallState& state) {
+    auto pathname =
+        SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+    generic_open_entry(pid, static_cast<int>(args[0]), pathname, state);
+}
+
+inline void FileTracer::syscall_newfstatat_exit(pid_t, SyscallRet,
+                                                bool is_error,
+                                                SyscallState const& state) {
+    if (is_error) {
+        return;
+    }
+
+    if (!std::holds_alternative<FileInfo>(state)) {
+        return;
+    }
+
+    auto const& info = std::get<FileInfo>(state);
+    auto const& entry_file = info.path;
+
+    std::error_code ec;
+    if (!fs::exists(entry_file, ec)) {
+        return;
+    }
+
+    fs::file_status fs = fs::status(entry_file, ec);
+    if (!(fs::is_regular_file(fs) || fs::is_directory(fs) ||
+          fs::is_symlink(fs))) {
+        LOG(WARN) << "Unsupported file type: " << entry_file << " "
+                  << fs::exists(entry_file, ec);
+        return;
+    }
+
+    register_file(info);
 }
 
 #endif // FILE_TRACER_H
