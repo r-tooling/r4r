@@ -546,7 +546,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
     out << "set -e\n\n";
 
     for (auto const& dir : sorted_dirs) {
-        struct stat info {};
+        struct stat info{};
         if (stat(dir.c_str(), &info) != 0) {
             LOG(WARN) << "Warning: Unable to access " << dir << '\n';
             continue;
@@ -713,8 +713,10 @@ inline void DockerFileBuilderTask::prepare_command(DockerFileBuilder& builder,
     builder.workdir(manifest.cwd);
     builder.user(manifest.user.username);
     // this will allow user to install packages locally
-    builder.run(
-        R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
+    if (!manifest.r_packages.empty()) {
+        builder.run(
+            R"(R -e 'dir.create(unlist(strsplit(Sys.getenv("R_LIBS_USER"), .Platform$path.sep))[1L], recursive=TRUE)')");
+    }
     builder.cmd(manifest.cmd);
 }
 
