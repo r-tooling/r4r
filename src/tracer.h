@@ -413,7 +413,8 @@ class DockerFileBuilderTask : public Task {
                                    bool docker_sudo_access)
         : Task("Create Dockerfile"), output_dir_{std::move(output_dir)},
           archive_{output_dir_ / "archive.tar"},
-          permission_script_{output_dir_ / "permissions.sh"},
+          pre_file_copy_script_{output_dir_ / "pre_file_copy.sh"},
+          post_file_copy_script_{output_dir_ / "post_file_copy.sh"},
           cran_install_script_{output_dir_ / "install_r_packages.R"},
           dockerfile_{output_dir_ / "Dockerfile"},
           base_image_{std::move(base_image)},
@@ -425,8 +426,13 @@ class DockerFileBuilderTask : public Task {
     static void install_deb_packages(DockerFileBuilder& builder,
                                      Manifest const& manifest);
 
-    static void generate_permissions_script(std::vector<fs::path> const& files,
-                                            std::ostream& out);
+    static void
+    generate_pre_file_copy_script(std::vector<fs::path> const& directories,
+                                  std::ostream& out);
+
+    static void
+    generate_post_file_copy_script(std::vector<fs::path> const& files,
+                                   std::ostream& out);
 
     static void set_lang_and_timezone(DockerFileBuilder& builder,
                                       Manifest const& manifest);
@@ -448,7 +454,8 @@ class DockerFileBuilderTask : public Task {
 
     fs::path output_dir_;
     fs::path archive_;
-    fs::path permission_script_;
+    fs::path pre_file_copy_script_;
+    fs::path post_file_copy_script_;
     fs::path cran_install_script_;
     fs::path dockerfile_;
     fs::path base_image_;
@@ -483,9 +490,11 @@ inline void DockerFileBuilderTask::run(TracerState& state) {
 inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
                                               Manifest const& manifest) const {
     std::vector<fs::path> files;
+    std::vector<fs::path> empty_dirs;
+
     for (auto const& [path, status] : manifest.copy_files) {
         if (status == FileStatus::Result) {
-            files.push_back(path.parent_path());
+            empty_dirs.push_back(path.parent_path());
             continue;
         }
 
@@ -504,31 +513,42 @@ inline void DockerFileBuilderTask::copy_files(DockerFileBuilder& builder,
         return;
     }
 
-    // 1. copy files
-    std::sort(files.begin(), files.end());
+    {
+        std::ofstream script{pre_file_copy_script_};
+        generate_pre_file_copy_script(empty_dirs, script);
+    }
+    builder.run_script_once(pre_file_copy_script_);
 
+    std::sort(files.begin(), files.end());
     create_tar_archive(archive_, files);
     // FIXME: the paths are not good, it will copy into out/archive.tar
     builder.copy({archive_}, archive_);
-
     builder.run({STR("tar -x -f "
                      << archive_
                      << " --same-owner --same-permissions --absolute-names"),
                  STR("rm -f " << archive_)});
 
-    // 2. set proper permissions
     {
-        std::ofstream permissions{permission_script_};
-        generate_permissions_script(files, permissions);
+        std::ofstream permissions{post_file_copy_script_};
+        generate_post_file_copy_script(files, permissions);
     }
-
-    // FIXME: the paths are not good, it will copy into out/...sh
-    builder.copy({permission_script_}, permission_script_);
-    builder.run({STR("bash " << permission_script_),
-                 STR("rm -f " << permission_script_)});
+    builder.run_script_once(post_file_copy_script_);
 }
 
-inline void DockerFileBuilderTask::generate_permissions_script(
+inline void DockerFileBuilderTask::generate_pre_file_copy_script(
+    std::vector<fs::path> const& directories, std::ostream& out) {
+
+    std::vector<fs::path> sorted_dirs(directories.begin(), directories.end());
+
+    out << "#!/bin/bash\n\n";
+    out << "set -e\n\n";
+
+    for (auto const& dir : sorted_dirs) {
+        out << "mkdir -p " << dir << '\n';
+    }
+}
+
+inline void DockerFileBuilderTask::generate_post_file_copy_script(
     std::vector<fs::path> const& files, std::ostream& out) {
     std::set<fs::path> directories;
 

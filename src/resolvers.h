@@ -101,8 +101,16 @@ inline void CopyFileResolver::resolve(Files& files, Symlinks& symlinks,
 
         try {
             switch (check_accessibility(path)) {
-            case AccessStatus::Accessible:
-                if (fs::is_regular_file(path) || fs::is_symlink(path)) {
+            case AccessStatus::Accessible: {
+                bool shoud_consider = fs::is_regular_file(path);
+
+                if (fs::is_symlink(path)) {
+                    if (auto it = resolve_symlink(path); it) {
+                        shoud_consider = fs::is_regular_file(*it);
+                    }
+                }
+
+                if (shoud_consider) {
                     if (f.existed_before) {
                         status = FileStatus::Copy;
                         copy_cnt++;
@@ -114,6 +122,7 @@ inline void CopyFileResolver::resolve(Files& files, Symlinks& symlinks,
                     status = FileStatus::IgnoreDirectory;
                 }
                 break;
+            }
             case AccessStatus::DoesNotExist:
                 status = FileStatus::IgnoreNoLongerExist;
                 break;

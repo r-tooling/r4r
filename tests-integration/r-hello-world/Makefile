@@ -25,4 +25,5 @@ check:
 clean:
 	-docker rm $(CONTAINER_NAME)
 	-docker rmi -f $(IMAGE_TAG)
-	rm -fr actual hello-world.txt
+	rm -fr actual
+	rm -fr hello-world.txt

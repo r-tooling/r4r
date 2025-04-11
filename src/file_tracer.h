@@ -8,8 +8,14 @@
 #include <filesystem>
 #include <system_error>
 #include <variant>
-#include <asm-generic/unistd.h>
 
+#ifdef __x86_64__
+#include <asm/unistd_64.h>
+#elif defined(__aarch64__)
+#include <asm/unistd.h>
+#else
+#error "Unsupported architecture: only x86_64 and aarch64 are supported"
+#endif
 
 struct FileInfo {
     fs::path path;
@@ -50,7 +56,8 @@ class FileTracer : public SyscallListener {
 
     void register_file(FileInfo info);
 
-    std::optional<fs::path> resolve_path_at(pid_t pid, int dirfd, fs::path const& pathname);
+    std::optional<fs::path> resolve_path_at(pid_t pid, int dirfd,
+                                            fs::path const& pathname);
 
     void generic_open_entry(pid_t pid, int dirfd, fs::path const& pathname,
                             SyscallState& state);
@@ -73,11 +80,17 @@ class FileTracer : public SyscallListener {
     void syscall_execve_exit(pid_t /*unused*/, SyscallRet /*unused*/,
                              bool is_error, SyscallState const& state);
 
-    void syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
+    void syscall_readlink_entry(pid_t pid, SyscallArgs args,
                                 SyscallState& state);
 
-    void syscall_readlinkat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+    void syscall_readlink_exit(pid_t pid, SyscallRet ret_val, bool is_error,
                                SyscallState const& state);
+
+    void syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
+                                  SyscallState& state);
+
+    void syscall_readlinkat_exit(pid_t pid, SyscallRet ret_val, bool is_error,
+                                 SyscallState const& state);
 
     void syscall_newfstatat_entry(pid_t pid, SyscallArgs args,
                                   SyscallState& state);
@@ -95,9 +108,10 @@ class FileTracer : public SyscallListener {
         }                                                                      \
     }
 
-    #ifdef __x86_64__
+#ifdef __x86_64__
         REG_SYSCALL_HANDLER(open),
-    #endif
+        REG_SYSCALL_HANDLER(readlink),
+#endif
         REG_SYSCALL_HANDLER(openat),
         REG_SYSCALL_HANDLER(execve),
         REG_SYSCALL_HANDLER(readlinkat),
@@ -179,7 +193,8 @@ inline void FileTracer::register_file(FileInfo info) {
     files_.try_emplace(path, info);
 }
 
-inline std::optional<fs::path> FileTracer::resolve_path_at(pid_t pid, int dirfd, fs::path const& pathname) {
+inline std::optional<fs::path>
+FileTracer::resolve_path_at(pid_t pid, int dirfd, fs::path const& pathname) {
     fs::path result;
 
     // Handle absolute paths directly
@@ -216,7 +231,7 @@ inline std::optional<fs::path> FileTracer::resolve_path_at(pid_t pid, int dirfd,
     }
 
     result = result.lexically_normal();
-    
+
     // Check if file should be ignored
     if (ignore_file_map_->ignore(result)) {
         LOG(DEBUG) << "Ignoring file: " << result;
@@ -326,7 +341,7 @@ inline void FileTracer::syscall_execve_entry(pid_t pid, SyscallArgs args,
     if (!result) {
         return;
     }
-    
+
     state = FileInfo{.path = *result, .size = {}, .existed_before = false};
 }
 
@@ -349,9 +364,29 @@ inline void FileTracer::syscall_execve_exit(pid_t, SyscallRet, bool is_error,
     }
 }
 
-inline void FileTracer::syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
+inline void FileTracer::syscall_readlink_entry(pid_t pid, SyscallArgs args,
                                                SyscallState& state) {
-    fs::path path = SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
+    fs::path path =
+        SyscallMonitor::read_string_from_process(pid, args[0], PATH_MAX);
+
+    auto result = resolve_path_at(pid, AT_FDCWD, path);
+    if (!result) {
+        return;
+    }
+
+    state = FileInfo{.path = *result, .size = {}, .existed_before = false};
+}
+
+inline void FileTracer::syscall_readlink_exit(pid_t pid, SyscallRet ret,
+                                              bool is_error,
+                                              SyscallState const& state) {
+    syscall_readlinkat_exit(pid, ret, is_error, state);
+}
+
+inline void FileTracer::syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
+                                                 SyscallState& state) {
+    fs::path path =
+        SyscallMonitor::read_string_from_process(pid, args[1], PATH_MAX);
     int dirfd = static_cast<int>(args[0]);
 
     auto result = resolve_path_at(pid, dirfd, path);
@@ -362,8 +397,9 @@ inline void FileTracer::syscall_readlinkat_entry(pid_t pid, SyscallArgs args,
     state = FileInfo{.path = *result, .size = {}, .existed_before = false};
 }
 
-inline void FileTracer::syscall_readlinkat_exit(pid_t, SyscallRet, bool is_error,
-                                              SyscallState const& state) {
+inline void FileTracer::syscall_readlinkat_exit(pid_t, SyscallRet,
+                                                bool is_error,
+                                                SyscallState const& state) {
     if (is_error) {
         return;
     }
