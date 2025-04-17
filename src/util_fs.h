@@ -4,6 +4,7 @@
 #include "common.h"
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <queue>
 #include <random>
 #include <system_error>
@@ -246,6 +247,20 @@ inline std::string read_from_file(fs::path const& path) {
                                 STR("Failed to read from file: " << path));
     }
     return buffer.str();
+}
+
+inline std::optional<fs::path> resolve_symlink(fs::path const& path) {
+    std::error_code ec;
+    fs::path target = fs::read_symlink(path, ec);
+    if (ec) {
+        return {};
+    }
+
+    if (!target.is_absolute()) {
+        target = fs::absolute(path.parent_path() / target);
+    }
+
+    return target;
 }
 
 #endif // UTIL_FS_H
