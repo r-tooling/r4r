@@ -7,6 +7,12 @@
 #define SKIP_ON_COVERAGE(message) (void)0
 #endif
 
+#ifdef __aarch64__
+#define SKIP_ON_AARCH64(message) GTEST_SKIP() << message
+#else
+#define SKIP_ON_AARCH64(message) (void)0
+#endif
+
 #define SKIP_ON_CI(message)                                                    \
     if (std::getenv("GITHUB_ACTIONS") != nullptr) {                            \
         GTEST_SKIP() << message;                                               \

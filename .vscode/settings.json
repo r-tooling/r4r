@@ -1,4 +1,5 @@
 {
+    "makefile.configureOnOpen": true
     "files.associations": {
         "span": "cpp",
         "cctype": "cpp",

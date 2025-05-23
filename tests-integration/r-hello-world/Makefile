@@ -6,10 +6,14 @@ BASE_IMAGE ?= ubuntu:24.04
 
 all: clean trace check
 
+.PHONY: debug
+debug: R4R := gdb --args $(R4R)
+debug: all
+
 .PHONY: trace
 trace:
 	$(R4R) \
-		-vv \
+		-vvv \
 		--output actual \
 		--skip-manifest \
 		--default-image-file ../$(BASE_IMAGE).cache \
@@ -25,4 +29,5 @@ check:
 clean:
 	-docker rm $(CONTAINER_NAME)
 	-docker rmi -f $(IMAGE_TAG)
-	rm -fr actual hello-world.txt
+	rm -fr actual
+	rm -fr hello-world.txt

@@ -4,6 +4,7 @@
 #include "common.h"
 #include "util.h"
 #include "util_fs.h"
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -46,6 +47,7 @@ class DockerFileBuilder {
 
     DockerFileBuilder& run(std::string const& command);
     DockerFileBuilder& run(std::vector<std::string> const& commands);
+    DockerFileBuilder& run_script_once(fs::path const& path);
     DockerFileBuilder& cmd(std::vector<std::string> const& commands);
     DockerFileBuilder& env(std::string const& key, std::string const& value);
     DockerFileBuilder&
@@ -77,6 +79,13 @@ inline DockerFileBuilder&
 DockerFileBuilder::run(std::vector<std::string> const& commands) {
     std::string cmds = string_join(commands, " && \\\n  ");
     commands_.emplace_back("RUN " + cmds);
+    return *this;
+}
+
+inline DockerFileBuilder&
+DockerFileBuilder::run_script_once(fs::path const& path) {
+    copy({path}, path);
+    run({STR("bash " << path), STR("rm -f " << path)});
     return *this;
 }
 
