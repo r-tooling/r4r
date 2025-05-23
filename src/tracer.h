@@ -546,7 +546,7 @@ inline void DockerFileBuilderTask::generate_permissions_script(
     out << "set -e\n\n";
 
     for (auto const& dir : sorted_dirs) {
-        struct stat info{};
+        struct stat info {};
         if (stat(dir.c_str(), &info) != 0) {
             LOG(WARN) << "Warning: Unable to access " << dir << '\n';
             continue;
@@ -654,6 +654,7 @@ inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
 
     // sudo?
     if (docker_sudo_access_) {
+        cmds.emplace_back("apt-get update -y");
         cmds.emplace_back("apt-get install -y sudo");
         cmds.push_back(STR("echo '"
                            << user.username
