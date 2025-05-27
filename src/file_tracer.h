@@ -196,9 +196,9 @@ inline void FileTracer::register_file(FileInfo info) {
         } else {
             info.size = size;
         }
-    }
 
-    files_.try_emplace(path, info);
+        files_.try_emplace(path, info);
+    }
 }
 
 inline std::optional<fs::path>
