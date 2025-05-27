@@ -10,7 +10,11 @@ OLD_UID="$(id -u r4r)"
 OLD_GID="$(id -g r4r)"
 
 if [ "$OLD_GID" != "$R4R_GID" ]; then
-	groupmod -g "$R4R_GID" r4r
+	if getent group "$HOST_GID" >/dev/null; then
+		echo "WARNING: A group with GID $HOST_GID already exists; skipping groupmod for r4r." >&2
+	else
+		groupmod -g "$HOST_GID" r4r
+	fi
 fi
 
 if [ "$OLD_UID" != "$R4R_UID" ]; then
