@@ -639,6 +639,13 @@ inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
     std::vector<std::string> cmds;
     auto const& user = manifest.user;
 
+    // remove existing user and group
+    cmds.push_back(STR("getent passwd "
+                       << user.uid << "| cut -d: -f1 | xargs -r userdel -r"));
+    cmds.push_back(STR("getent group "
+                       << user.group.gid
+                       << " | cut -d: -f1 | xargs -r groupdel"));
+
     // create the primary group
     cmds.push_back(
         STR("groupadd -g " << user.group.gid << " " << user.group.name));

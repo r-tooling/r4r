@@ -163,4 +163,4 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run integration tests
-        run: make -C tests-integration r-hello-world
+        run: make -C tests-integration r-hello-world r-ggplot

@@ -263,4 +263,33 @@ inline std::optional<fs::path> resolve_symlink(fs::path const& path) {
     return target;
 }
 
+inline std::string file_type_str(fs::path const& p) {
+    fs::file_status st = fs::symlink_status(p);
+
+    switch (st.type()) {
+    case fs::file_type::none:
+        return "none";
+    case fs::file_type::not_found:
+        return "not found";
+    case fs::file_type::regular:
+        return "regular file";
+    case fs::file_type::directory:
+        return "directory";
+    case fs::file_type::symlink:
+        return "symlink";
+    case fs::file_type::block:
+        return "block device";
+    case fs::file_type::character:
+        return "character device";
+    case fs::file_type::fifo:
+        return "FIFO/pipe";
+    case fs::file_type::socket:
+        return "socket";
+    case fs::file_type::unknown:
+        return "unknown";
+    default:
+        UNREACHABLE();
+    }
+}
+
 #endif // UTIL_FS_H
