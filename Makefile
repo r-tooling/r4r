@@ -11,6 +11,9 @@ CLANG_TIDY       ?= clang-tidy
 CMAKE            ?= cmake
 CTEST            ?= ctest
 
+# docker settings
+IMAGE_NAME ?= ghcr.io/r-tooling/r4r:latest
+
 # cmake configuration arguments
 CMAKE_ARGS += -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
 CMAKE_ARGS += -GNinja
@@ -73,8 +76,11 @@ clean: ## Clean build artifacts
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(COVERAGE_BUILD_DIR)
 
-docker-image-integration-test:
-	docker build --rm -t ghcr.io/r-tooling/r4r-it:latest -f tests-integration/Dockerfile .
+docker-image:
+	docker build --rm -t $(IMAGE_NAME) -f .devcontainer/Dockerfile .
+
+integration-tests:
+	$(MAKE) -C tests-integration
 
 help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

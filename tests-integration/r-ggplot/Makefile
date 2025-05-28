@@ -1,13 +1,14 @@
 NAME := r-ggplot
 IMAGE_TAG := r4r/test-$(NAME)
 CONTAINER_NAME := r4r-test-$(NAME)
+R4R ?= ../../build/r4r
 
 all: clean trace check
 
 .PHONY: trace
 trace:
-	../../build/r4r \
-		-vvv \
+	$(R4R) \
+		-vv \
 		--output actual \
 		--skip-manifest \
 		--docker-image-tag $(IMAGE_TAG) \

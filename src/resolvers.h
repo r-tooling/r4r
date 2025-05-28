@@ -41,6 +41,11 @@ inline void DebPackageResolver::resolve(Files& files, Symlinks& symlinks,
 
     auto resolved = [&](fs::path const& path) {
         for (auto const& p : symlink_resolver.resolve_symlinks(path)) {
+            if (!fs::is_regular_file(p)) {
+                LOG(DEBUG) << "Skipping: " << path
+                           << " as it is not a regular file ("
+                           << file_type_str(path) << ")";
+            }
             if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
                 LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
 

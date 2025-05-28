@@ -196,9 +196,9 @@ inline void FileTracer::register_file(FileInfo info) {
         } else {
             info.size = size;
         }
-
-        files_.try_emplace(path, info);
     }
+
+    files_.try_emplace(path, info);
 }
 
 inline std::optional<fs::path>
@@ -285,6 +285,8 @@ void FileTracer::generic_open_exit(pid_t pid, SyscallRet ret_val, bool is_error,
 
     std::error_code ec;
     if (!fs::exists(entry_file, ec)) {
+        LOG(DEBUG) << "File does not exist at the end of open syscall "
+                   << entry_file;
         return;
     }
 

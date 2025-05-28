@@ -1,21 +1,32 @@
 .SUFFIXES:
 
 ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+IMAGE_NAME := ghcr.io/r-tooling/r4r-it:latest
+
+# replace the UID/GID of r4r user which has been created in the r4r-it container
+# it is important that it does not collide with any existing users
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
+HOST_USER ?= r4r
 
 RUN := docker \
 			 run \
 			 --rm \
-			 -e R4R_UID=$(shell id -u) \
-			 -e R4R_GID=$(shell id -g) \
+			 -e HOST_UID=$(HOST_UID) \
+			 -e HOST_GID=$(HOST_GID) \
+			 -e HOST_USER=$(HOST_USER) \
 			 -v $(ROOT_DIR):/home/r4r/tests \
 			 -v /var/run/docker.sock:/var/run/docker.sock \
-			 ghcr.io/r-tooling/r4r-it:latest
+			 $(IMAGE_NAME)
 
 SUBDIRS := $(patsubst %/,%,$(sort $(dir $(wildcard */Makefile))))
 
-.PHONY: all $(SUBDIRS) clean
+.PHONY: all docker-image $(SUBDIRS) clean
 
 all: $(SUBDIRS)
 
-$(SUBDIRS):
+docker-image:
+	docker build --progress=plain --rm -t $(IMAGE_NAME) -f Dockerfile ..
+
+$(SUBDIRS): docker-image
 	$(RUN) make -C /home/r4r/tests/$@ R4R=r4r

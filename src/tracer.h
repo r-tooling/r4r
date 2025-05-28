@@ -639,11 +639,18 @@ inline void DockerFileBuilderTask::create_user(DockerFileBuilder& builder,
     std::vector<std::string> cmds;
     auto const& user = manifest.user;
 
+    // FIXME: this is a hack - the default ubuntu user (if using ubuntu base
+    // image) has UID/GID 1000/1000 which is quite common and thus we would not
+    // be able to create our user
+    cmds.emplace_back("id ubuntu &>/dev/null && userdel -r ubuntu");
+
     // create the primary group
     cmds.push_back(
         STR("groupadd -g " << user.group.gid << " " << user.group.name));
 
     // create groups
+    // FIXME: this is very fragile, it is possible that
+    // another group with the same GID alrady exists
     for (auto const& group : user.groups) {
         cmds.push_back(STR("(groupadd -g " << group.gid << " " << group.name
                                            << " || groupmod -g " << group.gid
@@ -940,6 +947,9 @@ class CaptureEnvironmentTask : public Task {
         LOG(DEBUG) << "Current working directory: " << state.manifest.cwd;
         state.manifest.user = UserInfo::get_current_user_info();
         LOG(DEBUG) << "Current user: " << state.manifest.user.username;
+
+        // FIXME: check that there is no conflict with the base image
+        // otherwise the Dockerfile will fail
 
         if (environ != nullptr) {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
