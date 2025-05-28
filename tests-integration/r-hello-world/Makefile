@@ -1,33 +1,9 @@
 NAME := r-hello-world
-IMAGE_TAG ?= r4r/test-$(NAME)
-CONTAINER_NAME ?= r4r-test-$(NAME)
-R4R ?= ../../build/r4r
-BASE_IMAGE ?= ubuntu:24.04
+COMMAND := R -f hello-world.R
+ARTIFACTS := hello-world.txt
 
-all: clean trace check
+include ../test.mk
 
-.PHONY: debug
-debug: R4R := gdb --args $(R4R)
-debug: all
+setup:
+	$(call install_r_packages,stringr)
 
-.PHONY: trace
-trace:
-	$(R4R) \
-		-vvv \
-		--output actual \
-		--skip-manifest \
-		--default-image-file ../$(BASE_IMAGE).cache \
-		--docker-image-tag $(IMAGE_TAG) \
-		--docker-container-name $(CONTAINER_NAME) \
-		R -f hello-world.R
-
-.PHONY: check
-check:
-	../snapshot.sh --fail expected actual/result
-
-.PHONY: clean
-clean:
-	-docker rm $(CONTAINER_NAME)
-	-docker rmi -f $(IMAGE_TAG)
-	rm -fr actual
-	rm -fr hello-world.txt
