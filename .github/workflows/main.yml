@@ -162,5 +162,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run integration tests
-        run: make -C tests-integration r-hello-world r-ggplot
+      - name: Run integration test r-hello-world
+        run: make -C tests-integration r-hello-world
+        env:
+          HOST_UID: 1000
+          HOST_GID: 1000
+
+      - name: Run integration test r-ggplot
+        run: make -C tests-integration r-ggplot
+        env:
+          HOST_UID: 1000
+          HOST_GID: 1000
