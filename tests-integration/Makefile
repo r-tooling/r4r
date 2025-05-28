@@ -26,7 +26,16 @@ SUBDIRS := $(patsubst %/,%,$(sort $(dir $(wildcard */Makefile))))
 all: $(SUBDIRS)
 
 docker-image:
-	docker build --progress=plain --rm -t $(IMAGE_NAME) -f Dockerfile ..
+	docker build --rm -t $(IMAGE_NAME) -f Dockerfile ..
+
+ifndef LOCAL
 
 $(SUBDIRS): docker-image
 	$(RUN) make -C /home/r4r/tests/$@ R4R=r4r
+
+else
+
+$(SUBDIRS):
+	$(MAKE) -C $@ R4R=$(ROOT_DIR)/../build/r4r
+
+endif

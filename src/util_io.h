@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <streambuf>
@@ -32,7 +33,7 @@ class FilteringOutputStreamBuf : public std::streambuf {
 class LinePrefixingFilter {
   public:
     explicit LinePrefixingFilter(std::string prefix)
-        : prefix_{std::move(prefix)}, at_nl{true} {}
+        : prefix_{std::move(prefix)} {}
 
     void operator()(std::streambuf& dst, int c) {
         if (at_nl) {
@@ -63,24 +64,53 @@ inline void with_prefixed_ostream(std::ostream& dst, std::string const& prefix,
     dst.rdbuf(old);
 }
 
-inline void forward_output(int read_fd, std::ostream& os) {
-    constexpr size_t kBufferSize = 4096;
+#include <poll.h>
+
+inline void forward_output(int fd, std::ostream& out) {
+    constexpr std::size_t kBufferSize = 4 * 1024ULL;
     std::array<char, kBufferSize> buffer{};
+
+    pollfd pfd{fd, POLLIN, 0};
+
     while (true) {
-        ssize_t bytes = ::read(read_fd, buffer.data(), buffer.size());
-        if (bytes == 0) {
-            break; // EOF
-        }
-        if (bytes < 0) {
-            if (errno == EINTR) {
-                continue; // retry
+        int ret = ::poll(&pfd, 1, -1);
+        if (ret == -1) {
+            if (errno == EINTR) { // interrupted by signal, try again
+                continue;
             }
-            throw make_system_error(
-                errno, STR("Unable to read from pipe: " << read_fd));
+            throw std::runtime_error(std::string("poll: ") +
+                                     std::strerror(errno));
         }
-        os.write(buffer.data(), bytes);
+
+        if (pfd.revents & POLLIN) {
+            ssize_t n = ::read(fd, buffer.data(), buffer.size());
+            if (n == 0) { // EOF
+                break;
+            }
+            if (n < 0) {
+                if (errno == EINTR) { // interrupted mid-read
+                    continue;
+                }
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    continue; // shouldn’t happen because poll said it’s ready
+                }
+                throw make_system_error(
+                    errno, STR("Unable to read from file descriptor: " << fd));
+            }
+
+            out.write(buffer.data(), static_cast<std::streamsize>(n));
+            if (!out) { // disk full, pipe closed, ...
+                throw make_system_error(
+                    errno, STR("Unable to write to stream: " << fd));
+            }
+        }
+
+        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) {
+            break; // peer hung up or fd became invalid
+        }
     }
-    os.flush();
+
+    out.flush();
 }
 
 #endif // UTIL_IO_H

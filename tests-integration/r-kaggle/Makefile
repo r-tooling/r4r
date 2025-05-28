@@ -1,25 +1,8 @@
-NAME := r-ggplot
-IMAGE_TAG := r4r/test-$(NAME)
-CONTAINER_NAME := r4r-test-$(NAME)
+NAME := r-kaggle
+COMMAND := R -e 'rmarkdown::render("code/titanic-2nd-degree-families-and-majority-voting.Rmd")'
+ARTIFACTS := code/Titanic_select.csv code/titanic-2nd-degree-families-and-majority-voting.html
 
-all: clean trace check
+include ../test.mk
 
-.PHONY: trace
-trace:
-	../../build/r4r \
-		-vvv \
-		--output actual \
-		--skip-manifest \
-		--docker-image-tag $(IMAGE_TAG) \
-		--docker-container-name $(CONTAINER_NAME) \
-		R -e 'rmarkdown::render("code/titanic-2nd-degree-families-and-majority-voting.Rmd")'
-
-.PHONY: check
-check:
-	../snapshot.sh expected actual/result
-
-.PHONY: clean
-clean:
-	-docker rm $(CONTAINER_NAME)
-	-docker rmi -f $(IMAGE_TAG)
-	rm -fr actual code/Titanic_select.csv code/titanic-2nd-degree-families-and-majority-voting.html
+setup:
+	$(call install_r_packages,Hmisc knitr ggplot2 dplyr caret randomForest gridExtra ROCR corrplot kernlab gbm)
