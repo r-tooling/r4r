@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+#include <algorithm>
+
 TEST(FileSystemTrieTest, DefaultInitialization) {
     FileSystemTrie<std::string> trie;
     EXPECT_TRUE(trie.is_empty());
@@ -146,11 +148,14 @@ TEST(FileSystemTrieIteratorTest, IteratorVisitsAllNodes) {
     trie.insert("e", 4);
 
     std::vector<std::pair<fs::path, int>> actual;
-    auto exists = [&](auto const& elem) {
-        auto it = std::find(actual.begin(), actual.end(), elem);
+     auto exists = [&](auto const& elem) {
+       // auto it = std::find(actual.begin(), actual.end(), elem);
+        auto it = std::find_if(actual.begin(), actual.end(),
+    [&](const auto& pair) {
+        return pair.first == elem.first && pair.second == elem.second;
+    });
         return it != actual.end();
     };
-
     for (auto const& node : trie) {
         ASSERT_NE(node.value, nullptr);
         actual.emplace_back(node.path, *(node.value));
