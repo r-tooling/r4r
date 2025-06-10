@@ -47,7 +47,8 @@ inline void DebPackageResolver::resolve(Files& files, Symlinks& symlinks,
                            << file_type_str(path) << ")";
             }
             if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
-                if (pkg->name.find("rstudio") != std::string::npos) {
+                if (pkg->name.find("rstudio") != std::string::npos ||
+                    pkg->name.find("bslib") != std::string::npos) {
                     //  TODO: GET RID OF THIS!! THIS IS A HACK TO MAKE TRACING PASS FROM RSTUDIO   
                     continue;
                 }
