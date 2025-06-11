@@ -7,7 +7,7 @@ static bool isEmptyOrWhitespace(const std::string& str) {
     });
 }
 
-int r4r_trace_expression(std::string expression, std::string output, std::string imageTag, std::string containerName, std::string baseImage ) {
+int r4r_trace_expression(std::string expression, std::string output, std::string imageTag, std::string containerName, std::string baseImage, bool skipManifest ) {
     Options options;
     options.os_release = parse_os();
     options.docker_base_image = base_image(options.os_release);
@@ -23,7 +23,7 @@ int r4r_trace_expression(std::string expression, std::string output, std::string
     //--options.log_level;
 
     options.output_dir = output;
-    options.skip_manifest = true; 
+    options.skip_manifest = skipManifest; 
 
  
     options.default_image_file = get_user_cache_dir() / kBinaryName /
