@@ -1,0 +1,11 @@
+#ifndef R4R_LIB_H
+#define R4R_LIB_H
+
+
+#include <string>
+
+
+int r4r_trace_expression(std::string expression, std::string output, std::string imageTag, std::string containerName,  std::string baseImage , bool skipManifest);
+
+
+#endif // R4R_LIB_H

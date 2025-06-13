@@ -1,6 +1,7 @@
 #include "filesystem_trie.h"
 #include <gtest/gtest.h>
 #include <vector>
+#include <algorithm>
 
 #include <algorithm>
 
@@ -148,12 +149,11 @@ TEST(FileSystemTrieIteratorTest, IteratorVisitsAllNodes) {
     trie.insert("e", 4);
 
     std::vector<std::pair<fs::path, int>> actual;
-     auto exists = [&](auto const& elem) {
+    auto exists = [&](auto const& elem) {
        // auto it = std::find(actual.begin(), actual.end(), elem);
-        auto it = std::find_if(actual.begin(), actual.end(),
-    [&](const auto& pair) {
-        return pair.first == elem.first && pair.second == elem.second;
-    });
+        auto it = std::find_if(actual.begin(), actual.end(), [&](const auto& pair) {
+            return pair.first == elem.first && pair.second == elem.second;
+        });
         return it != actual.end();
     };
     for (auto const& node : trie) {
