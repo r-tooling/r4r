@@ -27,6 +27,10 @@ Positional arguments:
   command    The program to trace
 ```
 
+## R Package and RStudio Addins
+
+Have a a look at [r4rwrapper](https://github.com/r-tooling/r4rwrapper).
+
 ## Build
 
 Look at the `Makefile`:
