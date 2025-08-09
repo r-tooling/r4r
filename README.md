@@ -11,6 +11,60 @@ R4R is a tool for creating a reproducible environment from a dynamic program tra
 
 [Article at ACM REP 2025](https://www.pdonatbouillud.com/donat-r4r-rep-2025.pdf)
 
+## Getting started 
+
+### Install from source
+
+Clone the repository:
+
+```bash 
+git clone git@github.com:r-tooling/r4r.git
+```
+
+Go into the `r4r` directory, compile and install:
+
+```bash
+cd r4r
+make install
+```
+
+You're now good to go!
+
+### Pre-built binary
+
+Download one of the r4r binaries from the release page.
+
+### Run it on a R code
+
+Run the tool on a R notebook that outputs a HTML file:
+
+```bash
+r4r R -e "rmarkdown::render('path/to/notebook.Rmd')" --output output --result notebook.html
+```
+
+This will create an `output` directory with a Docker file, a Makefile, and other auxiliary files then build a Docker image.with tag `r4r/test` all the necessary data, R package, system package dependencies, and then run the Docker image as a container called `r4r-test` to re-execute the notebook. 
+The result will be saved in `output/result` if you want to check if it is exactly reproducible. 
+
+You can skip the building of the Docker image by passing `--skip-make` to `r4r`.
+In that case, you will have to go to the `output` directory and run `make build` to 
+build the Docker image and `make copy` to run it and get the result.
+
+### Uploading the image to a repository 
+
+If you want to upload the image to a repository, you can use the `docker push` command:
+
+```bash
+docker push r4r/test
+```
+
+If you want to manually export the image to save it in some archive, you can do:
+
+```bash
+docker save r4r/test -o r4r-test.tar
+```
+
+You most likely want to compress that tar archive.
+
 ## Usage
 
 ```sh
