@@ -68,9 +68,8 @@ static void register_error_handler(Tracer& tracer) {
     return STR(os_release.distribution << ':' << r);
 }
 
-
 static int run_from_options(Options& options) {
-    
+
     Tracer tracer{options};
 
     // Interrupt signals generated in the terminal are delivered to the
@@ -92,5 +91,3 @@ static int run_from_options(Options& options) {
 
     return EXIT_SUCCESS;
 }
-
-

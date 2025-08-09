@@ -1,7 +1,5 @@
 #include "main_common.h"
 
-
-
 static void parse_cmd_args(Options& opts, std::span<char const*> args) {
     opts.docker_base_image = base_image(opts.os_release);
 
@@ -75,7 +73,7 @@ static int do_main(std::span<char const*> args) {
         exit(1);
     }
 
-    return  run_from_options(options);
+    return run_from_options(options);
 }
 
 int main(int argc, char* argv[]) {
