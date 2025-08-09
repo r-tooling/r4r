@@ -9,6 +9,8 @@ R4R is a tool for creating a reproducible environment from a dynamic program tra
 
 [Fill the survey about re-executability and reproducibility of R code](https://framaforms.org/re-executability-and-reproducibility-of-r-notebooks-and-scripts-1754417915)
 
+[Article at ACM REP 2025](https://www.pdonatbouillud.com/donat-r4r-rep-2025.pdf)
+
 ## Usage
 
 ```sh
