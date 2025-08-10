@@ -34,7 +34,7 @@ You're now good to go!
 
 ### Pre-built binary
 
-Download one of the r4r binaries from the release page.
+Download one of the r4r binaries from the [release page](https://github.com/r-tooling/r4r/releases).
 
 ### Run it on a R code
 
