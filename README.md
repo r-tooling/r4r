@@ -13,6 +13,8 @@ R4R is a tool for creating a reproducible environment from a dynamic program tra
 
 ## Getting started 
 
+Note that we currently only support Debian and Ubuntu.
+
 ### Install from source
 
 Clone the repository:
@@ -34,7 +36,7 @@ You're now good to go!
 
 ### Pre-built binary
 
-Download one of the r4r binaries from the [release page](https://github.com/r-tooling/r4r/releases).
+Download the r4r binary for your architecture from the [release page](https://github.com/r-tooling/r4r/releases).
 
 ### Run it on a R code
 
