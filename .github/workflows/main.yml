@@ -184,6 +184,7 @@ jobs:
     container: ghcr.io/${{ github.repository }}:latest
     permissions:
       contents: write
+      packages: read
     env:
       RELEASE_NAME: r4r-${{ github.ref_name }}.tar.gz
     steps:

@@ -54,8 +54,7 @@ coverage: ## Run tests with code coverage
 	lcov --remove $(COVERAGE_REPORT) '/usr/*' --output-file $(COVERAGE_REPORT)
 	lcov --remove $(COVERAGE_REPORT) '*/tests/*' --output-file $(COVERAGE_REPORT)
 	lcov --remove $(COVERAGE_REPORT) '*/_deps/*' --output-file $(COVERAGE_REPORT)
-	lcov --list $(COVERAGE_REPORT) 
-	genhtml -o $(COVERAGE_REPORT_HTML) $(COVERAGE_REPORT); \
+	lcov --list $(COVERAGE_REPORT)
 
 install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
