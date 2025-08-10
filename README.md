@@ -1,9 +1,6 @@
 # r4r
 
-![Build](https://github.com/r-tooling/r4r/actions/workflows/main.yml/badge.svg)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=bugs&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=code_smells&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
-[![Code Coverage](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=coverage&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
+[![CI Pipeline](https://github.com/r-tooling/r4r/actions/workflows/main.yml/badge.svg)](https://github.com/r-tooling/r4r/actions/workflows/main.yml)
 
 R4R is a tool for creating a reproducible environment from a dynamic program trace.
 
@@ -13,30 +10,7 @@ R4R is a tool for creating a reproducible environment from a dynamic program tra
 
 ## Getting started 
 
-Note that we currently only support Debian and Ubuntu.
-
-### Install from source
-
-Clone the repository:
-
-```bash 
-git clone git@github.com:r-tooling/r4r.git
-```
-
-Make sure you have a C++ compiler supporting at least C++21 and [CMake](https://cmake.org/).
-
-Go into the `r4r` directory, compile and install:
-
-```bash
-cd r4r
-make install
-```
-
-You're now good to go!
-
-### Pre-built binary
-
-Download the r4r binary for your architecture from the [release page](https://github.com/r-tooling/r4r/releases).
+Download the r4r binary from the [release page](https://github.com/r-tooling/r4r/releases). Note that we currently only support Debian and Ubuntu. Other distribution will work as well, but files won't be resolved into packages, instead they will be simply copied.
 
 ### Run it on a R code
 
@@ -68,6 +42,26 @@ docker save r4r/test -o r4r-test.tar
 ```
 
 You most likely want to compress that tar archive.
+
+### Install from source
+
+Clone the repository:
+
+```bash 
+git clone git@github.com:r-tooling/r4r.git
+```
+
+Make sure you have a C++ compiler supporting at least C++21 and [CMake](https://cmake.org/).
+
+Go into the `r4r` directory, compile and install:
+
+```bash
+cd r4r
+make install BUILD_TYPE=Release
+```
+
+The built binary should be in `build/r4r` directory
+You're now good to go!
 
 ## Usage
 

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := all
-.PHONY: all configure build test install format lint clean help
+.PHONY: all configure build test install release format lint clean help
 
 # configuration
 BUILD_DIR        ?= build
@@ -54,11 +54,16 @@ coverage: ## Run tests with code coverage
 	lcov --remove $(COVERAGE_REPORT) '/usr/*' --output-file $(COVERAGE_REPORT)
 	lcov --remove $(COVERAGE_REPORT) '*/tests/*' --output-file $(COVERAGE_REPORT)
 	lcov --remove $(COVERAGE_REPORT) '*/_deps/*' --output-file $(COVERAGE_REPORT)
-	lcov --list $(COVERAGE_REPORT) 
-	genhtml -o $(COVERAGE_REPORT_HTML) $(COVERAGE_REPORT); \
+	lcov --list $(COVERAGE_REPORT)
 
 install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
+
+release: test ## Create a release archive
+	$(MAKE) test BUILD_TYPE=Release
+	@RELEASE_NAME=$${RELEASE_NAME:-r4r-$$(git rev-parse --short HEAD).tar.gz}; \
+	tar -czf "$$RELEASE_NAME" -C $(BUILD_DIR) r4r -C .. README.md LICENSE; \
+	echo "Release archive created: $$RELEASE_NAME"
 
 format: ## Format source code
 	@find $(SOURCE_DIR) $(TEST_DIR) \
