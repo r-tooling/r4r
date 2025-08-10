@@ -60,6 +60,7 @@ install: build ## Install the project
 	$(CMAKE) --install $(BUILD_DIR) --prefix $(INSTALL_PREFIX)
 
 release: test ## Create a release archive
+	$(MAKE) test BUILD_TYPE=Release
 	@RELEASE_NAME=$${RELEASE_NAME:-r4r-$$(git rev-parse --short HEAD).tar.gz}; \
 	tar -czf "$$RELEASE_NAME" -C $(BUILD_DIR) r4r -C .. README.md LICENSE; \
 	echo "Release archive created: $$RELEASE_NAME"
