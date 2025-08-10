@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
 
 jobs:
@@ -173,3 +175,30 @@ jobs:
         env:
           HOST_UID: 1000
           HOST_GID: 1000
+
+  release:
+    name: Create release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: tests-integration
+    container: ghcr.io/${{ github.repository }}:latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_NAME: r4r-${{ github.ref_name }}.tar.gz
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Configure cmake
+        run: make configure
+      
+      - name: Build release
+        run: make release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.RELEASE_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
