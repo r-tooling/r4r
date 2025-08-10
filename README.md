@@ -1,9 +1,6 @@
 # r4r
 
 [![CI Pipeline](https://github.com/r-tooling/r4r/actions/workflows/main.yml/badge.svg)](https://github.com/r-tooling/r4r/actions/workflows/main.yml)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=bugs&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=code_smells&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
-[![Code Coverage](https://sonarcloud.io/api/project_badges/measure?project=r-tooling_r4r&metric=coverage&token=25f03a0bb9f860fa2b82118a65714715b9be3627)](https://sonarcloud.io/summary/new_code?id=r-tooling_r4r)
 
 R4R is a tool for creating a reproducible environment from a dynamic program trace.
 

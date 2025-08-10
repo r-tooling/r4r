@@ -65,42 +65,42 @@ jobs:
       - name: Run tests
         run: make test
 
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
-    needs: build
-    container: ghcr.io/${{ github.repository }}:latest
-    env:
-      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
-      - name: Install build wrapper
-        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
-      - name: Run build wrapper
-        run: |
-          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} make coverage
-      - name: Run SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v4
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
-      - name: Archive code coverage results
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage-report
-          path: |
-            build-coverage/coverage*
-      - name: Upload to codecov
-        uses: codecov/codecov-action@v5
-        with:
-          disable_search: true
-          files: build-coverage/coverage.info
-          token: ${{ secrets.CODECOV_TOKEN }}
+  # coverage:
+  #   name: Code Coverage
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   container: ghcr.io/${{ github.repository }}:latest
+  #   env:
+  #     BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
+  #     - name: Install build wrapper
+  #       uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v4
+  #     - name: Run build wrapper
+  #       run: |
+  #         build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} make coverage
+  #     - name: Run SonarCloud scan
+  #       uses: SonarSource/sonarqube-scan-action@v4
+  #       env:
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #       with:
+  #         args: >
+  #           --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
+  #     - name: Archive code coverage results
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: code-coverage-report
+  #         path: |
+  #           build-coverage/coverage*
+  #     - name: Upload to codecov
+  #       uses: codecov/codecov-action@v5
+  #       with:
+  #         disable_search: true
+  #         files: build-coverage/coverage.info
+  #         token: ${{ secrets.CODECOV_TOKEN }}
 
   build-it-image:
     name: Build and Push Docker Image for integration tests
