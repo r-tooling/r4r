@@ -21,6 +21,8 @@ Clone the repository:
 git clone git@github.com:r-tooling/r4r.git
 ```
 
+Make sure you have a C++ compiler supporting at least C++21 and [CMake](https://cmake.org/).
+
 Go into the `r4r` directory, compile and install:
 
 ```bash
