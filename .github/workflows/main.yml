@@ -185,8 +185,6 @@ jobs:
     permissions:
       contents: write
       packages: read
-    env:
-      RELEASE_NAME: r4r-${{ github.ref_name }}.tar.gz
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -195,11 +193,11 @@ jobs:
         run: make configure
       
       - name: Build release
-        run: make release
+        run: RELEASE_NAME=r4r-${{ github.ref_name }}-${{ runner.os }}-${{ runner.arch }}.tar.gz make release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ env.RELEASE_NAME }}
+          files: r4r-${{ github.ref_name }}-${{ runner.os }}-${{ runner.arch }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
