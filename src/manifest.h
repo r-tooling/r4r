@@ -19,6 +19,8 @@ enum class FileStatus {
     IgnoreDirectory
 };
 
+enum class PackageStatus { Ignore, Install };
+
 namespace std {
 inline std::ostream& operator<<(std::ostream& os, FileStatus status) {
     switch (status) {
@@ -44,6 +46,17 @@ inline std::ostream& operator<<(std::ostream& os, FileStatus status) {
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, PackageStatus status) {
+    switch (status) {
+    case PackageStatus::Ignore:
+        os << "Ignore";
+        break;
+    case PackageStatus::Install:
+        os << "Install";
+        break;
+    }
+    return os;
+}
 }; // namespace std
 
 struct Manifest {

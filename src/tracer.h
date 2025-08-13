@@ -1023,7 +1023,6 @@ class Tracer {
                                          std::string const& docker_base_image,
                                          IgnoreFileMap& map) {
         auto default_files = [&]() {
-
             if (fs::exists(default_image_file)) {
                 return DefaultImageFiles::from_file(default_image_file);
             }

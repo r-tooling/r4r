@@ -393,7 +393,8 @@ SyscallMonitor::spawn_process(std::vector<std::string> const& cmd) {
         auto const& program = cmd.front();
         execvp(program.c_str(), c_args.data());
 
-        std::cerr << "execvp: " << strerror(errno) << " (" << errno << ")\n";
+        std::cerr << "execvp: " << strerror(errno) << " (" << errno << ") for"
+                  << program << "\n";
 
         return kSpawnErrorExitCode;
     };

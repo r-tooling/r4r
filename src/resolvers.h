@@ -49,14 +49,15 @@ inline void DebPackageResolver::resolve(Files& files, Symlinks& symlinks,
             if (auto const* pkg = dpkg_database_->lookup_by_path(p); pkg) {
                 if (pkg->name.find("rstudio") != std::string::npos ||
                     pkg->name.find("bslib") != std::string::npos) {
-                    //  TODO: GET RID OF THIS!! THIS IS A HACK TO MAKE TRACING PASS FROM RSTUDIO   
+                    //  TODO: GET RID OF THIS!! THIS IS A HACK TO MAKE TRACING
+                    //  PASS FROM RSTUDIO
                     continue;
                 }
-                
+
                 LOG(DEBUG) << "Resolved: " << path << " to: " << pkg->name;
 
                 // TODO: check that the file size is the same
-                
+
                 resolved_packages.insert(pkg);
                 resolved_files++;
                 return true;
