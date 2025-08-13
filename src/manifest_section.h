@@ -192,7 +192,11 @@ inline bool RPackagesManifestSection::save(std::ostream& stream,
     with_prefixed_ostream(stream, ManifestFormat::prefixed_comment(), [&] {
         stream << "The following R packages have been resolved.\n"
                << "# - ignores the package.\n"
-               << "I - marks the package to be installed in the image.\n";
+               << "cran packageName version - marks the package from CRAN at "
+                  "version"
+                  "to be installed in the image.\n"
+               << "github org/name@ref - marks the package from GitHub to be "
+                  "installed in the image.\n";
     });
 
     std::vector<RPackage const*> sorted_packages;
@@ -239,13 +243,13 @@ inline bool RPackagesManifestSection::save(std::ostream& stream,
     for (auto const* pkg : manifest.r_packages) {
         if (std::holds_alternative<RPackage::GitHub>(pkg->repository)) {
             auto const& gh = std::get<RPackage::GitHub>(pkg->repository);
-            stream << "I" << " github " << gh.org << '/' << gh.name << '@'
-                   << gh.ref << '\n';
+            stream << "github " << gh.org << '/' << gh.name << '@' << gh.ref
+                   << '\n';
         } else if (std::holds_alternative<RPackage::CRAN>(pkg->repository)) {
-            stream << "I" << " cran " << pkg->name << '\n';
+            stream << "cran " << pkg->name << " " << pkg->version << '\n';
         } else {
             LOG(WARN) << "Unknown R package repository type for package "
-                      << pkg->name;
+                      << pkg->name << " version" << pkg->version;
         }
     }
 

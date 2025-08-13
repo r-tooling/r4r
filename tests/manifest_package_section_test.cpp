@@ -27,6 +27,6 @@ TEST_F(RPackageManifestSectionTest, SaveValidEntries) {
     EXPECT_TRUE(hasContent);
 
     auto lines = string_split(oss.str(), '\n');
-    EXPECT_EQ(lines[lines.size() - 2], "I github org/name@ref");
-    EXPECT_EQ(lines[lines.size() - 1], "I cran testpkg");
+    EXPECT_EQ(lines[lines.size() - 2], "github org/name@ref");
+    EXPECT_EQ(lines[lines.size() - 1], "cran testpkg 1.0");
 }
