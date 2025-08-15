@@ -1,29 +1,27 @@
 cff-version: 1.2.0
 message: "If you use this work, please cite it as below."
-type: conference-paper
-title: "R4R: Reproducibility for R"
-authors:
-  - family-names: Donat-Bouillud
-    given-names: Pierre
-    orcid: "0000-0003-4455-1130"
-  - family-names: Křikava
-    given-names: Filip
-    orcid: "0000-0002-0478-6202"
-  - family-names: Krynski
-    given-names: Sebastián
-    orcid: "0000-0002-4124-0225"
-  - family-names: Vitek
-    given-names: Jan
-    orcid: "0000-0003-4052-3458"
-year: 2025
-conference:
-  name: "ACM Conference on Reproducibility and Replicability"
-  abbreviation: "ACM REP ’25"
-  location: "Vancouver, BC, Canada"
-  dates: "2025-07-29/2025-07-31"
-publisher:
-  name: "ACM"
-  location: "New York, NY, USA"
-pages: "1-11"
-doi: "10.1145/3736731.3746156"
-url: "https://doi.org/10.1145/3736731.3746156"
+preferred-citation:
+  type: conference-paper
+  title: "R4R: Reproducibility for R"
+  authors:
+    - family-names: Donat-Bouillud
+      given-names: Pierre
+      orcid: "https://orcid.org/0000-0003-4455-1130"
+    - family-names: Křikava
+      given-names: Filip
+      orcid: "https://orcid.org/0000-0002-0478-6202"
+    - family-names: Krynski
+      given-names: Sebastián
+      orcid: "https://orcid.org/0000-0002-4124-0225"
+    - family-names: Vitek
+      given-names: Jan
+      orcid: "https://orcid.org/0000-0003-4052-3458"
+  year: 2025
+  collection-title: "Proceedings of the ACM Conference on Reproducibility and Replicability (ACM REP ’25)"
+  publisher:
+    name: "Association for Computing Machinery"
+    location: "New York, NY, USA"
+  start: 1
+  end: 11
+  doi: "10.1145/3736731.3746156"
+  url: "https://doi.org/10.1145/3736731.3746156"
