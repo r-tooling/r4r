@@ -17,6 +17,7 @@ authors:
 version: 0.0.1
 date-released: 2025-08-10
 url: "https://github.com/r-tooling/r4r"
+doi: 10.5281/zenodo.16891362 
 preferred-citation:
   type: conference-paper
   title: "R4R: Reproducibility for R"
