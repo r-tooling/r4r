@@ -199,7 +199,7 @@ TEST(FileTracerTest, NewFstatAtSyscall) {
 
     SyscallMonitor monitor(
         [&test_file]() {
-            struct stat statbuf{};
+            struct stat statbuf {};
 
             int ret = syscall(SYS_newfstatat, AT_FDCWD, test_file->c_str(),
                               &statbuf, 0); // NOLINT(*-pro-type-vararg)
