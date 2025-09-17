@@ -27,6 +27,7 @@ TEST_F(RPackageManifestSectionTest, SaveValidEntries) {
     EXPECT_TRUE(hasContent);
 
     auto lines = string_split(oss.str(), '\n');
-    EXPECT_EQ(lines[lines.size() - 2], "github org/name@ref");
-    EXPECT_EQ(lines[lines.size() - 1], "cran testpkg 1.0");
+    // cran packages are listed before github packages
+    EXPECT_EQ(lines[lines.size() - 2], "cran testpkg 1.0");
+    EXPECT_EQ(lines[lines.size() - 1], "github org/name@ref");
 }

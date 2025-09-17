@@ -205,42 +205,9 @@ inline bool RPackagesManifestSection::save(std::ostream& stream,
         sorted_packages.emplace_back(p);
     }
 
-    // TODO: rather add a operator< for RPackage (using std::tie)
-    std::sort(
-        sorted_packages.begin(), sorted_packages.end(),
-        [](RPackage const* lhs, RPackage const* rhs) {
-            std::string left;
-            std::string right;
-            if (std::holds_alternative<RPackage::GitHub>(lhs->repository)) {
-                left = std::get<RPackage::GitHub>(lhs->repository).org + '/' +
-                       std::get<RPackage::GitHub>(lhs->repository).name + '@' +
-                       std::get<RPackage::GitHub>(lhs->repository).ref;
-            } else if (std::holds_alternative<RPackage::CRAN>(
-                           lhs->repository)) {
-                left = lhs->name;
-            } else {
-                LOG(WARN) << "Unknown R package repository type for package "
-                          << lhs->name;
-                return false; // do not sort unknown types
-            }
+    std::sort(sorted_packages.begin(), sorted_packages.end());
 
-            if (std::holds_alternative<RPackage::GitHub>(rhs->repository)) {
-                right = std::get<RPackage::GitHub>(rhs->repository).org + '/' +
-                        std::get<RPackage::GitHub>(rhs->repository).name + '@' +
-                        std::get<RPackage::GitHub>(rhs->repository).ref;
-            } else if (std::holds_alternative<RPackage::CRAN>(
-                           rhs->repository)) {
-                right = rhs->name;
-            } else {
-                LOG(WARN) << "Unknown R package repository type for package "
-                          << rhs->name;
-                return false; // do not sort unknown types
-            }
-
-            return left < right;
-        });
-
-    for (auto const* pkg : manifest.r_packages) {
+    for (auto const* pkg : sorted_packages) {
         if (std::holds_alternative<RPackage::GitHub>(pkg->repository)) {
             auto const& gh = std::get<RPackage::GitHub>(pkg->repository);
             stream << "github " << gh.org << '/' << gh.name << '@' << gh.ref
