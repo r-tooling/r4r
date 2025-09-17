@@ -28,6 +28,10 @@ struct RPackage {
             return std::tie(org, name, ref) ==
                    std::tie(other.org, other.name, other.ref);
         };
+        bool operator<(GitHub const& other) const {
+            return std::tie(org, name, ref) <
+                   std::tie(other.org, other.name, other.ref);
+        }
         friend std::ostream& operator<<(std::ostream& os, GitHub const& gh) {
             return os << "GitHub(" << gh.org << "/" << gh.name << "@" << gh.ref
                       << ")";
@@ -36,7 +40,7 @@ struct RPackage {
 
     struct CRAN {
         bool operator==(const CRAN&) const = default;
-
+        bool operator<(const CRAN&) const = default;
         friend std::ostream& operator<<(std::ostream& os,
                                         [[maybe_unused]] CRAN const& cran) {
             return os << "CRAN";
@@ -45,7 +49,7 @@ struct RPackage {
 
     using Repository = std::variant<GitHub, CRAN>;
 
-    // TODO: change the order name, followd by version
+    // TODO: change the order name, followed by version
     std::string name;
     fs::path lib_path;
     std::string version;
@@ -60,6 +64,30 @@ struct RPackage {
                std::tie(other.name, other.lib_path, other.version,
                         other.dependencies, other.is_base,
                         other.needs_compilation, repository);
+    }
+
+    bool operator<(RPackage const& other) const {
+        // Determine if repositories are of CRAN or GitHub type
+        bool this_is_cran = std::holds_alternative<CRAN>(repository);
+        bool other_is_cran = std::holds_alternative<CRAN>(other.repository);
+
+        // If one is CRAN and the other is GitHub, CRAN comes first
+        if (this_is_cran != other_is_cran) {
+            return this_is_cran; // CRAN is considered less than GitHub
+        }
+
+        // If both are CRAN or both are GitHub, proceed with detailed comparison
+        if (this_is_cran && other_is_cran) {
+            return name < other.name;
+        } else { // Both are GitHub
+            auto const& this_gh = std::get<GitHub>(repository);
+            auto const& other_gh = std::get<GitHub>(other.repository);
+            std::string left =
+                this_gh.org + '/' + this_gh.name + '@' + this_gh.ref;
+            std::string right =
+                other_gh.org + '/' + other_gh.name + '@' + other_gh.ref;
+            return left < right;
+        }
     }
 };
 
